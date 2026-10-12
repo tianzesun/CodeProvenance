@@ -551,6 +551,40 @@ export default function SettingsPage() {
   // API call rather than merely the presence of a stored key.
   const [providerTest, setProviderTest] = useState<Record<string, { testing: boolean; message: string; ok: boolean }>>({});
 
+  // Live service-health overview (database, embedding, LLM, GPU, disk) for
+  // the System tab. Shapes mirror GET /api/system/status.
+  interface ServiceStatusEntry {
+    status: string;
+    label: string;
+    detail?: string;
+    latency_ms?: number;
+    verified?: boolean;
+    provider?: string;
+    base_url?: string;
+    model?: string;
+    models_available?: number;
+    providers?: ServiceStatusEntry[];
+  }
+  interface SystemStatusPayload {
+    checked_at: string;
+    status: string;
+    services: Record<string, ServiceStatusEntry>;
+  }
+  const [sysStatus, setSysStatus] = useState<SystemStatusPayload | null>(null);
+  const [sysLoading, setSysLoading] = useState(false);
+  const [sysError, setSysError] = useState<string | null>(null);
+
+  const serviceTone = (status: string): string =>
+    status === 'up'
+      ? 'border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10'
+      : status === 'down'
+        ? 'border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10'
+        : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900';
+  const serviceDot = (status: string): string =>
+    status === 'up' ? 'bg-emerald-500' : status === 'down' ? 'bg-red-500' : 'bg-slate-300 dark:bg-slate-600';
+  const serviceWord = (status: string): string =>
+    status === 'up' ? 'Up' : status === 'down' ? 'Down' : 'Not configured';
+
   // Vendor catalog + live model listings. The catalog comes with /api/settings
   // (settings.llm_providers); model lists are fetched per provider so the UI
   // always offers the vendor's newest models instead of a hardcoded list.
@@ -653,6 +687,25 @@ export default function SettingsPage() {
     if (!modelOptions[activeProvider]) void loadModels(activeProvider);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeProvider, providers.length]);
+
+  const refreshSystemStatus = async (): Promise<void> => {
+    setSysLoading(true);
+    setSysError(null);
+    try {
+      const res = await apiClient.get('/api/system/status');
+      setSysStatus((res.data || null) as SystemStatusPayload | null);
+    } catch (err) {
+      setSysError(describeError(err, 'Could not load service status.'));
+    } finally {
+      setSysLoading(false);
+    }
+  };
+
+  // Load the service overview whenever the System tab opens.
+  useEffect(() => {
+    if (activeTab === 'system' && !sysStatus && !sysLoading && !sysError) void refreshSystemStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const validateConfig = async () => {
     setValidationLoading(true);
@@ -1396,6 +1449,85 @@ export default function SettingsPage() {
           {/* SYSTEM SETTINGS */}
           {activeTab === 'system' && (
             <div className="space-y-6">
+              {/* Live Service Status */}
+              <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400">
+                    <Activity size={18} />
+                  </span>
+                  <div className="flex-1">
+                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Service Status</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                      Live health of every service this app depends on{sysStatus ? ` · checked ${new Date(sysStatus.checked_at).toLocaleString()}` : ''}.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void refreshSystemStatus()}
+                    disabled={sysLoading}
+                    className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 disabled:opacity-50"
+                  >
+                    {sysLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                    {sysLoading ? 'Checking…' : 'Refresh'}
+                  </button>
+                </div>
+                {sysError && (
+                  <div role="alert" className="mt-4 text-xs text-red-600 dark:text-red-400">{sysError}</div>
+                )}
+                {!sysStatus && !sysError && (
+                  <div className="mt-4 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                    <Loader2 size={16} className="animate-spin" /> Checking services…
+                  </div>
+                )}
+                {sysStatus && (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {(['database', 'embedding', 'gpu', 'storage'] as const).map((key) => {
+                      const svc = sysStatus.services[key];
+                      if (!svc) return null;
+                      return (
+                        <div key={key} className={`rounded-lg border p-3 ${serviceTone(svc.status)}`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">{svc.label}</div>
+                            {typeof svc.latency_ms === 'number' && svc.latency_ms > 0 && (
+                              <div className="text-[11px] text-slate-400 dark:text-slate-500">{svc.latency_ms} ms</div>
+                            )}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2">
+                            <span className={`inline-block h-2 w-2 rounded-full ${serviceDot(svc.status)}`} />
+                            <span className="text-sm font-medium text-slate-900 dark:text-white">{serviceWord(svc.status)}</span>
+                          </div>
+                          {svc.detail ? <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{svc.detail}</div> : null}
+                          {svc.base_url ? <div className="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500" title={svc.base_url}>{svc.base_url}</div> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {sysStatus?.services?.llm && (
+                  <div className={`mt-3 rounded-lg border p-3 ${serviceTone(sysStatus.services.llm.status)}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">LLM</div>
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-block h-2 w-2 rounded-full ${serviceDot(sysStatus.services.llm.status)}`} />
+                        <span className="text-sm font-medium text-slate-900 dark:text-white">{serviceWord(sysStatus.services.llm.status)}</span>
+                      </div>
+                    </div>
+                    {(sysStatus.services.llm.providers || []).map((provider) => (
+                      <div key={provider.provider || provider.label} className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200/70 dark:border-slate-800 pt-2">
+                        <span className="text-sm font-medium text-slate-900 dark:text-white">{provider.label}</span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">{provider.model || ''}</span>
+                        {typeof provider.latency_ms === 'number' && provider.latency_ms > 0 && (
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500">{provider.latency_ms} ms</span>
+                        )}
+                        <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">
+                          {provider.status === 'up' ? 'Connected' : provider.detail || serviceWord(provider.status)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
               {/* Database & System Health Card */}
               <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
                 <div className="flex items-start gap-3">
@@ -1409,9 +1541,13 @@ export default function SettingsPage() {
                 </div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   {/* This tile used to say "Connected · Neon PostgreSQL" unconditionally, whatever the real state.
-                      It now shows what the settings response reports, or says nothing was reported. */}
+                      It prefers the live service overview above and falls back to what the settings
+                      response reports (which is empty — the backend never sends it). */}
                   {(() => {
-                    const reported = String((settings as any).database_status ?? '').toLowerCase();
+                    const liveDb = sysStatus?.services?.database;
+                    const reported = liveDb
+                      ? (liveDb.status === 'up' ? 'connected' : liveDb.status === 'unconfigured' ? '' : 'down')
+                      : String((settings as any).database_status ?? '').toLowerCase();
                     const known = reported !== '';
                     const healthy = ['ok', 'connected', 'healthy', 'up'].includes(reported);
                     const tone = !known
@@ -1425,7 +1561,7 @@ export default function SettingsPage() {
                         <div className="mt-1 flex items-center gap-2">
                           <span className={`inline-block h-2 w-2 rounded-full ${!known ? 'bg-slate-300 dark:bg-slate-600' : healthy ? 'bg-emerald-500' : 'bg-red-500'}`} />
                           <span className="text-sm font-medium text-slate-900 dark:text-white">
-                            {!known ? 'Status not reported' : healthy ? 'Connected' : reported}
+                            {!known ? 'Status not reported' : healthy ? 'Connected' : (liveDb?.detail || reported)}
                           </span>
                         </div>
                         {(settings as any).database_provider && (

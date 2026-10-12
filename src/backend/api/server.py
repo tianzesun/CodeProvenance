@@ -17164,6 +17164,19 @@ async def validate_current_config():
     }
 
 
+@app.get("/api/system/status")
+async def get_system_status(request: Request) -> dict[str, Any]:
+    """Live service-health overview for the Settings → System tab.
+
+    Fans out database, embedding, LLM, GPU and disk probes concurrently.
+    No probe can fail the request: each degrades to ``down``/``unconfigured``.
+    """
+    _require_current_user(request, admin_only=True)
+    from src.backend.integrations.system_status import collect_system_status
+
+    return await collect_system_status(reports_dir=str(REPORTS_DIR))
+
+
 def _cleanup_expired_jobs():
     """Delete jobs older than each tenant's retention_days setting."""
     import time
