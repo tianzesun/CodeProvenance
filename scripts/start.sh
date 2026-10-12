@@ -158,12 +158,28 @@ else
     if [ ! -f "$REQ_HASH_FILE" ] || [ "$(cat "$REQ_HASH_FILE")" != "$REQ_HASH" ]; then
         echo "Installing backend deps inside GPU container (first run takes a few minutes)..."
         mapfile -t GPU_PKGS < <(grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' "$PROJECT_DIR/requirements.txt")
-        docker exec "$GPU_CONTAINER" pip install --break-system-packages "${GPU_PKGS[@]}"
+        docker exec "${PROXY_ARGS[@]}" "$GPU_CONTAINER" pip install --break-system-packages "${GPU_PKGS[@]}"
         printf '%s\n' "$REQ_HASH" > "$REQ_HASH_FILE"
     fi
     # Stop any previous uvicorn inside the container so the port is free.
     docker exec "$GPU_CONTAINER" pkill -f "uvicorn src.backend.api.server:app" 2>/dev/null || true
     sleep 1
+    # Forward proxy settings: the container does not inherit the host shell's
+    # proxy vars, and without them pip (and any external call) gets DNS errors
+    # like "Name or service not known" on proxied networks.
+    PROXY_ARGS=()
+    for proxy_var in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; do
+        if [ -n "${!proxy_var:-}" ]; then PROXY_ARGS+=(-e "$proxy_var=${!proxy_var}"); fi
+    done
+    # Fail fast when the container has no network instead of printing pages
+    # of pip retries for every package.
+    if ! docker exec "$GPU_CONTAINER" getent hosts files.pythonhosted.org >/dev/null 2>&1; then
+        DETECTED_PROXY="$(for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do if [ -n "${!v:-}" ]; then printf '%s ' "$v"; fi; done)"
+        echo "❌ GPU container has no network/DNS access (pip cannot reach PyPI)."
+        echo "   If this host needs a proxy, export http_proxy/https_proxy (and no_proxy)"
+        echo "   in this shell and re-run. Proxy vars currently set here: ${DETECTED_PROXY:-none}."
+        exit 1
+    fi
     # .env.local is (re)passed on every start, so edits apply without rebuilds.
     ENV_ARGS=()
     if [ -f "$ENV_FILE" ]; then
@@ -173,7 +189,7 @@ else
             ENV_ARGS+=(-e "$line")
         done < "$ENV_FILE"
     fi
-    docker exec -d "${ENV_ARGS[@]}" "$GPU_CONTAINER" bash -c "cd /app && exec python3 -m uvicorn src.backend.api.server:app --host 127.0.0.1 --port $BACKEND_PORT --log-level warning >> /app/logs/backend.log 2>&1"
+    docker exec -d "${PROXY_ARGS[@]}" "${ENV_ARGS[@]}" "$GPU_CONTAINER" bash -c "cd /app && exec python3 -m uvicorn src.backend.api.server:app --host 127.0.0.1 --port $BACKEND_PORT --log-level warning >> /app/logs/backend.log 2>&1"
     echo "Waiting for backend..."
     for i in {1..30}; do
         if curl -s "http://$BACKEND_HOST:$BACKEND_PORT/health" >/dev/null 2>&1; then
