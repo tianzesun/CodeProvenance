@@ -563,6 +563,7 @@ export default function SettingsPage() {
     base_url?: string;
     model?: string;
     models_available?: number;
+    default_provider?: string;
     providers?: ServiceStatusEntry[];
   }
   interface SystemStatusPayload {
@@ -1503,16 +1504,21 @@ export default function SettingsPage() {
                     })}
                   </div>
                 )}
-                {sysStatus?.services?.llm && (
-                  <div className={`mt-3 rounded-lg border p-3 ${serviceTone(sysStatus.services.llm.status)}`}>
+                {sysStatus?.services?.llm && (() => {
+                  const llm = sysStatus.services.llm;
+                  const defaultEntry = (llm.providers || []).find((provider) => provider.provider === llm.default_provider) || (llm.providers || [])[0];
+                  return (
+                  <div className={`mt-3 rounded-lg border p-3 ${serviceTone(llm.status)}`}>
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">LLM</div>
+                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                        LLM{defaultEntry ? ` · default: ${defaultEntry.label}` : ''}
+                      </div>
                       <div className="flex items-center gap-2">
-                        <span className={`inline-block h-2 w-2 rounded-full ${serviceDot(sysStatus.services.llm.status)}`} />
-                        <span className="text-sm font-medium text-slate-900 dark:text-white">{serviceWord(sysStatus.services.llm.status)}</span>
+                        <span className={`inline-block h-2 w-2 rounded-full ${serviceDot(llm.status)}`} />
+                        <span className="text-sm font-medium text-slate-900 dark:text-white">{serviceWord(llm.status)}</span>
                       </div>
                     </div>
-                    {(sysStatus.services.llm.providers || []).map((provider) => (
+                    {(llm.providers || []).map((provider) => (
                       <div key={provider.provider || provider.label} className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200/70 dark:border-slate-800 pt-2">
                         <span className="text-sm font-medium text-slate-900 dark:text-white">{provider.label}</span>
                         <span className="text-xs text-slate-500 dark:text-slate-400">{provider.model || ''}</span>
@@ -1524,52 +1530,28 @@ export default function SettingsPage() {
                         </span>
                       </div>
                     ))}
+                    {llm.status !== 'up' && (
+                      <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        Evidence summaries use the default provider. Using Ollama locally? Pick it as Default provider in Intelligence → AI Provider Integration, then Save.
+                      </div>
+                    )}
                   </div>
-                )}
+                  );
+                })()}
               </section>
 
-              {/* Database & System Health Card */}
+              {/* Configuration Card (static values — live health is in Service Status above) */}
               <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
                 <div className="flex items-start gap-3">
                   <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
                     <Database size={18} />
                   </span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Database & System Health</h2>
-                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">Current connection status and system information.</p>
+                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Configuration</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">Static configuration values. Live service health is shown above.</p>
                   </div>
                 </div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {/* This tile used to say "Connected · Neon PostgreSQL" unconditionally, whatever the real state.
-                      It prefers the live service overview above and falls back to what the settings
-                      response reports (which is empty — the backend never sends it). */}
-                  {(() => {
-                    const liveDb = sysStatus?.services?.database;
-                    const reported = liveDb
-                      ? (liveDb.status === 'up' ? 'connected' : liveDb.status === 'unconfigured' ? '' : 'down')
-                      : String((settings as any).database_status ?? '').toLowerCase();
-                    const known = reported !== '';
-                    const healthy = ['ok', 'connected', 'healthy', 'up'].includes(reported);
-                    const tone = !known
-                      ? 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900'
-                      : healthy
-                        ? 'border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10'
-                        : 'border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10';
-                    return (
-                      <div className={`rounded-lg border p-3 ${tone}`}>
-                        <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">Database</div>
-                        <div className="mt-1 flex items-center gap-2">
-                          <span className={`inline-block h-2 w-2 rounded-full ${!known ? 'bg-slate-300 dark:bg-slate-600' : healthy ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                          <span className="text-sm font-medium text-slate-900 dark:text-white">
-                            {!known ? 'Status not reported' : healthy ? 'Connected' : (liveDb?.detail || reported)}
-                          </span>
-                        </div>
-                        {(settings as any).database_provider && (
-                          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{String((settings as any).database_provider)}</div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">Default Threshold</div>
                     <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{(Number(settings.default_threshold ?? FALLBACK_THRESHOLD) * 100).toFixed(0)}%</div>
