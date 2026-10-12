@@ -14058,8 +14058,9 @@ async def download_report_pdf(job_id: str, request: Request):
                     body { background: #fff !important; }
                     .shell { box-shadow: none !important; max-width: 100% !important; }
                     .no-print, .action-buttons { display: none !important; }
-                    details.finding { page-break-inside: avoid; }
-                    .code-card { page-break-inside: avoid; }
+                    details.finding, .code-card, .sec { page-break-inside: auto; }
+                    .code-tbl thead { display: table-header-group; }
+                    .code-tbl tr { page-break-inside: avoid; }
                     summary::after { display: none !important; }
                     details > .finding-body { display: block !important; }
                     """
@@ -14098,7 +14099,8 @@ async def download_report_pdf(job_id: str, request: Request):
                 .shell { box-shadow: none !important; max-width: 100% !important; }
                 .no-print, .action-buttons { display: none !important; }
                 details > .finding-body { display: block !important; }
-                details.finding { page-break-inside: avoid; }
+                details.finding, .code-card, .sec { page-break-inside: auto; }
+                .code-tbl tr { page-break-inside: avoid; }
             }
             </style></head>""",
         )
@@ -14111,9 +14113,13 @@ async def download_report_pdf(job_id: str, request: Request):
         )
     except Exception as exc:
         logger.exception("PDF generation failed for %s", job_id)
+        exc_detail = str(exc) or "no additional details"
         raise HTTPException(
             status_code=500,
-            detail=f"PDF generation failed: {exc}. Try using the Print button in your browser instead.",
+            detail=(
+                f"PDF generation failed ({type(exc).__name__}: {exc_detail}). "
+                "Try using the Print button in your browser instead."
+            ),
         )
 
 
@@ -15326,7 +15332,7 @@ def _generate_detailed_scorecard_pdf(scorecard: dict[str, Any]) -> bytes:
             }}
             .section {{
                 margin-bottom: 40pt;
-                page-break-inside: avoid;
+                page-break-inside: auto;
             }}
             .section-header {{
                 font-size: 16pt;

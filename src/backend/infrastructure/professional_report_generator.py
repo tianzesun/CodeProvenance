@@ -220,7 +220,7 @@ class ReportGenerator:
             f".audit-item{{border:1px solid #e2e8f0;border-radius:8px;padding:11px 12px;background:#fff}}"
             f"footer{{border-top:1px solid #e2e8f0;padding:16px 36px;font-size:11px;color:#94a3b8;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}}"
             f"footer .footer-brand{{font-weight:700;color:#64748b}}"
-            f"@media print{{body{{background:#fff}}.shell{{box-shadow:none;max-width:100%}}.action-bar,.no-print{{display:none!important}}details.finding summary::after{{display:none}}details.finding>.finding-body{{display:block!important}}details.finding{{page-break-inside:avoid}}.code-card{{page-break-inside:avoid}}.sec{{page-break-inside:avoid}}}}"
+            f"@media print{{body{{background:#fff}}.shell{{box-shadow:none;max-width:100%}}.action-bar,.no-print{{display:none!important}}details.finding summary::after{{display:none}}details.finding>.finding-body{{display:block!important}}details.finding,.code-card,.sec{{page-break-inside:auto}}.code-tbl thead{{display:table-header-group}}.code-tbl tr{{page-break-inside:avoid}}}}"
             f"@media(max-width:760px){{.rpt-header,.score-banner,main,footer{{padding-left:16px;padding-right:16px}}.method-grid,.signals,.evidence-grid,.sig-grid,.ai-grid,.two-col,.audit-grid{{grid-template-columns:1fr}}.score-chips{{margin-left:0}}.heat-row{{grid-template-columns:28px 1fr 60px}}}}"
         )
 

@@ -67,7 +67,7 @@ h1 { font-size: 18pt; margin: 0 0 2pt 0; }
 .student-card {
     border: 0.5pt solid #cbd5e1; border-radius: 6pt;
     padding: 8pt 10pt; margin-bottom: 10pt;
-    page-break-inside: avoid;
+    page-break-inside: auto;
 }
 .student-head { display: flex; justify-content: space-between; align-items: center; }
 .student-name { font-size: 11pt; font-weight: bold; }
@@ -83,7 +83,7 @@ h1 { font-size: 18pt; margin: 0 0 2pt 0; }
 .questions {
     margin-top: 7pt; border: 0.5pt solid #c7d2fe; border-radius: 5pt;
     background: #eef2ff; padding: 6pt 8pt;
-    page-break-inside: avoid;
+    page-break-inside: auto;
 }
 .questions-title {
     font-size: 8pt; font-weight: bold; text-transform: uppercase;
