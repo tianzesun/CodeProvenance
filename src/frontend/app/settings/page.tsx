@@ -41,8 +41,16 @@ type Settings = Record<string, unknown> & {
   webhook_url?: string;
 };
 
+interface WeightGovernanceState {
+  needs_validation: boolean;
+  changed_engines: string[];
+  evidence: Record<string, unknown>;
+  warnings: string[];
+}
+
 interface ValidationResult {
   issues: string[];
+  weight_governance?: WeightGovernanceState;
 }
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -346,6 +354,23 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [validationLoading, setValidationLoading] = useState<boolean>(false);
+
+  // Weight-governance evidence form: the Configuration Check warns until a
+  // default weight change names its validation run, benchmark dataset and
+  // metric snapshot. This records that evidence so the warnings can clear.
+  const [govForm, setGovForm] = useState({ validation_run_id: '', benchmark_dataset_id: '', metric_snapshot: '' });
+  const [govSaving, setGovSaving] = useState<boolean>(false);
+  const [govMessage, setGovMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const govEvidenceText = (value: unknown): string => {
+    if (typeof value === 'string') return value;
+    if (value === null || value === undefined) return '';
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  };
   const [calibrating, setCalibrating] = useState<boolean>(false);
   const [showCalibrateConfirm, setShowCalibrateConfirm] = useState<boolean>(false);
   const [testingEmail, setTestingEmail] = useState<boolean>(false);
@@ -713,10 +738,40 @@ export default function SettingsPage() {
     try {
       const res = await apiClient.get('/api/settings/validation');
       setValidationResult(res.data);
+      const stored = (res.data as ValidationResult | null)?.weight_governance?.evidence;
+      if (stored && Object.keys(stored).length > 0) {
+        setGovForm({
+          validation_run_id: govEvidenceText(stored.validation_run_id),
+          benchmark_dataset_id: govEvidenceText(stored.benchmark_dataset_id),
+          metric_snapshot: govEvidenceText(stored.metric_snapshot),
+        });
+      }
     } catch (err: unknown) {
       setValidationResult({ issues: [describeError(err, 'Failed to validate the configuration.')] });
     } finally {
       setValidationLoading(false);
+    }
+  };
+
+  const submitGovernanceEvidence = async () => {
+    setGovSaving(true);
+    setGovMessage(null);
+    try {
+      const res = await apiClient.post('/api/settings/weight-governance-evidence', {
+        validation_run_id: govForm.validation_run_id.trim(),
+        benchmark_dataset_id: govForm.benchmark_dataset_id.trim(),
+        metric_snapshot: govForm.metric_snapshot.trim(),
+      });
+      const body = (res.data || {}) as { ok?: boolean; message?: string };
+      setGovMessage({
+        ok: Boolean(body.ok),
+        text: body.message || (body.ok ? 'Evidence recorded.' : 'Evidence recorded with warnings.'),
+      });
+      await validateConfig();
+    } catch (err: unknown) {
+      setGovMessage({ ok: false, text: describeError(err, 'Could not save validation evidence.') });
+    } finally {
+      setGovSaving(false);
     }
   };
 
@@ -1731,6 +1786,63 @@ export default function SettingsPage() {
                         <span>Configuration looks healthy. No issues detected.</span>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {validationResult?.weight_governance?.needs_validation && (
+                  <div className="mt-4 rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-4">
+                    <div className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                      Weight change needs validation evidence
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-300">
+                      Default fusion weights were changed
+                      {(validationResult.weight_governance.changed_engines || []).length > 0 && (
+                        <> for <span className="font-semibold">{validationResult.weight_governance.changed_engines.join(', ')}</span></>
+                      )}{' '}
+                      without naming their validation proof. Shipping default weights requires a validation run on the
+                      validation split (the locked test set stays untouched). Fill in the three fields to clear these warnings.
+                    </p>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <TextInput
+                        label="Validation run ID"
+                        value={govForm.validation_run_id}
+                        placeholder="e.g. val-2026-10-03-01"
+                        autoComplete="off"
+                        onChange={(value) => setGovForm((form) => ({ ...form, validation_run_id: value }))}
+                      />
+                      <TextInput
+                        label="Benchmark dataset ID"
+                        value={govForm.benchmark_dataset_id}
+                        placeholder="e.g. pan2026-validation"
+                        autoComplete="off"
+                        onChange={(value) => setGovForm((form) => ({ ...form, benchmark_dataset_id: value }))}
+                      />
+                    </div>
+                    <div className="mt-3">
+                      <TextAreaInput
+                        label="Metric snapshot"
+                        value={govForm.metric_snapshot}
+                        placeholder='e.g. F1 0.91, AUC-PR 0.93, FPR 0.03 (or paste JSON)'
+                        onChange={(value) => setGovForm((form) => ({ ...form, metric_snapshot: value }))}
+                      />
+                    </div>
+                    <div className="mt-2 text-xs text-amber-800 dark:text-amber-300">
+                      Split: <span className="font-semibold">validation</span> (fixed — default weights must be tuned against the validation split, never the locked test set).
+                    </div>
+                    {govMessage && (
+                      <div role={govMessage.ok ? 'status' : 'alert'} className={`mt-3 text-xs ${govMessage.ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600 dark:text-red-400'}`}>
+                        {govMessage.text}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void submitGovernanceEvidence()}
+                      disabled={govSaving}
+                      className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:opacity-50"
+                    >
+                      {govSaving ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
+                      {govSaving ? 'Saving…' : 'Record validation evidence'}
+                    </button>
                   </div>
                 )}
               </Accordion>

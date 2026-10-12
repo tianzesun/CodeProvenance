@@ -5525,7 +5525,9 @@ async def _read_json_object(request: Request) -> dict[str, Any]:
             status_code=400, detail="Request body must be valid JSON"
         ) from None
     if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+        raise HTTPException(
+            status_code=400, detail="Request body must be a JSON object"
+        )
     return payload
 
 
@@ -5799,7 +5801,9 @@ async def register(request: Request):
     _REGISTER_RATE_LIMIT[email] = now
     if len(_REGISTER_RATE_LIMIT) > 10_000:  # was never pruned: unbounded memory
         for stale in [
-            k for k, v in _REGISTER_RATE_LIMIT.items() if now - v >= _REGISTER_COOLDOWN_SECONDS
+            k
+            for k, v in _REGISTER_RATE_LIMIT.items()
+            if now - v >= _REGISTER_COOLDOWN_SECONDS
         ]:
             _REGISTER_RATE_LIMIT.pop(stale, None)
 
@@ -8274,9 +8278,7 @@ async def get_analytics_overview(request: Request) -> dict[str, Any]:
         total_cases = len(cases)
         high_priority = sum(1 for c in cases if c.priority in ("HIGH", "URGENT"))
         # "Unassigned" groups orphaned cases; it is a bucket, not a course.
-        courses_affected = len(
-            [label for label in by_course if label != "Unassigned"]
-        )
+        courses_affected = len([label for label in by_course if label != "Unassigned"])
         repeat_cases = (
             repeat_buckets["Prior warning"] + repeat_buckets["Repeat pattern"]
         )
@@ -12944,7 +12946,9 @@ def _quote_env_value(value: str) -> str:
         return '""'
     # A raw newline was not quoted, so a value like "x\nALLOW_ANONYMOUS_ANALYSIS=true"
     # wrote a second, attacker-chosen line into .env.local.
-    if any(ch in value for ch in (" ", "#", '"', "'", "\\", "\n", "\r", "\t", "$", "`")):
+    if any(
+        ch in value for ch in (" ", "#", '"', "'", "\\", "\n", "\r", "\t", "$", "`")
+    ):
         return json.dumps(value, ensure_ascii=False)
     return value
 
@@ -12996,7 +13000,9 @@ def _persist_env_settings_locked(updates: dict[str, Any]) -> None:
     try:
         os.chmod(ENV_SETTINGS_PATH, 0o600)  # it holds API keys: owner-only
     except OSError:
-        logger.warning("Could not restrict permissions on the settings file", exc_info=True)
+        logger.warning(
+            "Could not restrict permissions on the settings file", exc_info=True
+        )
 
 
 def _should_require_auth(path: str) -> bool:
@@ -17141,19 +17147,31 @@ async def validate_current_config():
                 if isinstance(value, (int, float)) and not 0.0 <= value <= 1.0:
                     issues.append(f"{section}.{key} out of range: {value}")
 
-    if config.get("advanced", {}).get("weights_need_validation"):
-        governance = evaluate_weight_change_governance(
+    advanced = config.get("advanced", {})
+    stored_evidence = advanced.get("weight_governance_evidence")
+    needs_validation = bool(advanced.get("weights_need_validation"))
+    governance_block: dict[str, Any] = {
+        "needs_validation": needs_validation,
+        "changed_engines": [],
+        "evidence": dict(stored_evidence) if isinstance(stored_evidence, dict) else {},
+        "warnings": [],
+    }
+    if needs_validation:
+        pending = evaluate_weight_change_governance(
             {},
             config.get("weights", {}),
-            config.get("advanced", {}).get("weight_governance_evidence"),
+            stored_evidence,
         )
-        issues.extend(governance.warnings)
+        governance_block["changed_engines"] = pending.changed_engines
+        governance_block["warnings"] = pending.warnings
+        issues.extend(pending.warnings)
 
     normalizer = default_score_normalizer()
 
     return {
         "valid": len(issues) == 0,
         "issues": issues,
+        "weight_governance": governance_block,
         "config_summary": {
             "weights_count": len(config.get("weights", {})),
             "thresholds_count": len(config.get("thresholds", {})),
@@ -17175,6 +17193,70 @@ async def get_system_status(request: Request) -> dict[str, Any]:
     from src.backend.integrations.system_status import collect_system_status
 
     return await collect_system_status(reports_dir=str(REPORTS_DIR))
+
+
+@app.post("/api/settings/weight-governance-evidence")
+async def attach_weight_governance_evidence(request: Request) -> dict[str, Any]:
+    """Record validation evidence for pending default weight changes.
+
+    The Configuration Check keeps warning until a weight change names its
+    validation run, benchmark dataset and metric snapshot on the validation
+    split. This endpoint stores that evidence; when it satisfies governance
+    the pending-validation flag is cleared as well.
+    """
+    _require_current_user(request, admin_only=True)
+    from src.backend.engines.scoring.fusion_engine import (
+        load_engine_config,
+        save_engine_config,
+    )
+    from src.backend.engines.scoring.fusion_policy import (
+        evaluate_weight_change_governance,
+    )
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid evidence payload")
+    evidence: dict[str, Any] = {
+        "validation_run_id": str(payload.get("validation_run_id") or "").strip(),
+        "benchmark_dataset_id": str(payload.get("benchmark_dataset_id") or "").strip(),
+        "metric_snapshot": payload.get("metric_snapshot"),
+        "split": "validation",
+    }
+    if isinstance(evidence["metric_snapshot"], str):
+        evidence["metric_snapshot"] = evidence["metric_snapshot"].strip()
+    missing = [
+        field
+        for field in ("validation_run_id", "benchmark_dataset_id", "metric_snapshot")
+        if not evidence.get(field)
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing validation evidence: {', '.join(missing)}",
+        )
+    config = load_engine_config()
+    advanced = config.get("advanced")
+    if not isinstance(advanced, dict):
+        config["advanced"] = advanced = {}
+    advanced["weight_governance_evidence"] = evidence
+    governance_result = evaluate_weight_change_governance(
+        {}, config.get("weights", {}), evidence
+    )
+    cleared = governance_result.allowed
+    if cleared:
+        advanced.pop("weights_need_validation", None)
+    save_engine_config(config)
+    return {
+        "ok": cleared,
+        "cleared": cleared,
+        "weight_governance": governance_result.to_dict(),
+        "message": (
+            "Validation evidence recorded — weight warnings cleared."
+            if cleared
+            else "Evidence recorded, but governance still warns: "
+            + "; ".join(governance_result.warnings)
+        ),
+    }
 
 
 def _cleanup_expired_jobs():
