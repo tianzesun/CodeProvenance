@@ -38,6 +38,11 @@ RUN grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' \
         -r /tmp/requirements-notorch.txt \
     && rm -f /tmp/requirements.txt /tmp/requirements-notorch.txt
 
+# Fail the build — not the boot — on broken deps: import everything the
+# backend needs at startup. torch imports without a GPU present; CUDA
+# visibility is verified separately once the backend is up.
+RUN python3 -c "import fastapi, uvicorn, sqlalchemy, jose, yaml, redis, torch, transformers, weasyprint; print('backend deps ok')"
+
 # Holder model: start.sh mounts the repo at /app and execs uvicorn inside,
 # so the image carries deps only — no code, no env, no ports.
 CMD ["sleep", "infinity"]

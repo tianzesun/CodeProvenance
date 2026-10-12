@@ -410,7 +410,20 @@ else
     nohup npx next start --port "$DASHBOARD_PORT" --hostname 127.0.0.1 > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
 fi
 
-sleep 2
+echo "Waiting for dashboard..."
+for i in {1..30}; do
+    if curl -s "http://localhost:$DASHBOARD_PORT/" >/dev/null 2>&1; then
+        echo "✔ Dashboard ready"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo "❌ Dashboard failed to start"
+        echo "---- Last logs ----"
+        tail -n 30 "$PROJECT_DIR/logs/dashboard.log"
+        exit 1
+    fi
+    sleep 1
+done
 
 # ----------------------------
 # FINAL CHECK
