@@ -567,6 +567,25 @@ export default function SettingsPage() {
   const overridesMap: Record<string, string> = (settings as any)?.llm_model_overrides || {};
   const baseUrlsMap: Record<string, string> = (settings as any)?.llm_base_urls || {};
 
+  // Status-pill truth: keyed vendors are configured once a key is stored;
+  // keyless local runtimes (Ollama) need a saved model instead, and any
+  // provider that just passed Test Connection reports "Connected".
+  const providerStatus = (
+    spec: { key: string; requires_key?: boolean } | null,
+  ): { configured: boolean; label: string } => {
+    if (!spec) return { configured: false, label: 'Not configured' };
+    if (providerTest[spec.key]?.ok) return { configured: true, label: 'Connected' };
+    if (spec.requires_key) {
+      return configuredMap[spec.key]
+        ? { configured: true, label: 'Key stored' }
+        : { configured: false, label: 'Not configured' };
+    }
+    return (overridesMap[spec.key] || '').trim()
+      ? { configured: true, label: 'Configured' }
+      : { configured: false, label: 'Not configured' };
+  };
+  const activeStatus = providerStatus(activeSpec);
+
   const loadModels = async (provider: string, refresh = false) => {
     if (!provider) return;
     setModelsLoading((cur) => ({ ...cur, [provider]: true }));
@@ -916,7 +935,7 @@ export default function SettingsPage() {
                 {/* Provider picker: choose which vendor to configure */}
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   {providers.map((spec: any) => {
-                    const connected = Boolean(configuredMap[spec.key]);
+                    const connected = providerStatus(spec).configured;
                     const isActive = activeProvider === spec.key;
                     return (
                       <button
@@ -939,11 +958,10 @@ export default function SettingsPage() {
                   <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-2">
-                        <div className={`h-2.5 w-2.5 rounded-full ${configuredMap[activeSpec.key] ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
+                        <div className={`h-2.5 w-2.5 rounded-full ${activeStatus.configured ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
                         <span className="text-sm font-semibold text-slate-900 dark:text-white">{activeSpec.label}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${configuredMap[activeSpec.key] ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
-                          {/* "Connected" claimed a working connection; this only reflects that a key is stored. */}
-                          {configuredMap[activeSpec.key] ? 'Key stored' : 'Not configured'}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${activeStatus.configured ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
+                          {activeStatus.label}
                         </span>
                       </div>
                       <div className="flex items-center gap-3 text-xs font-medium text-blue-600 dark:text-blue-400">
