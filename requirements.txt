@@ -58,11 +58,21 @@ joblib==1.5.3
 # AI Detection - Multi-layer ensemble (Binoculars + existing signals)
 # Binoculars (ICML 2024) - zero-shot SOTA detector, very low false positive rate
 transformers==4.41.0
-torch==2.2.1
+# GPU support: torch needs a CUDA wheel. The extra index below lets pip
+# resolve CUDA builds on x86_64. torch>=2.5 on cu124+ is required for NVIDIA
+# Blackwell GPUs (sm_100, e.g. GB10) — older wheels predate them.
+# ARM/aarch64 exception (e.g. NVIDIA DGX Spark GB10 host): the PyTorch indexes
+# only ship CPU-only aarch64 wheels, so pip alone cannot enable CUDA there —
+# run the backend from NVIDIA's NGC PyTorch container (arm64) or install
+# NVIDIA's Jetson/DGX-Spark CUDA wheel for aarch64 instead.
+# CPU-only installs: install torch from
+# https://download.pytorch.org/whl/cpu instead of using this file's torch pin.
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.5.1
 sentencepiece==0.2.2
 lightgbm==4.3.0
 
-# PDF & Forensic Reporting (requires wkhtmltopdf system package)
+# PDF & Forensic Reporting (system packages: pango + cairo for weasyprint, wkhtmltopdf for pdfkit)
 pdfkit==1.0.0
 jinja2==3.1.3
 weasyprint==68.1
