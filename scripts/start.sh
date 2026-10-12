@@ -179,16 +179,26 @@ else
     # Fail fast when the container has no network instead of printing pages
     # of pip retries for every package. Probe exactly what pip needs: HTTPS
     # to both the simple index and the file host.
-    if ! docker exec "$GPU_CONTAINER" python3 -c "
+    if ! NET_ERR="$(docker exec "$GPU_CONTAINER" python3 -c "
 import urllib.request
 for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/'):
+    print('trying ' + url, flush=True)
     urllib.request.urlopen(url, timeout=10).read(1)
-" >/dev/null 2>&1; then
+    print('ok ' + url, flush=True)
+" 2>&1)"; then
         DETECTED_PROXY="$(for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do if [ -n "${!v:-}" ]; then printf '%s ' "$v"; fi; done)"
         echo "❌ GPU container cannot reach PyPI (DNS or blocked network)."
         echo "   Proxy vars currently set here: ${DETECTED_PROXY:-none} (export http_proxy/https_proxy + no_proxy and re-run if this host is proxied)."
         echo "   No direct PyPI access? Point pip at a mirror instead:"
         echo "     PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ BACKEND_GPU=1 ./scripts/restart.sh"
+        echo "--- underlying error + container DNS diagnostics ---"
+        printf '%s\n' "$NET_ERR" | tail -8
+        echo "--- container resolv.conf ---"
+        docker exec "$GPU_CONTAINER" cat /etc/resolv.conf 2>/dev/null || echo "(unreadable)"
+        echo "--- container getent ---"
+        docker exec "$GPU_CONTAINER" getent hosts pypi.org 2>&1 || echo "(getent failed)"
+        echo "--- host resolv.conf (first line) ---"
+        head -1 /etc/resolv.conf 2>/dev/null || echo "(unreadable)"
         exit 1
     fi
     # .env.local is (re)passed on every start, so edits apply without rebuilds.
