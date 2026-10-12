@@ -1,0 +1,11 @@
+# Keep the GPU image build context tiny: Dockerfile.gpu COPYs only
+# requirements.txt, but the whole context ships to the daemon without this.
+.git/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+logs/
+reports/
+src/frontend/node_modules/
+src/frontend/.next/

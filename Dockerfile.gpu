@@ -1,0 +1,34 @@
+# GPU backend image for hosts where pip has no CUDA torch wheel
+# (ARM/Blackwell, e.g. NVIDIA DGX Spark GB10).
+#
+# Built by scripts/start.sh with BACKEND_GPU=1 (rebuilds only when
+# requirements.txt changes — docker layer cache makes that instant).
+# Manual build:
+#   docker build --network host -f Dockerfile.gpu -t integritydesk-backend-gpu-img .
+#
+# The base image ships a CUDA torch for its arch; torch is deliberately
+# excluded below so requirements.txt can never overwrite it with CPU-only.
+ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:25.02-py3
+FROM ${BASE_IMAGE}
+
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
+
+WORKDIR /app
+COPY requirements.txt /tmp/requirements.txt
+RUN grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' \
+        /tmp/requirements.txt > /tmp/requirements-notorch.txt \
+    && PIP_ARGS="" \
+    && if [ -n "$PIP_INDEX_URL" ]; then PIP_ARGS="$PIP_ARGS --index-url $PIP_INDEX_URL"; fi \
+    && if [ -n "$PIP_TRUSTED_HOST" ]; then PIP_ARGS="$PIP_ARGS --trusted-host $PIP_TRUSTED_HOST"; fi \
+    # shellcheck disable=SC2086: PIP_ARGS word-splitting is intentional here
+    && pip install --break-system-packages --retries 10 --timeout 60 $PIP_ARGS --no-cache-dir \
+        -r /tmp/requirements-notorch.txt \
+    && rm -f /tmp/requirements.txt /tmp/requirements-notorch.txt
+
+# Holder model: start.sh mounts the repo at /app and execs uvicorn inside,
+# so the image carries deps only — no code, no env, no ports.
+CMD ["sleep", "infinity"]
