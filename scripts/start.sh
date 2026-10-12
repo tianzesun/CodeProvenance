@@ -107,6 +107,76 @@ else
 fi
 
 # ----------------------------
+# SERVICE CHECKS (Postgres, Redis, Ollama)
+# ----------------------------
+echo "Checking supporting services..."
+
+# Postgres: fast TCP probe (never prints credentials, only host:port)
+if [ -n "${DATABASE_URL:-}" ]; then
+    read -r DB_HOST DB_PORT <<< "$("$VENV_PYTHON" -c "
+import os
+from urllib.parse import urlparse
+u = urlparse(os.environ.get('DATABASE_URL', ''))
+scheme = (u.scheme or '').lower()
+port = u.port or ('5432' if 'postgres' in scheme else '')
+print(u.hostname or '', port)
+" 2>/dev/null)"
+    if [ -n "$DB_HOST" ] && [ -n "$DB_PORT" ] \
+        && "$VENV_PYTHON" -c "import socket, sys; s = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5); s.close()" "$DB_HOST" "$DB_PORT" 2>/dev/null; then
+        echo "✔ Postgres reachable ($DB_HOST:$DB_PORT)"
+    else
+        echo "❌ Postgres NOT reachable (${DB_HOST:-unknown}:${DB_PORT:-?}) — jobs and settings cannot load until the database is up"
+    fi
+else
+    echo "⚠️  DATABASE_URL is not set — skipping Postgres check"
+fi
+
+# Redis: real PING via the redis client (optional service — warn only)
+if [ -n "${REDIS_URL:-}" ]; then
+    REDIS_DISP="$("$VENV_PYTHON" -c "
+import os
+from urllib.parse import urlparse
+u = urlparse(os.environ.get('REDIS_URL', ''))
+print(f\"{u.hostname or 'unknown'}:{u.port or 6379}\")
+" 2>/dev/null)"
+    if "$VENV_PYTHON" -c "import os, redis; redis.Redis.from_url(os.environ.get('REDIS_URL', ''), socket_connect_timeout=5).ping()" 2>/dev/null; then
+        echo "✔ Redis reachable ($REDIS_DISP)"
+    else
+        echo "⚠️  Redis NOT reachable ($REDIS_DISP) — caching disabled, app continues without it"
+    fi
+else
+    echo "⚠️  REDIS_URL is not set — Redis cache disabled"
+fi
+
+# Ollama: list pulled models (optional service — warn only)
+OLLAMA_BASE="${OLLAMA_BASE_URL:-http://localhost:11434/v1}"
+OLLAMA_ROOT="${OLLAMA_BASE%/}"
+OLLAMA_ROOT="${OLLAMA_ROOT%/v1}"
+TAGS_JSON="$(curl -s --max-time 5 "$OLLAMA_ROOT/api/tags" 2>/dev/null || true)"
+if OLLAMA_INFO="$(printf '%s' "$TAGS_JSON" | "$VENV_PYTHON" -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+models = data.get('models') or []
+names = [str(m.get('name', '?')) for m in models if isinstance(m, dict)]
+shown = ', '.join(names[:4]) + ('…' if len(names) > 4 else '')
+print(f'{len(names)}|{shown}')
+" 2>/dev/null)"; then
+    OLLAMA_COUNT="${OLLAMA_INFO%%|*}"
+    OLLAMA_NAMES="${OLLAMA_INFO#*|}"
+    if [ "$OLLAMA_COUNT" -gt 0 ] 2>/dev/null; then
+        echo "✔ Ollama up ($OLLAMA_ROOT) · $OLLAMA_COUNT model(s): $OLLAMA_NAMES"
+    else
+        echo "⚠️  Ollama reachable but no models pulled — run: ollama pull <model>"
+    fi
+else
+    echo "⚠️  Ollama NOT reachable ($OLLAMA_ROOT/api/tags) — AI summaries fall back to heuristics"
+fi
+echo ""
+
+# ----------------------------
 # BACKEND START (host venv, or NVIDIA GPU container when requested)
 # ----------------------------
 mkdir -p "$PROJECT_DIR/logs"
