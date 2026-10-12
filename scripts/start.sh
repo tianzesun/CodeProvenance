@@ -178,13 +178,18 @@ else
     done
     # Fail fast when the container has no network instead of printing pages
     # of pip retries for every package. Probe exactly what pip needs: HTTPS
-    # to both the simple index and the file host.
+    # to both the simple index and the file host. Any HTTP answer — even an
+    # error status — proves DNS+TCP+TLS work; only connection-level failures
+    # (DNS, refused, timeout, TLS) mean no network.
     if ! NET_ERR="$(docker exec "$GPU_CONTAINER" python3 -c "
-import urllib.request
+import urllib.request, urllib.error
 for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/'):
     print('trying ' + url, flush=True)
-    urllib.request.urlopen(url, timeout=10).read(1)
-    print('ok ' + url, flush=True)
+    try:
+        urllib.request.urlopen(url, timeout=10).read(1)
+        print('ok ' + url, flush=True)
+    except urllib.error.HTTPError as e:
+        print('reachable %s (HTTP %s)' % (url, e.code), flush=True)
 " 2>&1)"; then
         DETECTED_PROXY="$(for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do if [ -n "${!v:-}" ]; then printf '%s ' "$v"; fi; done)"
         echo "❌ GPU container cannot reach PyPI (DNS or blocked network)."
