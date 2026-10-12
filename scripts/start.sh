@@ -158,7 +158,12 @@ else
     if [ ! -f "$REQ_HASH_FILE" ] || [ "$(cat "$REQ_HASH_FILE")" != "$REQ_HASH" ]; then
         echo "Installing backend deps inside GPU container (first run takes a few minutes)..."
         mapfile -t GPU_PKGS < <(grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' "$PROJECT_DIR/requirements.txt")
-        docker exec "${PROXY_ARGS[@]}" "$GPU_CONTAINER" pip install --break-system-packages "${GPU_PKGS[@]}"
+        # Optional PyPI mirror for networks without direct PyPI access
+        # (e.g. PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/).
+        PIP_INDEX_ARGS=()
+        if [ -n "${PIP_INDEX_URL:-}" ]; then PIP_INDEX_ARGS+=(--index-url "$PIP_INDEX_URL"); fi
+        if [ -n "${PIP_TRUSTED_HOST:-}" ]; then PIP_INDEX_ARGS+=(--trusted-host "$PIP_TRUSTED_HOST"); fi
+        docker exec "${PROXY_ARGS[@]}" "$GPU_CONTAINER" pip install --break-system-packages "${PIP_INDEX_ARGS[@]}" "${GPU_PKGS[@]}"
         printf '%s\n' "$REQ_HASH" > "$REQ_HASH_FILE"
     fi
     # Stop any previous uvicorn inside the container so the port is free.
@@ -172,12 +177,18 @@ else
         if [ -n "${!proxy_var:-}" ]; then PROXY_ARGS+=(-e "$proxy_var=${!proxy_var}"); fi
     done
     # Fail fast when the container has no network instead of printing pages
-    # of pip retries for every package.
-    if ! docker exec "$GPU_CONTAINER" getent hosts files.pythonhosted.org >/dev/null 2>&1; then
+    # of pip retries for every package. Probe exactly what pip needs: HTTPS
+    # to both the simple index and the file host.
+    if ! docker exec "$GPU_CONTAINER" python3 -c "
+import urllib.request
+for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/'):
+    urllib.request.urlopen(url, timeout=10).read(1)
+" >/dev/null 2>&1; then
         DETECTED_PROXY="$(for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do if [ -n "${!v:-}" ]; then printf '%s ' "$v"; fi; done)"
-        echo "❌ GPU container has no network/DNS access (pip cannot reach PyPI)."
-        echo "   If this host needs a proxy, export http_proxy/https_proxy (and no_proxy)"
-        echo "   in this shell and re-run. Proxy vars currently set here: ${DETECTED_PROXY:-none}."
+        echo "❌ GPU container cannot reach PyPI (DNS or blocked network)."
+        echo "   Proxy vars currently set here: ${DETECTED_PROXY:-none} (export http_proxy/https_proxy + no_proxy and re-run if this host is proxied)."
+        echo "   No direct PyPI access? Point pip at a mirror instead:"
+        echo "     PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ BACKEND_GPU=1 ./scripts/restart.sh"
         exit 1
     fi
     # .env.local is (re)passed on every start, so edits apply without rebuilds.
