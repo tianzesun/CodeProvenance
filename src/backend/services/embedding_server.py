@@ -76,12 +76,15 @@ def _load_model_sync():
     if embedding_model is not None:
         return embedding_model
 
-    logger.info(f"Loading embedding model: {DEFAULT_MODEL}")
+    # Device is read here (not at import) so tests and container entrypoints
+    # can select it via the environment; default preserves CPU behavior.
+    device = os.getenv("EMBEDDING_DEVICE", "cpu").strip() or "cpu"
+    logger.info(f"Loading embedding model: {DEFAULT_MODEL} (device={device})")
     start = time.time()
 
     from sentence_transformers import SentenceTransformer
 
-    embedding_model = SentenceTransformer(DEFAULT_MODEL, device="cpu")
+    embedding_model = SentenceTransformer(DEFAULT_MODEL, device=device)
 
     # Warmup run to eliminate first request latency
     embedding_model.encode("warmup")

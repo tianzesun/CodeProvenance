@@ -69,8 +69,9 @@ transformers==4.41.0
 # https://download.pytorch.org/whl/cpu instead of using this file's torch pin.
 --extra-index-url https://download.pytorch.org/whl/cu124
 torch==2.5.1
+# Embedding server runtime (also baked into the GPU image alongside torch).
+sentence-transformers==5.4.1
 sentencepiece==0.2.2
-lightgbm==4.3.0
 
 # PDF & Forensic Reporting (system packages: pango + cairo for weasyprint, wkhtmltopdf for pdfkit)
 pdfkit==1.0.0

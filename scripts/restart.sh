@@ -29,12 +29,16 @@ pkill -9 -f "next dev" 2>/dev/null || true
 pkill -9 -f "next start" 2>/dev/null || true
 pkill -9 -f "next-server" 2>/dev/null || true
 
-# Stop the GPU backend container too (BACKEND_GPU=1 in start.sh). Its uvicorn
-# shares the host network, so stop the holder explicitly for a clean restart.
-if command -v docker >/dev/null 2>&1 \
-    && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "integritydesk-backend-gpu"; then
-    echo "Stopping GPU backend container..."
-    docker stop integritydesk-backend-gpu >/dev/null 2>&1 || true
+# Stop the GPU holder containers too (BACKEND_GPU=1 / EMBEDDING_GPU=1 in
+# start.sh). Their uvicorn shares the host network, so stop the holders
+# explicitly for a clean restart.
+if command -v docker >/dev/null 2>&1; then
+    for holder in integritydesk-backend-gpu integritydesk-embedding-gpu; do
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$holder"; then
+            echo "Stopping GPU container $holder..."
+            docker stop "$holder" >/dev/null 2>&1 || true
+        fi
+    done
 fi
 
 # Kill by the actual ports being used (not hardcoded)

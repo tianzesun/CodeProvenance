@@ -3,7 +3,8 @@
 # Backend + Embedding Server + Next.js Dashboard
 #
 # GPU backend (ARM/Blackwell hosts without a pip CUDA torch wheel):
-#   BACKEND_GPU=1 ./scripts/start.sh   (image override: GPU_IMAGE=...)
+#   BACKEND_GPU=1 ./scripts/start.sh    (image override: GPU_IMAGE=...)
+#   EMBEDDING_GPU=1 ./scripts/start.sh  (same image, second holder)
 
 set -e
 
@@ -31,11 +32,12 @@ BACKEND_PORT="${2:-${BACKEND_PORT:-8000}}"
 EMBEDDING_PORT="${EMBEDDING_PORT:-8001}"
 
 # GPU backend (NVIDIA ARM/Blackwell hosts where pip has no CUDA torch wheel).
-# Opt in with BACKEND_GPU=1 (base image override: GPU_IMAGE=...).
+# Opt in with BACKEND_GPU=1 / EMBEDDING_GPU=1 (base image override: GPU_IMAGE=...).
 # Deps bake into Dockerfile.gpu (rebuilt only when requirements.txt changes);
-# the holder container is recreated automatically when the image moves on.
-# BACKEND_GPU=0 forces the host venv backend.
+# holder containers are recreated automatically when the image moves on.
+# BACKEND_GPU=0 / EMBEDDING_GPU=0 force the host venv services.
 GPU_CONTAINER="integritydesk-backend-gpu"
+EMB_GPU_CONTAINER="integritydesk-embedding-gpu"
 GPU_IMAGE="${GPU_IMAGE:-nvcr.io/nvidia/pytorch:25.02-py3}"
 
 BACKEND_HOST="${BACKEND_HOST:-127.0.0.1}"
@@ -180,7 +182,124 @@ echo ""
 # ----------------------------
 # BACKEND START (host venv, or NVIDIA GPU container when requested)
 # ----------------------------
-mkdir -p "$PROJECT_DIR/logs"
+mkdir -p "$PROJECT_DIR/logs" "$PROJECT_DIR/.hf-cache"
+
+# Shared GPU-image helpers: backend and embedding holders run from one image
+# (Dockerfile.gpu) so there is a single build and a single torch.
+GPU_IMG="integritydesk-backend-gpu-img"
+GPU_DOCKERFILE="$PROJECT_DIR/Dockerfile.gpu"
+
+require_docker() {
+    command -v docker >/dev/null 2>&1 || { echo "❌ GPU mode needs the docker CLI"; exit 1; }
+}
+
+ensure_gpu_image() {
+    # Pull the base image, probe build-time network, and (re)build our image
+    # when requirements.txt or the Dockerfile changed (layer cache makes a
+    # no-change rebuild instant).
+    [ -f "$GPU_DOCKERFILE" ] || { echo "❌ Missing $GPU_DOCKERFILE"; exit 1; }
+    if ! docker image inspect "$GPU_IMAGE" >/dev/null 2>&1; then
+        echo "Pulling base image..."
+        docker pull "$GPU_IMAGE" || { echo "❌ Could not pull $GPU_IMAGE"; exit 1; }
+    fi
+    # Probe under the same conditions the build will use. Any HTTP answer —
+    # even an error status — proves DNS+TCP+TLS work; only connection-level
+    # failures (DNS, refused, timeout, TLS) mean no network.
+    if ! NET_ERR="$(docker run --rm --network host "$GPU_IMAGE" python3 -c "
+import urllib.request, urllib.error
+for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/'):
+    print('trying ' + url, flush=True)
+    try:
+        urllib.request.urlopen(url, timeout=10).read(1)
+        print('ok ' + url, flush=True)
+    except urllib.error.HTTPError as e:
+        print('reachable %s (HTTP %s)' % (url, e.code), flush=True)
+" 2>&1)"; then
+        DETECTED_PROXY="$(for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do if [ -n "${!v:-}" ]; then printf '%s ' "$v"; fi; done)"
+        echo "❌ No PyPI network for the GPU image build (DNS or blocked network)."
+        echo "   Proxy vars currently set here: ${DETECTED_PROXY:-none} (export http_proxy/https_proxy + no_proxy and re-run if this host is proxied)."
+        echo "   No direct PyPI access? Point the build at a mirror instead:"
+        echo "     PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ BACKEND_GPU=1 ./scripts/restart.sh"
+        echo "--- underlying error ---"
+        printf '%s\n' "$NET_ERR" | tail -8
+        echo "--- image resolv.conf ---"
+        docker run --rm --network host "$GPU_IMAGE" cat /etc/resolv.conf 2>/dev/null || echo "(unreadable)"
+        echo "--- host resolv.conf (first line) ---"
+        head -1 /etc/resolv.conf 2>/dev/null || echo "(unreadable)"
+        exit 1
+    fi
+    REQ_HASH="$(cat "$PROJECT_DIR/requirements.txt" "$GPU_DOCKERFILE" | sha256sum | cut -d' ' -f1)"
+    BUILT_HASH="$(docker image inspect -f '{{index .Config.Labels "req-hash"}}' "$GPU_IMG" 2>/dev/null || true)"
+    if [ "$BUILT_HASH" != "$REQ_HASH" ]; then
+        echo "Building GPU backend image (deps bake in; first build takes a while)..."
+        docker build --network host -f "$GPU_DOCKERFILE" \
+            --build-arg "BASE_IMAGE=$GPU_IMAGE" \
+            --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL:-}" \
+            --build-arg "PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}" \
+            --build-arg "http_proxy=${http_proxy:-}" \
+            --build-arg "https_proxy=${https_proxy:-}" \
+            --build-arg "no_proxy=${no_proxy:-}" \
+            --label "req-hash=$REQ_HASH" \
+            -t "$GPU_IMG" "$PROJECT_DIR" || { echo "❌ GPU image build failed"; exit 1; }
+    fi
+}
+
+ensure_gpu_holder() {
+    # $1 = holder container name. Creates/starts the sleep-infinity holder on
+    # the current image, recreating it when the image moved on (code and logs
+    # live in the mounted repo, so a recreate loses nothing).
+    local name="$1"
+    local holder_img=""
+    local current_img=""
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$name"; then
+        holder_img="$(docker inspect -f '{{.Image}}' "$name")"
+        current_img="$(docker inspect -f '{{.Id}}' "$GPU_IMG")"
+        if [ "$holder_img" != "$current_img" ]; then
+            echo "Backend image changed — recreating $name..."
+            docker rm -f "$name" >/dev/null
+        else
+            docker start "$name" >/dev/null
+        fi
+    fi
+    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$name"; then
+        # --network host keeps every localhost URL (DB, embedding, Ollama)
+        # and .env.local working unchanged inside the container (Linux only).
+        docker run -d --name "$name" --gpus all --network host \
+            -v "$PROJECT_DIR:/app" -w /app "$GPU_IMG" sleep infinity
+    fi
+}
+
+detect_gpu_py() {
+    # $1 = holder container name. Echoes the interpreter owning CUDA torch:
+    # bare `pip` and `python3` can resolve to different Pythons in these
+    # images (system python vs the conda env shipping CUDA torch).
+    local name="$1"
+    if docker exec "$name" test -x /opt/conda/bin/python; then
+        echo /opt/conda/bin/python
+    else
+        echo python3
+    fi
+}
+
+# Proxy vars never enter holders on their own; forward the host shell's so
+# external calls (and any fallback pip) work on proxied networks.
+PROXY_ARGS=()
+for proxy_var in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; do
+    if [ -n "${!proxy_var:-}" ]; then PROXY_ARGS+=(-e "$proxy_var=${!proxy_var}"); fi
+done
+
+build_env_args() {
+    # Emit .env.local as docker -e args (one per line) so edits apply on
+    # every start without rebuilds.
+    if [ -f "$ENV_FILE" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            case "$line" in ''|\#*) continue ;; esac
+            printf '%s\n' "-e"
+            printf '%s\n' "$line"
+        done < "$ENV_FILE"
+    fi
+}
 
 GPU_WANTS_HOST=1
 if [ "${BACKEND_GPU:-}" = "1" ]; then
@@ -211,108 +330,18 @@ if [ "$GPU_WANTS_HOST" = "1" ]; then
         sleep 2
     fi
 else
-    GPU_IMG="integritydesk-backend-gpu-img"
-    GPU_DOCKERFILE="$PROJECT_DIR/Dockerfile.gpu"
     echo "Starting backend in GPU container (image: $GPU_IMG from $GPU_IMAGE)..."
-    command -v docker >/dev/null 2>&1 || { echo "❌ BACKEND_GPU=1 needs the docker CLI"; exit 1; }
-    [ -f "$GPU_DOCKERFILE" ] || { echo "❌ Missing $GPU_DOCKERFILE"; exit 1; }
-    if ! docker image inspect "$GPU_IMAGE" >/dev/null 2>&1; then
-        echo "Pulling base image..."
-        docker pull "$GPU_IMAGE" || { echo "❌ Could not pull $GPU_IMAGE"; exit 1; }
-    fi
-    # Probe build-time network under the same conditions the build will use.
-    # Any HTTP answer — even an error status — proves DNS+TCP+TLS work; only
-    # connection-level failures (DNS, refused, timeout, TLS) mean no network.
-    if ! NET_ERR="$(docker run --rm --network host "$GPU_IMAGE" python3 -c "
-import urllib.request, urllib.error
-for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/'):
-    print('trying ' + url, flush=True)
-    try:
-        urllib.request.urlopen(url, timeout=10).read(1)
-        print('ok ' + url, flush=True)
-    except urllib.error.HTTPError as e:
-        print('reachable %s (HTTP %s)' % (url, e.code), flush=True)
-" 2>&1)"; then
-        DETECTED_PROXY="$(for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do if [ -n "${!v:-}" ]; then printf '%s ' "$v"; fi; done)"
-        echo "❌ No PyPI network for the GPU image build (DNS or blocked network)."
-        echo "   Proxy vars currently set here: ${DETECTED_PROXY:-none} (export http_proxy/https_proxy + no_proxy and re-run if this host is proxied)."
-        echo "   No direct PyPI access? Point the build at a mirror instead:"
-        echo "     PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ BACKEND_GPU=1 ./scripts/restart.sh"
-        echo "--- underlying error ---"
-        printf '%s\n' "$NET_ERR" | tail -8
-        echo "--- image resolv.conf ---"
-        docker run --rm --network host "$GPU_IMAGE" cat /etc/resolv.conf 2>/dev/null || echo "(unreadable)"
-        echo "--- host resolv.conf (first line) ---"
-        head -1 /etc/resolv.conf 2>/dev/null || echo "(unreadable)"
-        exit 1
-    fi
-    # (Re)build when requirements.txt OR the Dockerfile changed — docker
-    # layer cache makes a no-change rebuild instant. Torch stays excluded:
-    # the base image's own CUDA torch is never overwritten (see Dockerfile).
-    REQ_HASH="$(cat "$PROJECT_DIR/requirements.txt" "$GPU_DOCKERFILE" | sha256sum | cut -d' ' -f1)"
-    BUILT_HASH="$(docker image inspect -f '{{index .Config.Labels "req-hash"}}' "$GPU_IMG" 2>/dev/null || true)"
-    if [ "$BUILT_HASH" != "$REQ_HASH" ]; then
-        echo "Building GPU backend image (deps bake in; first build takes a while)..."
-        docker build --network host -f "$GPU_DOCKERFILE" \
-            --build-arg "BASE_IMAGE=$GPU_IMAGE" \
-            --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL:-}" \
-            --build-arg "PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}" \
-            --build-arg "http_proxy=${http_proxy:-}" \
-            --build-arg "https_proxy=${https_proxy:-}" \
-            --build-arg "no_proxy=${no_proxy:-}" \
-            --label "req-hash=$REQ_HASH" \
-            -t "$GPU_IMG" "$PROJECT_DIR" || { echo "❌ GPU image build failed"; exit 1; }
-    fi
-    # Recreate the holder when the image moved on (code itself is mounted,
-    # so a recreate loses nothing but a stale dependency set).
-    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$GPU_CONTAINER"; then
-        HOLDER_IMG="$(docker inspect -f '{{.Image}}' "$GPU_CONTAINER")"
-        CURRENT_IMG="$(docker inspect -f '{{.Id}}' "$GPU_IMG")"
-        if [ "$HOLDER_IMG" != "$CURRENT_IMG" ]; then
-            echo "Backend image changed — recreating GPU container..."
-            docker rm -f "$GPU_CONTAINER" >/dev/null
-        else
-            docker start "$GPU_CONTAINER" >/dev/null
-        fi
-    fi
-    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$GPU_CONTAINER"; then
-        # --network host keeps every localhost URL (DB, embedding, Ollama)
-        # and .env.local working unchanged inside the container (Linux only).
-        docker run -d --name "$GPU_CONTAINER" --gpus all --network host \
-            -v "$PROJECT_DIR:/app" -w /app "$GPU_IMG" sleep infinity
-    fi
-    # One interpreter for everything below: bare `pip` and `python3` can
-    # resolve to different Pythons in these images (system python vs the
-    # conda env that ships the CUDA torch). Prefer conda's python so the
-    # backend runs with GPU torch.
-    if docker exec "$GPU_CONTAINER" test -x /opt/conda/bin/python; then
-        GPU_PY=/opt/conda/bin/python
-    else
-        GPU_PY=python3
-    fi
+    require_docker
+    ensure_gpu_image
+    ensure_gpu_holder "$GPU_CONTAINER"
+    GPU_PY="$(detect_gpu_py "$GPU_CONTAINER")"
     echo "Using container python: $GPU_PY"
     # Deps are baked into the image at build time (torch excluded — the base
     # image's own CUDA torch is never overwritten). Nothing to install here.
     # Stop any previous uvicorn inside the container so the port is free.
     docker exec "$GPU_CONTAINER" pkill -f "uvicorn src.backend.api.server:app" 2>/dev/null || true
     sleep 1
-    # Forward proxy settings: the container does not inherit the host shell's
-    # proxy vars, and without them external calls get DNS errors like
-    # "Name or service not known" on proxied networks.
-    PROXY_ARGS=()
-    for proxy_var in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; do
-        if [ -n "${!proxy_var:-}" ]; then PROXY_ARGS+=(-e "$proxy_var=${!proxy_var}"); fi
-    done
-    # Network was already proven by the image build above; no second probe.
-    # .env.local is (re)passed on every start, so edits apply without rebuilds.
-    ENV_ARGS=()
-    if [ -f "$ENV_FILE" ]; then
-        while IFS= read -r line || [ -n "$line" ]; do
-            line="${line%$'\r'}"
-            case "$line" in ''|\#*) continue ;; esac
-            ENV_ARGS+=(-e "$line")
-        done < "$ENV_FILE"
-    fi
+    mapfile -t ENV_ARGS < <(build_env_args)
     docker exec -d "${PROXY_ARGS[@]}" "${ENV_ARGS[@]}" "$GPU_CONTAINER" bash -c "cd /app && exec $GPU_PY -m uvicorn src.backend.api.server:app --host 127.0.0.1 --port $BACKEND_PORT --log-level warning >> /app/logs/backend.log 2>&1"
     echo "Waiting for backend (first boot imports torch/transformers — can take minutes on ARM)..."
     for i in $(seq 1 120); do
@@ -340,38 +369,73 @@ for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/
 fi
 
 # ----------------------------
-# EMBEDDING START (FIXED)
-# ----------------------------
-
-# ----------------------------
-# EMBEDDING START (FIXED)
+# EMBEDDING START (host venv, or shared GPU image when requested)
 # ----------------------------
 echo "Starting embedding server..."
 
-if lsof -i :$EMBEDDING_PORT >/dev/null 2>&1; then
-    echo "✔ Embedding API already running"
-else
-    nohup "$VENV_PYTHON" -m uvicorn src.backend.services.embedding_server:app \
-        --host 127.0.0.1 \
-        --port "$EMBEDDING_PORT" \
-        --log-level info > "$EMBEDDING_LOG" 2>&1 &
-
-    echo "Waiting for embedding server to start..."
-
-    for i in {1..30}; do
-        if curl -s "http://$BACKEND_HOST:$EMBEDDING_PORT/health" >/dev/null 2>&1; then
-            echo "✔ Embedding API ready (model loads on first request)"
-            break
-        fi
-        if [ $i -eq 30 ]; then
-            echo "❌ Embedding API failed to start"
-            echo "---- Last logs ----"
-            tail -n 30 "$EMBEDDING_LOG"
-            exit 1
-        fi
-        sleep 1
-    done
+EMB_WANTS_HOST=1
+if [ "${EMBEDDING_GPU:-}" = "1" ]; then
+    EMB_WANTS_HOST=0
+elif [ "${EMBEDDING_GPU:-}" != "0" ] \
+    && command -v docker >/dev/null 2>&1 \
+    && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$EMB_GPU_CONTAINER"; then
+    # An embedding holder from a previous GPU run: keep using it.
+    EMB_WANTS_HOST=0
 fi
+
+if [ "$EMB_WANTS_HOST" = "1" ]; then
+    if command -v docker >/dev/null 2>&1 \
+        && docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$EMB_GPU_CONTAINER"; then
+        echo "Stopping GPU embedding container (host embedding requested)..."
+        docker stop "$EMB_GPU_CONTAINER" >/dev/null
+    fi
+    if lsof -i :$EMBEDDING_PORT >/dev/null 2>&1; then
+        echo "✔ Embedding API already running"
+    else
+        nohup "$VENV_PYTHON" -m uvicorn src.backend.services.embedding_server:app \
+            --host 127.0.0.1 \
+            --port "$EMBEDDING_PORT" \
+            --log-level info > "$EMBEDDING_LOG" 2>&1 &
+    fi
+else
+    require_docker
+    ensure_gpu_image
+    ensure_gpu_holder "$EMB_GPU_CONTAINER"
+    EMB_PY="$(detect_gpu_py "$EMB_GPU_CONTAINER")"
+    echo "Using container python: $EMB_PY"
+    docker exec "$EMB_GPU_CONTAINER" pkill -f "uvicorn src.backend.services.embedding_server:app" 2>/dev/null || true
+    sleep 1
+    mapfile -t ENV_ARGS < <(build_env_args)
+    # Default to CUDA inside the GPU holder; an explicit EMBEDDING_DEVICE in
+    # .env.local wins (checked, not appended twice).
+    if ! grep -q "^EMBEDDING_DEVICE=" "$ENV_FILE" 2>/dev/null; then
+        ENV_ARGS=(-e EMBEDDING_DEVICE=cuda "${ENV_ARGS[@]}")
+    fi
+    # HF weights persist in the mounted repo so recreates skip re-downloads.
+    ENV_ARGS+=(-e HF_HOME=/app/.hf-cache)
+    echo "Starting embedding server in GPU container..."
+    docker exec -d "${PROXY_ARGS[@]}" "${ENV_ARGS[@]}" "$EMB_GPU_CONTAINER" bash -c "cd /app && exec $EMB_PY -m uvicorn src.backend.services.embedding_server:app --host 127.0.0.1 --port $EMBEDDING_PORT --log-level info >> /app/logs/embedding.log 2>&1"
+fi
+
+echo "Waiting for embedding server to start..."
+
+for i in {1..30}; do
+    if curl -s "http://$BACKEND_HOST:$EMBEDDING_PORT/health" >/dev/null 2>&1; then
+        echo "✔ Embedding API ready (model loads on first request)"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo "❌ Embedding API failed to start"
+        echo "---- Last logs ----"
+        if [ "$EMB_WANTS_HOST" = "1" ]; then
+            tail -n 30 "$EMBEDDING_LOG"
+        else
+            tail -n 30 "$EMBEDDING_LOG" 2>/dev/null || docker logs --tail 30 "$EMB_GPU_CONTAINER"
+        fi
+        exit 1
+    fi
+    sleep 1
+done
 
 # ----------------------------
 # DASHBOARD START

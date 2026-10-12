@@ -172,3 +172,4 @@ tools/sandbox/
 tsunn*
 sandbox/
 outputs/
+.hf-cache/

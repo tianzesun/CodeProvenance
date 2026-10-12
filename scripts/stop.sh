@@ -137,6 +137,18 @@ kill_port 3000 "Frontend Dashboard"
 kill_port 8000 "Backend API Server"
 kill_port 8001 "Embedding Server"
 
+# GPU holder containers share the host network: their uvicorn processes die
+# with the port kills above, but stop the holders explicitly so a later
+# start.sh datapath is clean (it reuses or recreates them as needed).
+if command -v docker >/dev/null 2>&1; then
+    for holder in integritydesk-backend-gpu integritydesk-embedding-gpu; do
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$holder"; then
+            echo "→ Stopping GPU container $holder"
+            docker stop "$holder" >/dev/null 2>&1 || true
+        fi
+    done
+fi
+
 echo ""
 echo "Cleaning up orphan processes:"
 echo "-----------------------------"
