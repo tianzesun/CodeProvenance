@@ -246,10 +246,10 @@ for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/
         head -1 /etc/resolv.conf 2>/dev/null || echo "(unreadable)"
         exit 1
     fi
-    # (Re)build only when requirements.txt changed — docker layer cache makes
-    # a no-change rebuild instant. Torch stays excluded: the base image's own
-    # CUDA torch is never overwritten (see Dockerfile.gpu).
-    REQ_HASH="$(sha256sum "$PROJECT_DIR/requirements.txt" | cut -d' ' -f1)"
+    # (Re)build when requirements.txt OR the Dockerfile changed — docker
+    # layer cache makes a no-change rebuild instant. Torch stays excluded:
+    # the base image's own CUDA torch is never overwritten (see Dockerfile).
+    REQ_HASH="$(cat "$PROJECT_DIR/requirements.txt" "$GPU_DOCKERFILE" | sha256sum | cut -d' ' -f1)"
     BUILT_HASH="$(docker image inspect -f '{{index .Config.Labels "req-hash"}}' "$GPU_IMG" 2>/dev/null || true)"
     if [ "$BUILT_HASH" != "$REQ_HASH" ]; then
         echo "Building GPU backend image (deps bake in; first build takes a while)..."

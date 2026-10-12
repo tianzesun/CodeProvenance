@@ -18,6 +18,15 @@ ARG https_proxy
 ARG no_proxy
 
 WORKDIR /app
+
+# System libraries for WeasyPrint (PDF reports): Pango/Cairo stack plus
+# DejaVu so PDFs never render tofu boxes. Pure-pip installs cannot
+# provide these — this layer is why the image exists.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
+        libjpeg-dev libopenjp2-7-dev libffi-dev fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt /tmp/requirements.txt
 RUN grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' \
         /tmp/requirements.txt > /tmp/requirements-notorch.txt \
