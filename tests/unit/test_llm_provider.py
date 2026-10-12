@@ -154,6 +154,31 @@ class TestLLMProviderValidation:
                 base_url="https://example.com/v1",
             )
 
+    def test_configured_key_unwraps_secretstr(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Stored keys must resolve to the raw secret, never the mask."""
+        from pydantic import SecretStr
+
+        from src.backend.integrations.llm_provider import configured_api_key
+
+        monkeypatch.setattr(
+            app_settings, "LLM_API_KEYS", {"openai": SecretStr("sk-real-key")}
+        )
+        assert configured_api_key("openai") == "sk-real-key"
+
+    def test_configured_key_unwraps_legacy_secretstr(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that legacy env-backed keys resolve past the SecretStr mask."""
+        from pydantic import SecretStr
+
+        from src.backend.integrations.llm_provider import configured_api_key
+
+        monkeypatch.setattr(app_settings, "LLM_API_KEYS", {})
+        monkeypatch.setattr(app_settings, "OPENAI_API_KEY", SecretStr("sk-legacy"))
+        assert configured_api_key("openai") == "sk-legacy"
+
     def test_resolve_provider_config_rejects_unknown_provider(self) -> None:
         with pytest.raises(ValueError):
             resolve_provider_config("not-a-real-vendor")

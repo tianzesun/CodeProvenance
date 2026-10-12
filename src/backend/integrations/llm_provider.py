@@ -131,12 +131,12 @@ class LLMProvider:
     ) -> None:
         normalized = normalize_provider(provider)
         spec = self._resolve_spec(normalized, provider)
-        if spec.requires_key and not (api_key or "").strip():
+        if spec.requires_key and not _unwrap_secret(api_key):
             raise LLMError(f"{spec.label} API key is not configured")
         if not model:
             raise LLMError(f"No model configured for {spec.label}")
         self.provider = spec.key
-        self.api_key = (api_key or "").strip()
+        self.api_key = _unwrap_secret(api_key)
         self.model = model
         self.api_style = api_style or spec.api_style
         self.base_url = (base_url or spec.base_url).rstrip("/")
@@ -371,6 +371,27 @@ def build_evidence_prompt(
     )
 
 
+def _unwrap_secret(value: Any) -> str:
+    """Return the usable string for a setting that may be a SecretStr.
+
+    Args:
+        value: A plain string, a pydantic ``SecretStr``, or ``None``.
+
+    Returns:
+        The raw secret with surrounding whitespace removed. ``str()`` on a
+        ``SecretStr`` yields the masked ``'**********'`` placeholder, which
+        must never be sent as a credential.
+    """
+    if value is None:
+        return ""
+    if hasattr(value, "get_secret_value"):
+        try:
+            return str(value.get_secret_value() or "").strip()
+        except Exception:
+            return ""
+    return str(value).strip()
+
+
 def _heuristic_summary(features: Mapping[str, float]) -> str:
     """Rule-based fallback when no LLM provider is available or callable."""
     if not features:
@@ -405,12 +426,12 @@ def configured_api_key(provider: str) -> str:
     except ValueError:
         return ""
     keys = settings.LLM_API_KEYS or {}
-    value = str(keys.get(provider) or "").strip()
+    value = _unwrap_secret(keys.get(provider))
     if value:
         return value
     legacy_attr = _LEGACY_KEY_ATTRS.get(provider)
     if legacy_attr:
-        return str(getattr(settings, legacy_attr, "") or "").strip()
+        return _unwrap_secret(getattr(settings, legacy_attr, ""))
     return ""
 
 
