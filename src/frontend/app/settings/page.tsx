@@ -811,9 +811,18 @@ export default function SettingsPage() {
 
     setSaving(true);
     setError(null);
+    // Remember what default provider was submitted: if the re-read below
+    // comes back with a different value, the server silently dropped the
+    // change (e.g. an older backend) and the UI must say so loudly instead
+    // of displaying the stale selection as if it saved.
+    const submittedProvider = String((settings as unknown as Record<string, unknown>)?.llm_provider || '');
+    let ignoredProvider = '';
 
     try {
-      await apiClient.patch('/api/settings', buildPayload(settings, webhookUrl, sourceUrls, editedSecrets));
+      const saveRes = await apiClient.patch('/api/settings', buildPayload(settings, webhookUrl, sourceUrls, editedSecrets));
+      ignoredProvider = String(
+        ((saveRes.data as unknown as Record<string, unknown>)?.ignored as Record<string, unknown> | undefined)?.llm_provider || '',
+      );
     } catch (err: unknown) {
       setError(describeError(err, 'Failed to save settings.'));
       setSaving(false);
@@ -824,7 +833,14 @@ export default function SettingsPage() {
     try {
       const fresh = await apiClient.get('/api/settings');
       applyLoaded(fresh.data);
-      showSuccess('Settings saved. Recommended profile applied.');
+      const keptProvider = String((fresh.data as unknown as Record<string, unknown>)?.llm_provider || '');
+      if (ignoredProvider) {
+        setError(`The server refused the default provider value: ${ignoredProvider}`);
+      } else if (submittedProvider && keptProvider && keptProvider !== submittedProvider) {
+        setError(`The default provider change was not kept by the server (still “${keptProvider}”). Restart the backend with the latest pull and try again.`);
+      } else {
+        showSuccess('Settings saved. Recommended profile applied.');
+      }
     } catch {
       showSuccess('Settings saved, but the page couldn’t refresh. Reload to see the stored values.', 6000);
     }

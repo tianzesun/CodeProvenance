@@ -1,16 +1,29 @@
-"""Regression test: changing the default LLM provider must persist."""
+"""Regression tests: the default LLM provider must persist and report drops."""
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
+from jose import jwt as jose_jwt
 
 from src.backend.api import server
+from src.backend.api.server import AUTH_COOKIE_NAME
 from src.backend.config.database import SessionLocal
+from src.backend.config.settings import settings as app_settings
+from src.backend.engines.scoring.fusion_engine import FusionEngine
 from src.backend.models.database import Tenant, User
 
 
-def _admin_with_tenant(monkeypatch):
-    """Create a tenant + admin user; fake auth to return them."""
+@pytest.fixture
+def admin_client(monkeypatch):
+    """Return a TestClient authed as an admin with a tenant.
+
+    PATCH /api/settings always funnels through FusionEngine.update_config,
+    which saves engine_weights.yaml on disk — neutralized here so tests never
+    rewrite repo files.
+    """
+    monkeypatch.setattr(FusionEngine, "update_config", lambda config: None)
     email = f"llm-default-{uuid.uuid4().hex[:8]}@example.com"
     with SessionLocal() as db:
         tenant = Tenant(
@@ -36,36 +49,23 @@ def _admin_with_tenant(monkeypatch):
         return {"id": "admin-1", "role": "admin", "tenant_id": str(tenant_id)}
 
     monkeypatch.setattr(server, "_authenticate_request", fake_auth)
-    return tenant_id
+    now = datetime.now(timezone.utc)
+    cookies = {
+        AUTH_COOKIE_NAME: jose_jwt.encode(
+            {"sub": "admin-1", "exp": now + timedelta(minutes=30), "iat": now},
+            app_settings.auth_jwt_secret or "unit-test-secret",
+            algorithm="HS256",
+        )
+    }
+    return TestClient(server.app), cookies
 
 
 class TestDefaultLlmProviderRoundTrip:
     """PATCH llm_provider then GET settings must reflect the change."""
 
-    def test_default_provider_change_persists(self, monkeypatch):
+    def test_default_provider_change_persists(self, admin_client):
         """Test that selecting Ollama as default survives save + reload."""
-        from datetime import datetime, timedelta, timezone
-
-        from jose import jwt as jose_jwt
-
-        from src.backend.api.server import AUTH_COOKIE_NAME
-        from src.backend.config.settings import settings as app_settings
-        from src.backend.engines.scoring.fusion_engine import FusionEngine
-
-        # PATCH /api/settings always funnels through
-        # FusionEngine.update_config, which saves engine_weights.yaml on
-        # disk. Neutralize it: this test must not rewrite repo files.
-        monkeypatch.setattr(FusionEngine, "update_config", lambda config: None)
-        _admin_with_tenant(monkeypatch)
-        now = datetime.now(timezone.utc)
-        cookies = {
-            AUTH_COOKIE_NAME: jose_jwt.encode(
-                {"sub": "admin-1", "exp": now + timedelta(minutes=30), "iat": now},
-                app_settings.auth_jwt_secret or "unit-test-secret",
-                algorithm="HS256",
-            )
-        }
-        client = TestClient(server.app)
+        client, cookies = admin_client
         response = client.patch(
             "/api/settings",
             json={"llm_provider": "ollama"},
@@ -75,3 +75,16 @@ class TestDefaultLlmProviderRoundTrip:
         fresh = client.get("/api/settings", cookies=cookies)
         assert fresh.status_code == 200, fresh.text
         assert fresh.json().get("llm_provider") == "ollama"
+
+    def test_invalid_provider_is_reported_not_silently_dropped(self, admin_client):
+        """Test that an unknown provider is named in the response."""
+        client, cookies = admin_client
+        response = client.patch(
+            "/api/settings",
+            json={"llm_provider": "not-a-vendor"},
+            cookies=cookies,
+        )
+        assert response.status_code == 200, response.text
+        ignored = response.json().get("ignored", {})
+        assert "llm_provider" in ignored
+        assert "not-a-vendor" in ignored["llm_provider"]

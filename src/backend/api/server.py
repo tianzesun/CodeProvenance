@@ -16683,6 +16683,7 @@ async def update_settings(request: Request):
 
         stored_settings = dict(tenant.settings or {})
         applied = {}
+        ignored: dict[str, str] = {}
         env_updates: dict[str, Any] = {}
 
         for key, value in data.items():
@@ -16706,6 +16707,7 @@ async def update_settings(request: Request):
                     try:
                         value = get_provider_spec(raw_provider).key
                     except ValueError:
+                        ignored[key] = f"unsupported provider {raw_provider!r}"
                         continue
             if key == "llm_api_keys":
                 if not isinstance(value, dict):
@@ -16827,6 +16829,8 @@ async def update_settings(request: Request):
         "settings": applied,
         "source": "database",
     }
+    if ignored:
+        response["ignored"] = ignored
     if governance_result is not None:
         response["weight_governance"] = governance_result.to_dict()
 
