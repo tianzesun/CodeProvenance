@@ -419,6 +419,105 @@ def check_storage(reports_dir: str | None) -> dict[str, Any]:
     return _service("up", "Storage", detail, verified=True)
 
 
+def _celery_inspect_stats(timeout: float = 3.0) -> dict[str, Any] | None:
+    """Ask the broker which Celery workers answer, if any.
+
+    Args:
+        timeout: Seconds to wait for worker replies.
+
+    Returns:
+        The stats mapping (worker name to stats) when the broker answers,
+        an empty mapping when no worker replies, or ``None`` when the
+        broker itself is unreachable. Never raises.
+    """
+    try:
+        from src.backend.workers.celery_app import create_celery_app
+
+        app = create_celery_app()
+        inspector = app.control.inspect(timeout=timeout)
+        if inspector is None:
+            return None
+        stats = inspector.stats()
+    except Exception:
+        return None
+    return stats if isinstance(stats, dict) else {}
+
+
+def _redis_reachable(timeout: float = 2.0) -> bool:
+    """Return whether the configured Redis broker accepts TCP connections.
+
+    Args:
+        timeout: Connection timeout in seconds.
+
+    Returns:
+        ``True`` when a TCP handshake succeeds, ``False`` otherwise.
+    """
+    import socket
+    from urllib.parse import urlparse
+
+    try:
+        raw = settings.REDIS_URL
+        broker = (
+            raw.get_secret_value() if hasattr(raw, "get_secret_value") else str(raw)
+        )
+        parsed = urlparse(broker)
+        if parsed.scheme not in ("redis", "rediss"):
+            return True
+        with socket.create_connection(
+            (parsed.hostname or "127.0.0.1", parsed.port or 6379), timeout=timeout
+        ):
+            pass
+    except Exception:
+        return False
+    return True
+
+
+async def check_celery() -> dict[str, Any]:
+    """Report whether a Celery worker is draining the analysis queue.
+
+    Uploads route to Celery whenever Redis answers; with no worker those
+    jobs sit queued forever. A missing broker is *not* a failure here —
+    uploads transparently fall back to in-process execution.
+
+    Returns:
+        ``up`` with the answering worker names, ``down`` when the broker is
+        up but nobody drains it, ``unconfigured`` when no broker exists.
+    """
+    started = time.monotonic()
+    try:
+        broker_up = await asyncio.to_thread(_redis_reachable)
+    except Exception:
+        broker_up = False
+    if not broker_up:
+        return _service(
+            "unconfigured", "Celery workers", "No broker — uploads run in-process"
+        )
+    try:
+        stats = await asyncio.to_thread(_celery_inspect_stats)
+    except Exception as exc:
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        logger.info("Celery status probe failed: %s", exc)
+        return _service(
+            "down", "Celery workers", f"Inspect failed: {exc}", latency_ms=elapsed_ms
+        )
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+    if not stats:
+        return _service(
+            "down",
+            "Celery workers",
+            "Broker up, no workers answering — queued jobs stall",
+            latency_ms=elapsed_ms,
+        )
+    names = sorted(stats)
+    return _service(
+        "up",
+        "Celery workers",
+        f"{len(names)} worker(s): {', '.join(names)}",
+        latency_ms=elapsed_ms,
+        verified=True,
+    )
+
+
 async def collect_system_status(
     reports_dir: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
@@ -436,12 +535,13 @@ async def collect_system_status(
         A payload with ``checked_at``, an overall ``status`` (worst of:
         ``down`` beats ``unconfigured`` beats ``up``) and per-service entries.
     """
-    database, embedding, llm, gpu, storage = await asyncio.gather(
+    database, embedding, llm, gpu, storage, celery = await asyncio.gather(
         check_database(),
         check_embedding(transport),
         check_llm(transport),
         asyncio.to_thread(check_gpu),
         asyncio.to_thread(check_storage, reports_dir),
+        check_celery(),
     )
     services = {
         "database": database,
@@ -449,6 +549,7 @@ async def collect_system_status(
         "llm": llm,
         "gpu": gpu,
         "storage": storage,
+        "celery": celery,
     }
     statuses = [entry["status"] for entry in services.values()]
     if "down" in statuses:

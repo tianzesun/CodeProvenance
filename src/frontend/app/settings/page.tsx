@@ -1593,7 +1593,7 @@ export default function SettingsPage() {
                 )}
                 {sysStatus && (
                   <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {(['database', 'embedding', 'gpu', 'storage'] as const).map((key) => {
+                    {(['database', 'embedding', 'gpu', 'storage', 'celery'] as const).map((key) => {
                       const svc = sysStatus.services[key];
                       if (!svc) return null;
                       return (

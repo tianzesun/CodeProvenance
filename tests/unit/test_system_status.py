@@ -11,6 +11,7 @@ from src.backend.config.settings import settings as app_settings
 from src.backend.integrations import system_status
 from src.backend.integrations.system_status import (
     _describe_database_url,
+    check_celery,
     check_database,
     check_embedding,
     check_gpu,
@@ -279,6 +280,45 @@ class TestCheckStorage:
         assert result["status"] == "down"
 
 
+class TestCheckCelery:
+    """Celery worker probe up/down/unconfigured paths."""
+
+    def test_workers_answering_is_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that answering workers report up with their names."""
+        from src.backend.integrations import system_status as status_module
+
+        monkeypatch.setattr(status_module, "_redis_reachable", lambda: True)
+        monkeypatch.setattr(
+            status_module,
+            "_celery_inspect_stats",
+            lambda timeout=3.0: {"celery@host": {}},
+        )
+        result = run(check_celery())
+        assert result["status"] == "up"
+        assert result["verified"] is True
+        assert "celery@host" in result["detail"]
+
+    def test_no_workers_is_down(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that silence with a live broker reports down, not unknown."""
+        from src.backend.integrations import system_status as status_module
+
+        monkeypatch.setattr(status_module, "_redis_reachable", lambda: True)
+        monkeypatch.setattr(
+            status_module, "_celery_inspect_stats", lambda timeout=3.0: {}
+        )
+        result = run(check_celery())
+        assert result["status"] == "down"
+        assert "stall" in result["detail"]
+
+    def test_no_broker_is_unconfigured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a missing broker is unconfigured (inline fallback)."""
+        from src.backend.integrations import system_status as status_module
+
+        monkeypatch.setattr(status_module, "_redis_reachable", lambda: False)
+        result = run(check_celery())
+        assert result["status"] == "unconfigured"
+
+
 class TestCollectSystemStatus:
     """Aggregate overview shape and worst-of status."""
 
@@ -292,6 +332,15 @@ class TestCollectSystemStatus:
         monkeypatch.setattr(app_settings, "LLM_FALLBACK_PROVIDER", "")
         monkeypatch.setattr(app_settings, "LLM_API_KEYS", {})
         monkeypatch.setattr(app_settings, "LLM_MODEL_OVERRIDES", {"ollama": "qwen3:8b"})
+        # Deterministic celery result regardless of local Redis/workers.
+        from src.backend.integrations import system_status as status_module
+
+        monkeypatch.setattr(status_module, "_redis_reachable", lambda: True)
+        monkeypatch.setattr(
+            status_module,
+            "_celery_inspect_stats",
+            lambda timeout=3.0: {"celery@test": {}},
+        )
         # Deterministic GPU result regardless of the machine running the test.
         cuda = SimpleNamespace(
             is_available=lambda: True,
@@ -331,6 +380,7 @@ class TestCollectSystemStatus:
             "llm",
             "gpu",
             "storage",
+            "celery",
         }
         assert result["services"]["llm"]["providers"][0]["provider"] == "ollama"
         assert "checked_at" in result
@@ -378,6 +428,7 @@ class TestSystemStatusEndpoint:
                     "llm": {"status": "up", "label": "LLM", "providers": []},
                     "gpu": {"status": "up", "label": "GPU"},
                     "storage": {"status": "up", "label": "Storage"},
+                    "celery": {"status": "up", "label": "Celery workers"},
                 },
             }
 
@@ -395,4 +446,5 @@ class TestSystemStatusEndpoint:
             "llm",
             "gpu",
             "storage",
+            "celery",
         }
