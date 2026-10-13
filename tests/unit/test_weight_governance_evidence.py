@@ -136,3 +136,142 @@ class TestValidationGovernanceBlock:
             "evidence",
             "warnings",
         }
+
+
+def _labeled_run(run_id: str = "run-7") -> dict:
+    """Return a minimal labeled benchmark run payload."""
+    return {
+        "run_id": run_id,
+        "dataset_id": "pan-validation",
+        "has_ground_truth": True,
+        "pair_results": [{"file_a": "a.py", "file_b": "b.py", "label": 1}],
+        "tool_scores": {"integritydesk": {}},
+        "evaluation": {"integritydesk": {"precision": 0.9, "recall": 0.85, "f1": 0.87}},
+    }
+
+
+class TestAttachWeightGovernanceEvidenceAuto:
+    """POST /api/settings/weight-governance-evidence/auto behavior."""
+
+    def test_attaches_latest_labeled_run(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Test that a labeled run becomes evidence and clears the flag."""
+        import json
+
+        from src.backend.api import server
+        from src.backend.engines.scoring import fusion_engine
+
+        (tmp_path / "run-7.json").write_text(json.dumps(_labeled_run()))
+        (tmp_path / "unlabeled.json").write_text(json.dumps({"pair_results": []}))
+        monkeypatch.setattr(server, "BENCHMARK_RUNS_DIR", tmp_path)
+        monkeypatch.setattr(server, "_authenticate_request", _fake_admin)
+        monkeypatch.setattr(
+            fusion_engine, "load_engine_config", lambda: _stored_config()
+        )
+        saved: dict = {}
+
+        def fake_save(config: dict) -> None:
+            saved.update(copy.deepcopy(config))
+
+        monkeypatch.setattr(fusion_engine, "save_engine_config", fake_save)
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/settings/weight-governance-evidence/auto", cookies=_cookie_jar()
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["cleared"] is True
+        assert body["evidence"]["validation_run_id"] == "run-7"
+        assert body["evidence"]["benchmark_dataset_id"] == "pan-validation"
+        advanced = saved["advanced"]
+        assert "weights_need_validation" not in advanced
+        assert advanced["weight_governance_evidence"]["validation_run_id"] == "run-7"
+
+    def test_no_labeled_runs_returns_404(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Test that an empty runs dir explains itself instead of 500ing."""
+        from src.backend.api import server
+
+        monkeypatch.setattr(server, "BENCHMARK_RUNS_DIR", tmp_path)
+        monkeypatch.setattr(server, "_authenticate_request", _fake_admin)
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/settings/weight-governance-evidence/auto", cookies=_cookie_jar()
+        )
+        assert response.status_code == 404
+        assert "benchmark" in response.json()["detail"].lower()
+
+
+class TestRevertWeightGovernance:
+    """POST /api/settings/weight-governance-revert behavior."""
+
+    def test_revert_restores_defaults_and_clears(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that revert restores shipped weights and drops the flag."""
+        from src.backend.api import server
+        from src.backend.engines.scoring import fusion_engine
+        from src.backend.engines.scoring.fusion_engine import DEFAULT_WEIGHTS
+
+        def fake_load() -> dict:
+            return {
+                "weights": {"ast": 0.9, "token": 0.1},
+                "advanced": {
+                    "weights_need_validation": True,
+                    "weight_governance_evidence": {"validation_run_id": "old"},
+                },
+            }
+
+        monkeypatch.setattr(server, "_authenticate_request", _fake_admin)
+        monkeypatch.setattr(fusion_engine, "load_engine_config", fake_load)
+        saved: dict = {}
+
+        def fake_save(config: dict) -> None:
+            saved.update(copy.deepcopy(config))
+
+        monkeypatch.setattr(fusion_engine, "save_engine_config", fake_save)
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/settings/weight-governance-revert", cookies=_cookie_jar()
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["ok"] is True
+        assert body["cleared"] is True
+        assert saved["weights"] == dict(DEFAULT_WEIGHTS)
+        assert "weights_need_validation" not in saved["advanced"]
+        assert "weight_governance_evidence" not in saved["advanced"]
+
+
+class TestValidationChangedEngines:
+    """GET /api/settings/validation names real diffs vs shipped defaults."""
+
+    def test_changed_engines_compare_against_defaults(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that only genuinely changed engines are reported."""
+        from src.backend.api import server
+        from src.backend.engines.scoring import fusion_engine
+        from src.backend.engines.scoring.fusion_engine import DEFAULT_WEIGHTS
+
+        weights = dict(DEFAULT_WEIGHTS)
+        first_engine = next(iter(weights))
+        weights[first_engine] = float(weights[first_engine]) + 0.05
+
+        def fake_load() -> dict:
+            return {
+                "weights": weights,
+                "advanced": {"weights_need_validation": True},
+            }
+
+        monkeypatch.setattr(server, "_authenticate_request", _fake_admin)
+        monkeypatch.setattr(fusion_engine, "load_engine_config", fake_load)
+        client = TestClient(server.app)
+        response = client.get("/api/settings/validation", cookies=_cookie_jar())
+        assert response.status_code == 200, response.text
+        block = response.json()["weight_governance"]
+        assert block["needs_validation"] is True
+        assert block["changed_engines"] == [first_engine]
+        assert any("validation_run_id" in warning for warning in block["warnings"])

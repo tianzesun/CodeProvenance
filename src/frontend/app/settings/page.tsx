@@ -361,6 +361,7 @@ export default function SettingsPage() {
   const [govForm, setGovForm] = useState({ validation_run_id: '', benchmark_dataset_id: '', metric_snapshot: '' });
   const [govSaving, setGovSaving] = useState<boolean>(false);
   const [govMessage, setGovMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [govConfirmRevert, setGovConfirmRevert] = useState<boolean>(false);
 
   const govEvidenceText = (value: unknown): string => {
     if (typeof value === 'string') return value;
@@ -773,6 +774,42 @@ export default function SettingsPage() {
       await validateConfig();
     } catch (err: unknown) {
       setGovMessage({ ok: false, text: describeError(err, 'Could not save validation evidence.') });
+    } finally {
+      setGovSaving(false);
+    }
+  };
+
+  const submitGovernanceAuto = async () => {
+    setGovSaving(true);
+    setGovMessage(null);
+    try {
+      const res = await apiClient.post('/api/settings/weight-governance-evidence/auto', {});
+      const body = (res.data || {}) as { ok?: boolean; message?: string };
+      setGovMessage({
+        ok: Boolean(body.ok),
+        text: body.message || (body.ok ? 'Benchmark evidence attached.' : 'Benchmark evidence attached with warnings.'),
+      });
+      await validateConfig();
+    } catch (err: unknown) {
+      setGovMessage({ ok: false, text: describeError(err, 'Could not attach benchmark evidence. No labeled benchmark runs may exist yet.') });
+    } finally {
+      setGovSaving(false);
+    }
+  };
+
+  const submitGovernanceRevert = async () => {
+    setGovSaving(true);
+    setGovMessage(null);
+    try {
+      const res = await apiClient.post('/api/settings/weight-governance-revert', {});
+      const body = (res.data || {}) as { ok?: boolean; message?: string };
+      setGovMessage({
+        ok: Boolean(body.ok),
+        text: body.message || (body.ok ? 'Reverted to shipped defaults.' : 'Revert did not clear the warnings.'),
+      });
+      await validateConfig();
+    } catch (err: unknown) {
+      setGovMessage({ ok: false, text: describeError(err, 'Could not revert weights.') });
     } finally {
       setGovSaving(false);
     }
@@ -1787,6 +1824,33 @@ export default function SettingsPage() {
                       without naming their validation proof. Shipping default weights requires a validation run on the
                       validation split (the locked test set stays untouched). Fill in the three fields to clear these warnings.
                     </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void submitGovernanceAuto()}
+                        disabled={govSaving}
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                      >
+                        {govSaving ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                        Use latest benchmark run
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (govConfirmRevert) {
+                            setGovConfirmRevert(false);
+                            void submitGovernanceRevert();
+                          } else {
+                            setGovConfirmRevert(true);
+                          }
+                        }}
+                        disabled={govSaving}
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-50 dark:border-red-500/20 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-500/10"
+                      >
+                        <RefreshCw size={14} />
+                        {govConfirmRevert ? 'Click again to confirm revert' : 'Revert to shipped defaults'}
+                      </button>
+                    </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <TextInput
                         label="Validation run ID"

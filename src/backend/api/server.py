@@ -17161,12 +17161,16 @@ async def validate_current_config():
         "warnings": [],
     }
     if needs_validation:
+        from src.backend.engines.scoring.fusion_engine import DEFAULT_WEIGHTS
+
         pending = evaluate_weight_change_governance(
-            {},
+            DEFAULT_WEIGHTS,
             config.get("weights", {}),
             stored_evidence,
         )
-        governance_block["changed_engines"] = pending.changed_engines
+        governance_block["changed_engines"] = _direct_changed_engines(
+            DEFAULT_WEIGHTS, config.get("weights", {})
+        )
         governance_block["warnings"] = pending.warnings
         issues.extend(pending.warnings)
 
@@ -17210,6 +17214,7 @@ async def attach_weight_governance_evidence(request: Request) -> dict[str, Any]:
     """
     _require_current_user(request, admin_only=True)
     from src.backend.engines.scoring.fusion_engine import (
+        DEFAULT_WEIGHTS,
         load_engine_config,
         save_engine_config,
     )
@@ -17244,7 +17249,7 @@ async def attach_weight_governance_evidence(request: Request) -> dict[str, Any]:
         config["advanced"] = advanced = {}
     advanced["weight_governance_evidence"] = evidence
     governance_result = evaluate_weight_change_governance(
-        {}, config.get("weights", {}), evidence
+        DEFAULT_WEIGHTS, config.get("weights", {}), evidence
     )
     cleared = governance_result.allowed
     if cleared:
@@ -17260,6 +17265,218 @@ async def attach_weight_governance_evidence(request: Request) -> dict[str, Any]:
             else "Evidence recorded, but governance still warns: "
             + "; ".join(governance_result.warnings)
         ),
+    }
+
+
+def _direct_changed_engines(
+    baseline: dict[str, Any], current: dict[str, Any], tolerance: float = 0.0001
+) -> list[str]:
+    """List engines whose raw weights differ, without normalization.
+
+    Governance gates on *normalized* weights (scaling every engine equally is
+    a no-op), but that reshuffles every share when a single engine is tuned —
+    useless for telling the admin what they actually edited. This compares
+    raw values with the same tolerance so the UI names the real edits.
+
+    Args:
+        baseline: Reference weights (shipped defaults).
+        current: Live weights.
+        tolerance: Minimum absolute difference that counts as a change.
+
+    Returns:
+        Sorted engine names whose raw weights differ.
+    """
+    changed: list[str] = []
+    for key in set(baseline) | set(current):
+        try:
+            before = float(baseline.get(key, 0.0) or 0.0)
+            after = float(current.get(key, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if abs(before - after) > tolerance:
+            changed.append(str(key))
+    return sorted(changed)
+
+
+def _latest_labeled_benchmark_run() -> tuple[str, dict[str, Any]] | None:
+    """Return the newest benchmark run carrying ground-truth labels.
+
+    Returns:
+        A ``(run_id, run_payload)`` tuple, or ``None`` when no labeled run
+        exists on disk. Corrupt files are skipped, never fatal.
+    """
+    try:
+        paths = sorted(
+            BENCHMARK_RUNS_DIR.glob("*.json"),
+            key=lambda path: path.stat().st_mtime if path.exists() else 0.0,
+            reverse=True,
+        )
+    except OSError:
+        return None
+    for path in paths[:10]:
+        try:
+            run = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if (
+            isinstance(run, dict)
+            and run.get("has_ground_truth")
+            and run.get("pair_results")
+        ):
+            run_id = str(run.get("run_id") or run.get("id") or path.stem)
+            return run_id, run
+    return None
+
+
+def _benchmark_run_evidence(run_id: str, run: dict[str, Any]) -> dict[str, Any]:
+    """Build governance evidence from a labeled benchmark run.
+
+    Args:
+        run_id: Stable identifier for the run (payload id or filename).
+        run: Decoded benchmark run payload.
+
+    Returns:
+        An evidence dict satisfying the governance policy.
+    """
+    summary = run.get("summary") if isinstance(run.get("summary"), dict) else {}
+    evaluation = (
+        run.get("evaluation") if isinstance(run.get("evaluation"), dict) else {}
+    )
+    tool_scores = (
+        run.get("tool_scores") if isinstance(run.get("tool_scores"), dict) else {}
+    )
+    primary = (
+        "integritydesk"
+        if "integritydesk" in tool_scores
+        else next(iter(tool_scores), None)
+    )
+    tool_metrics = (
+        evaluation.get(primary)
+        if primary and isinstance(evaluation.get(primary), dict)
+        else {}
+    )
+    metrics = {
+        key: tool_metrics.get(key)
+        for key in (
+            "precision",
+            "recall",
+            "f1",
+            "auc_pr",
+            "false_positive_rate",
+            "best_threshold",
+            "fixed_threshold",
+        )
+        if tool_metrics.get(key) is not None
+    }
+    pairs = run.get("pair_results") or []
+    dataset = str(
+        run.get("dataset_id")
+        or summary.get("dataset_name")
+        or run.get("dataset")
+        or "benchmark"
+    )
+    return {
+        "validation_run_id": run_id,
+        "benchmark_dataset_id": dataset,
+        "metric_snapshot": {
+            "dataset": dataset,
+            "tool": primary or "integritydesk",
+            "metrics": metrics,
+            "pairs": len(pairs) if isinstance(pairs, list) else 0,
+        },
+        "split": "validation",
+    }
+
+
+@app.post("/api/settings/weight-governance-evidence/auto")
+async def attach_weight_governance_evidence_auto(
+    request: Request,
+) -> dict[str, Any]:
+    """Attach the newest labeled benchmark run as validation evidence.
+
+    One-click resolution for the Configuration Check warnings when a real
+    benchmark run exists: the run id, dataset and metric snapshot are taken
+    from the stored run instead of typed by hand.
+    """
+    _require_current_user(request, admin_only=True)
+    from src.backend.engines.scoring.fusion_engine import (
+        DEFAULT_WEIGHTS,
+        load_engine_config,
+        save_engine_config,
+    )
+    from src.backend.engines.scoring.fusion_policy import (
+        evaluate_weight_change_governance,
+    )
+
+    config = load_engine_config()
+    advanced = config.get("advanced")
+    if not isinstance(advanced, dict):
+        config["advanced"] = advanced = {}
+    found = _latest_labeled_benchmark_run()
+    if found is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No labeled benchmark runs found. Run a benchmark with ground truth first, or fill the evidence form manually.",
+        )
+    run_id, run = found
+    evidence = _benchmark_run_evidence(run_id, run)
+    advanced["weight_governance_evidence"] = evidence
+    governance_result = evaluate_weight_change_governance(
+        DEFAULT_WEIGHTS, config.get("weights", {}), evidence
+    )
+    cleared = governance_result.allowed
+    if cleared:
+        advanced.pop("weights_need_validation", None)
+    save_engine_config(config)
+    snapshot = evidence["metric_snapshot"]
+    return {
+        "ok": cleared,
+        "cleared": cleared,
+        "weight_governance": governance_result.to_dict(),
+        "evidence": {
+            "validation_run_id": evidence["validation_run_id"],
+            "benchmark_dataset_id": evidence["benchmark_dataset_id"],
+            "pairs": snapshot.get("pairs", 0),
+        },
+        "message": (
+            f"Attached benchmark run {run_id} ({snapshot.get('pairs', 0)} labeled pairs) — weight warnings cleared."
+            if cleared
+            else "Attached benchmark run, but governance still warns: "
+            + "; ".join(governance_result.warnings)
+        ),
+    }
+
+
+@app.post("/api/settings/weight-governance-revert")
+async def revert_weight_governance_to_defaults(
+    request: Request,
+) -> dict[str, Any]:
+    """Revert default weights to shipped values, clearing validation state.
+
+    The honest escape hatch when no validation evidence exists: instead of
+    leaving an unevidenced change flagged forever, restore the validated
+    shipped defaults so there is nothing left to validate.
+    """
+    _require_current_user(request, admin_only=True)
+    from src.backend.engines.scoring.fusion_engine import (
+        DEFAULT_WEIGHTS,
+        load_engine_config,
+        save_engine_config,
+    )
+
+    config = load_engine_config()
+    config["weights"] = dict(DEFAULT_WEIGHTS)
+    advanced = config.get("advanced")
+    if not isinstance(advanced, dict):
+        config["advanced"] = advanced = {}
+    advanced.pop("weights_need_validation", None)
+    advanced.pop("weight_governance_evidence", None)
+    save_engine_config(config)
+    return {
+        "ok": True,
+        "cleared": True,
+        "message": "Default weights reverted to shipped values — validation warnings cleared.",
+        "weights": config["weights"],
     }
 
 
