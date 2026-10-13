@@ -232,13 +232,17 @@ for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/
     BUILT_HASH="$(docker image inspect -f '{{index .Config.Labels "req-hash"}}' "$GPU_IMG" 2>/dev/null || true)"
     if [ "$BUILT_HASH" != "$REQ_HASH" ]; then
         echo "Building GPU backend image (deps bake in; first build takes a while)..."
+        # Proxy build-args only when set: empty proxy vars in the build env
+        # break some tools, so blank ones are never passed.
+        PROXY_BUILD_ARGS=()
+        for proxy_var in http_proxy https_proxy no_proxy; do
+            if [ -n "${!proxy_var:-}" ]; then PROXY_BUILD_ARGS+=(--build-arg "$proxy_var=${!proxy_var}"); fi
+        done
         DOCKER_BUILDKIT=1 docker build --network host -f "$GPU_DOCKERFILE" \
             --build-arg "BASE_IMAGE=$GPU_IMAGE" \
             --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL:-}" \
             --build-arg "PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}" \
-            --build-arg "http_proxy=${http_proxy:-}" \
-            --build-arg "https_proxy=${https_proxy:-}" \
-            --build-arg "no_proxy=${no_proxy:-}" \
+            "${PROXY_BUILD_ARGS[@]}" \
             --label "req-hash=$REQ_HASH" \
             -t "$GPU_IMG" "$PROJECT_DIR" || { echo "❌ GPU image build failed"; exit 1; }
     fi
