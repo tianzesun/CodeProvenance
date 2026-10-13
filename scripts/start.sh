@@ -218,8 +218,8 @@ for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/
         DETECTED_PROXY="$(for v in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY; do if [ -n "${!v:-}" ]; then printf '%s ' "$v"; fi; done)"
         echo "❌ No PyPI network for the GPU image build (DNS or blocked network)."
         echo "   Proxy vars currently set here: ${DETECTED_PROXY:-none} (export http_proxy/https_proxy + no_proxy and re-run if this host is proxied)."
-        echo "   No direct PyPI access? Point the build at a mirror instead:"
-        echo "     PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ BACKEND_GPU=1 ./scripts/restart.sh"
+        echo "   No direct PyPI access? Point the build at a PyPI mirror near you instead:"
+        echo "     PIP_INDEX_URL=https://<your-regional-mirror>/simple/ BACKEND_GPU=1 ./scripts/restart.sh"
         echo "--- underlying error ---"
         printf '%s\n' "$NET_ERR" | tail -8
         echo "--- image resolv.conf ---"
