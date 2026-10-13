@@ -159,12 +159,6 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: FileText,
         roles: ['admin'],
       },
-      {
-        href: '/error-analysis',
-        label: 'Error Analysis',
-        icon: AlertTriangle,
-        roles: ['admin'],
-      },
     ],
   },
   {
