@@ -1561,12 +1561,11 @@ export default function SettingsPage() {
                 )}
                 {sysStatus?.services?.llm && (() => {
                   const llm = sysStatus.services.llm;
-                  const defaultEntry = (llm.providers || []).find((provider) => provider.provider === llm.default_provider) || (llm.providers || [])[0];
                   return (
                   <div className={`mt-3 rounded-lg border p-3 ${serviceTone(llm.status)}`}>
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                        LLM{defaultEntry ? ` · default: ${defaultEntry.label}` : ''}
+                        LLM
                       </div>
                       <div className="flex items-center gap-2">
                         <span className={`inline-block h-2 w-2 rounded-full ${serviceDot(llm.status)}`} />
