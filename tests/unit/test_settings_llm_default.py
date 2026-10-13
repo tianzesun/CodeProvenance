@@ -88,3 +88,27 @@ class TestDefaultLlmProviderRoundTrip:
         ignored = response.json().get("ignored", {})
         assert "llm_provider" in ignored
         assert "not-a-vendor" in ignored["llm_provider"]
+
+    def test_default_provider_survives_runtime_restart(self, admin_client):
+        """Test that a restart restores the saved default on next request."""
+        from src.backend.config.settings import settings as app_settings
+
+        client, cookies = admin_client
+        response = client.patch(
+            "/api/settings",
+            json={"llm_provider": "ollama"},
+            cookies=cookies,
+        )
+        assert response.status_code == 200, response.text
+        previous = app_settings.LLM_PROVIDER
+        try:
+            # Simulate a backend restart: the live object reverts to env
+            # defaults while the tenant DB record keeps the saved value.
+            object.__setattr__(app_settings, "LLM_PROVIDER", "openai")
+            # The next authenticated request must re-apply the tenant record.
+            fresh = client.get("/api/settings", cookies=cookies)
+            assert fresh.status_code == 200, fresh.text
+            assert fresh.json().get("llm_provider") == "ollama"
+            assert app_settings.LLM_PROVIDER == "ollama"
+        finally:
+            object.__setattr__(app_settings, "LLM_PROVIDER", previous)
