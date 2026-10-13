@@ -15,6 +15,7 @@ echo "Stopping all running IntegrityDesk services (ports: $DASHBOARD_PORT, $BACK
 # Kill by process name (Next.js 16 + React 19 compatible patterns)
 pkill -f "uvicorn src.backend.api.server:app" 2>/dev/null || true
 pkill -f "uvicorn src.backend.services.embedding_server:app" 2>/dev/null || true
+pkill -f "celery.*celery_app" 2>/dev/null || true
 pkill -f "next dev" 2>/dev/null || true
 pkill -f "next start" 2>/dev/null || true
 pkill -f "next-server" 2>/dev/null || true
@@ -25,6 +26,7 @@ sleep 2
 # Force kill any survivors
 pkill -9 -f "uvicorn src.backend.api.server:app" 2>/dev/null || true
 pkill -9 -f "uvicorn src.backend.services.embedding_server:app" 2>/dev/null || true
+pkill -9 -f "celery.*celery_app" 2>/dev/null || true
 pkill -9 -f "next dev" 2>/dev/null || true
 pkill -9 -f "next start" 2>/dev/null || true
 pkill -9 -f "next-server" 2>/dev/null || true

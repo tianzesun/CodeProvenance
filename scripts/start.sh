@@ -1,10 +1,11 @@
 #!/bin/bash
 # IntegrityDesk - Robust Startup Script
-# Backend + Embedding Server + Next.js Dashboard
+# Backend + Embedding Server + Celery Worker + Next.js Dashboard
 #
 # GPU backend (ARM/Blackwell hosts without a pip CUDA torch wheel):
 #   BACKEND_GPU=1 ./scripts/start.sh    (image override: GPU_IMAGE=...)
 #   EMBEDDING_GPU=1 ./scripts/start.sh  (same image, second holder)
+# The celery worker always lives wherever the backend lives.
 
 set -e
 
@@ -480,6 +481,88 @@ for i in {1..30}; do
 done
 
 # ----------------------------
+# CELERY WORKER (drains the analysis queue)
+# ----------------------------
+# Uploads go to Celery whenever Redis is reachable; without a worker those
+# jobs sit "Queued for analysis" forever. The worker lives wherever the
+# backend lives (GPU holder when BACKEND_GPU=1, else host venv) so analysis
+# always runs with the same interpreter and libraries.
+echo "Starting celery worker..."
+
+redis_reachable() {
+    [ -n "${REDIS_URL:-}" ] || return 1
+    "$VENV_PYTHON" -c "
+import os, socket, sys
+from urllib.parse import urlparse
+u = urlparse(os.environ.get('REDIS_URL', ''))
+try:
+    s = socket.create_connection((u.hostname or '127.0.0.1', u.port or 6379), timeout=3)
+    s.close()
+except OSError:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+CELERY_CONCURRENCY="${CELERY_WORKER_CONCURRENCY:-4}"
+CELERY_LOG="$PROJECT_DIR/logs/celery.log"
+
+start_celery_host() {
+    cd "$PROJECT_DIR"
+    nohup "$VENV_PYTHON" -m celery -A src.backend.workers.celery_app:celery_app worker \
+        -Q analysis --concurrency="$CELERY_CONCURRENCY" --loglevel=info > "$CELERY_LOG" 2>&1 &
+}
+
+if ! redis_reachable; then
+    echo "⚠️  Redis unreachable — uploads run in-process; skipping Celery worker"
+elif [ "$GPU_WANTS_HOST" = "1" ]; then
+    if pgrep -f "celery.*celery_app" >/dev/null 2>&1; then
+        echo "✔ Celery worker already running"
+    else
+        start_celery_host
+        sleep 2
+    fi
+else
+    require_docker
+    ensure_gpu_holder "$GPU_CONTAINER"
+    EMB_PY_WORKER="$(detect_gpu_py "$GPU_CONTAINER")"
+    if docker exec "$GPU_CONTAINER" pgrep -f "celery.*celery_app" >/dev/null 2>&1; then
+        echo "✔ Celery worker already running (GPU container)"
+    else
+        echo "Starting celery worker in GPU container (threads pool: CUDA contexts cannot survive fork)..."
+        mapfile -t ENV_ARGS < <(build_env_args)
+        docker exec -d "${PROXY_ARGS[@]}" "${ENV_ARGS[@]}" "$GPU_CONTAINER" bash -c "cd /app && exec $EMB_PY_WORKER -m celery -A src.backend.workers.celery_app:celery_app worker -Q analysis --pool=threads --concurrency=\"$CELERY_CONCURRENCY\" --loglevel=info >> /app/logs/celery.log 2>&1"
+        sleep 2
+    fi
+fi
+
+if redis_reachable; then
+    echo "Waiting for celery worker..."
+    CELERY_INSPECT="src.backend.workers.celery_app:celery_app"
+    if [ "$GPU_WANTS_HOST" != "1" ]; then
+        mapfile -t ENV_ARGS < <(build_env_args)
+        CELERY_PY="$(detect_gpu_py "$GPU_CONTAINER")"
+    fi
+    for i in {1..30}; do
+        if [ "$GPU_WANTS_HOST" = "1" ]; then
+            PONG="$(cd "$PROJECT_DIR" && timeout 10 "$VENV_PYTHON" -m celery -A "$CELERY_INSPECT" inspect ping 2>/dev/null | grep -ci pong || true)"
+        else
+            PONG="$(docker exec "${ENV_ARGS[@]}" "$GPU_CONTAINER" timeout 10 bash -c "cd /app && exec $CELERY_PY -m celery -A $CELERY_INSPECT inspect ping" 2>/dev/null | grep -ci pong || true)"
+        fi
+        if [ "${PONG:-0}" -gt 0 ] 2>/dev/null; then
+            echo "✔ Celery worker ready — queued jobs will drain"
+            break
+        fi
+        if [ $i -eq 30 ]; then
+            echo "❌ Celery worker did not answer (queued jobs would stall)"
+            echo "---- Last logs ----"
+            tail -n 30 "$CELERY_LOG" 2>/dev/null || docker logs --tail 30 "$GPU_CONTAINER"
+            exit 1
+        fi
+        sleep 1
+    done
+fi
+
+# ----------------------------
 # DASHBOARD START
 # ----------------------------
 echo "Starting dashboard..."
@@ -543,6 +626,7 @@ echo ""
 echo "Logs:"
 echo "  Backend:   $BACKEND_LOG"
 echo "  Embedding: $EMBEDDING_LOG"
+echo "  Celery:    $CELERY_LOG"
 echo "  Dashboard:  $PROJECT_DIR/logs/dashboard.log"
 echo ""
 echo "Startup complete ✔"

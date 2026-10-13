@@ -155,6 +155,7 @@ echo "-----------------------------"
 
 kill_process_tree "uvicorn.*src.backend.api.server" "Backend Workers"
 kill_process_tree "uvicorn.*embedding_server" "Embedding Workers"
+kill_process_tree "celery.*celery_app" "Celery Workers"
 kill_process_tree "next dev" "Next.js Dev Server"
 kill_process_tree "next start" "Next.js Server"
 kill_process_tree "next-server" "Next.js Workers"
