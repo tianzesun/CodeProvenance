@@ -40,7 +40,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && if [ -n "$PIP_INDEX_URL" ]; then PIP_ARGS="$PIP_ARGS --index-url $PIP_INDEX_URL"; fi \
     && if [ -n "$PIP_TRUSTED_HOST" ]; then PIP_ARGS="$PIP_ARGS --trusted-host $PIP_TRUSTED_HOST"; fi \
     # shellcheck disable=SC2086: PIP_ARGS word-splitting is intentional here
-    && pip install --break-system-packages --retries 10 --timeout 60 $PIP_ARGS \
+    # -q hides pip's per-retry warnings (noisy on flaky networks); failures
+    # still print their error and fail the build.
+    && pip install -q --break-system-packages --retries 10 --timeout 60 $PIP_ARGS \
         -r /tmp/requirements-notorch.txt \
     && rm -f /tmp/requirements.txt /tmp/requirements-notorch.txt
 
