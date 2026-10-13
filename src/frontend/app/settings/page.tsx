@@ -1578,39 +1578,6 @@ export default function SettingsPage() {
                     })}
                   </div>
                 )}
-                {sysStatus?.services?.llm && (() => {
-                  const llm = sysStatus.services.llm;
-                  return (
-                  <div className={`mt-3 rounded-lg border p-3 ${serviceTone(llm.status)}`}>
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                        LLM
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-block h-2 w-2 rounded-full ${serviceDot(llm.status)}`} />
-                        <span className="text-sm font-medium text-slate-900 dark:text-white">{serviceWord(llm.status)}</span>
-                      </div>
-                    </div>
-                    {(llm.providers || []).map((provider) => (
-                      <div key={provider.provider || provider.label} className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-200/70 dark:border-slate-800 pt-2">
-                        <span className="text-sm font-medium text-slate-900 dark:text-white">{provider.label}</span>
-                        <span className="text-xs text-slate-500 dark:text-slate-400">{provider.model || ''}</span>
-                        {typeof provider.latency_ms === 'number' && provider.latency_ms > 0 && (
-                          <span className="text-[11px] text-slate-400 dark:text-slate-500">{provider.latency_ms} ms</span>
-                        )}
-                        <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">
-                          {provider.status === 'up' ? 'Connected' : provider.detail || serviceWord(provider.status)}
-                        </span>
-                      </div>
-                    ))}
-                    {llm.status !== 'up' && (
-                      <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                        Evidence summaries use the default provider. Using Ollama locally? Pick it as Default provider in Intelligence → AI Provider Integration, then Save.
-                      </div>
-                    )}
-                  </div>
-                  );
-                })()}
               </section>
 
               {/* Configuration Card (static values — live health is in Service Status above) */}
