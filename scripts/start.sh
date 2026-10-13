@@ -194,6 +194,9 @@ require_docker() {
 }
 
 ensure_gpu_image() {
+    # Wheelhouse first (host pip has the reliable network), then pull base,
+    # probe, and (re)build. The build itself never touches an index.
+    ensure_wheelhouse
     # Pull the base image, probe build-time network, and (re)build our image
     # when requirements.txt or the Dockerfile changed (layer cache makes a
     # no-change rebuild instant).
@@ -291,6 +294,30 @@ PROXY_ARGS=()
 for proxy_var in http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY; do
     if [ -n "${!proxy_var:-}" ]; then PROXY_ARGS+=(-e "$proxy_var=${!proxy_var}"); fi
 done
+
+ensure_wheelhouse() {
+    # Pre-download every GPU-image wheel with the host pip (proven reliable
+    # on networks where container DNS flakes), so the image build installs
+    # with --no-index from local files and never touches a package index.
+    # torch wheels are pruned: the base image's CUDA torch is used as-is.
+    local wheel_dir="$PROJECT_DIR/.wheels"
+    local req_list="$wheel_dir/requirements-gpu.txt"
+    local marker="$wheel_dir/.req.sha256"
+    local want_hash
+    want_hash="$(cat "$PROJECT_DIR/requirements.txt" | sha256sum | cut -d' ' -f1)"
+    if [ -f "$marker" ] && [ "$(cat "$marker")" = "$want_hash" ] && [ -n "$(ls -A "$wheel_dir"/*.whl 2>/dev/null)" ]; then
+        return 0
+    fi
+    echo "Downloading GPU image wheels on host (one-time per requirements change)..."
+    mkdir -p "$wheel_dir"
+    grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' \
+        -e '^pytest' -e '^black==' -e '^ruff==' -e '^flake8==' -e '^mypy==' \
+        "$PROJECT_DIR/requirements.txt" | grep -v "^$" > "$req_list"
+    "$VENV_PYTHON" -m pip download --retries 10 --timeout 60 -r "$req_list" -d "$wheel_dir" \
+        || { echo "❌ Wheel download failed (host network needed once per requirements change)"; return 1; }
+    rm -f "$wheel_dir"/torch-*.whl "$wheel_dir"/nvidia-*.whl "$wheel_dir"/triton-*.whl "$wheel_dir"/cuda-*.whl
+    printf '%s\n' "$want_hash" > "$marker"
+}
 
 build_env_args() {
     # Emit .env.local as docker -e args (one per line) so edits apply on

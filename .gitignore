@@ -173,3 +173,4 @@ tsunn*
 sandbox/
 outputs/
 .hf-cache/
+.wheels/

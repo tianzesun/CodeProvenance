@@ -3,8 +3,11 @@
 #
 # Built by scripts/start.sh with BACKEND_GPU=1 (rebuilds only when
 # requirements.txt changes — docker layer cache makes that instant).
-# Manual build:
-#   docker build --network host -f Dockerfile.gpu -t integritydesk-backend-gpu-img .
+# The Python install is fully offline: start.sh pre-downloads every wheel
+# with the host pip (reliable network) into .wheels/, and the build below
+# installs with --no-index from those local files. Manual build therefore
+# needs a populated .wheels/ first (start.sh does this automatically):
+#   ./scripts/start.sh  (with BACKEND_GPU=1; stops before the build otherwise)
 #
 # The base image ships a CUDA torch for its arch; torch is deliberately
 # excluded below so requirements.txt can never overwrite it with CPU-only.
@@ -31,6 +34,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/requirements.txt
+COPY .wheels /tmp/wheels
 # Dev/test tooling (pytest, black, ruff, flake8, mypy) has no runtime imports
 # and stays out of the image. The pip cache mount survives failed builds so
 # flaky networks resume downloads instead of restarting them — without
@@ -39,24 +43,25 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' \
         -e '^pytest' -e '^black==' -e '^ruff==' -e '^flake8==' -e '^mypy==' \
         /tmp/requirements.txt > /tmp/requirements-notorch.txt \
-    && PIP_ARGS="" \
-    && if [ -n "$PIP_INDEX_URL" ]; then PIP_ARGS="$PIP_ARGS --index-url $PIP_INDEX_URL"; fi \
-    && if [ -n "$PIP_TRUSTED_HOST" ]; then PIP_ARGS="$PIP_ARGS --trusted-host $PIP_TRUSTED_HOST"; fi \
     # One interpreter for install and smoke test: bare `pip` and `python3`
     # can resolve to different Pythons (system python vs the conda env
     # shipping CUDA torch) — the exact mismatch that once produced
     # "No module named uvicorn" at boot. Prefer conda's, like start.sh does.
     && if [ -x /opt/conda/bin/python ]; then PY=/opt/conda/bin/python; else PY=python3; fi \
-    # shellcheck disable=SC2086: $PY/$PIP_ARGS word-splitting is intentional
-    # -q hides pip's per-retry warnings (noisy on flaky networks); failures
-    # still print their error and fail the build.
-    && $PY -m pip install -q --break-system-packages --retries 10 --timeout 60 $PIP_ARGS \
+    # Offline install from the host-populated wheelhouse (see start.sh
+    # ensure_wheelhouse): no index access, so flaky container DNS cannot
+    # break the build. torch stays excluded — the base image's CUDA torch is
+    # used as-is, and --no-index fails loudly instead of fetching a CPU
+    # wheel over it.
+    # shellcheck disable=SC2086: $PY word-splitting is intentional
+    # -q hides per-file progress; failures still print and fail the build.
+    && $PY -m pip install -q --break-system-packages --no-index --find-links /tmp/wheels \
         -r /tmp/requirements-notorch.txt \
     # Fail the build — not the boot — on broken deps: import everything the
     # backend needs at startup with the SAME interpreter. torch imports
     # without a GPU present; CUDA visibility is verified separately by start.sh.
     && $PY -c "import fastapi, uvicorn, sqlalchemy, jose, yaml, redis, torch, transformers, weasyprint; print('backend deps ok')" \
-    && rm -f /tmp/requirements.txt /tmp/requirements-notorch.txt
+    && rm -rf /tmp/requirements.txt /tmp/requirements-notorch.txt /tmp/wheels
 
 # Holder model: start.sh mounts the repo at /app and execs uvicorn inside,
 # so the image carries deps only — no code, no env, no ports.
