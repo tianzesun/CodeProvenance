@@ -50,7 +50,12 @@ class TestDefaultLlmProviderRoundTrip:
 
         from src.backend.api.server import AUTH_COOKIE_NAME
         from src.backend.config.settings import settings as app_settings
+        from src.backend.engines.scoring.fusion_engine import FusionEngine
 
+        # PATCH /api/settings always funnels through
+        # FusionEngine.update_config, which saves engine_weights.yaml on
+        # disk. Neutralize it: this test must not rewrite repo files.
+        monkeypatch.setattr(FusionEngine, "update_config", lambda config: None)
         _admin_with_tenant(monkeypatch)
         now = datetime.now(timezone.utc)
         cookies = {
