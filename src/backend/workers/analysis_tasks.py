@@ -75,6 +75,16 @@ def run_upload_analysis(
     if owner_user_id or tenant_id:
         current_user = {"id": owner_user_id, "tenant_id": tenant_id}
 
+    # Cooperative cancellation: a job killed while queued (or redelivered
+    # after a lost worker) must die here, before any heavy work. The flag
+    # lives in the DB/job.json so it works across processes.
+    try:
+        if server._job_cancelled(job_id):
+            logger.info("Skipping cancelled job %s", job_id)
+            return {"job_id": job_id, "status": "cancelled", "cancelled": True}
+    except Exception:
+        logger.debug("Cancel-flag check failed for job %s", job_id, exc_info=True)
+
     try:
         asyncio.run(
             server._run_analysis(
@@ -91,6 +101,9 @@ def run_upload_analysis(
                 starter_sources,
             )
         )
+    except server._JobCancelled:
+        logger.info("Celery analysis cancelled for job %s", job_id)
+        return {"job_id": job_id, "status": "cancelled", "cancelled": True}
     except Exception:
         logger.exception("Celery analysis failed for job %s", job_id)
         raise

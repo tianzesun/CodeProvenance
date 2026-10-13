@@ -26,6 +26,7 @@ import {
   Workflow,
   Server,
   Activity,
+  Layers,
   XCircle,
   CheckCircle,
   Send,
@@ -601,6 +602,39 @@ export default function SettingsPage() {
   const [sysLoading, setSysLoading] = useState(false);
   const [sysError, setSysError] = useState<string | null>(null);
 
+  // Job queue monitor (System tab): live counts, worker activity, active
+  // jobs with admin kill. Shapes mirror GET /api/jobs/queue.
+  interface QueueWorkerTask {
+    task_id?: string;
+    job_id?: string;
+    task: string;
+    running_seconds?: number;
+  }
+  interface QueueWorker {
+    name: string;
+    active: QueueWorkerTask[];
+    reserved: number;
+  }
+  interface QueueJob {
+    id: string;
+    name: string;
+    status: string;
+    created_at?: string;
+    age_seconds?: number;
+  }
+  interface QueuePayload {
+    db_counts: Record<string, number>;
+    workers: QueueWorker[];
+    celery_error?: string;
+    active_jobs: QueueJob[];
+    checked_at: string;
+  }
+  const [queueData, setQueueData] = useState<QueuePayload | null>(null);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [killArmed, setKillArmed] = useState<string | null>(null);
+  const [killMessage, setKillMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
   const serviceTone = (status: string): string =>
     status === 'up'
       ? 'border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10'
@@ -736,6 +770,53 @@ export default function SettingsPage() {
     if (activeTab === 'system' && !sysLoading) void refreshSystemStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  const refreshQueue = async (): Promise<void> => {
+    setQueueLoading(true);
+    setQueueError(null);
+    try {
+      const res = await apiClient.get('/api/jobs/queue');
+      setQueueData((res.data || null) as QueuePayload | null);
+    } catch (err) {
+      setQueueError(describeError(err, 'Could not load job queue.'));
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  // Queue monitor polls while the System tab is open so stuck jobs surface
+  // without manual refreshes; the timer dies with the tab switch.
+  useEffect(() => {
+    if (activeTab !== 'system') return;
+    void refreshQueue();
+    const timer = setInterval(() => {
+      void refreshQueue();
+    }, 10000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const killJob = async (jobId: string): Promise<void> => {
+    setKillMessage(null);
+    try {
+      const res = await apiClient.post(`/api/jobs/${jobId}/cancel`, {});
+      const body = (res.data || {}) as { message?: string };
+      setKillMessage({
+        ok: true,
+        text: body.message || 'Cancellation requested.',
+      });
+      setKillArmed(null);
+      await refreshQueue();
+    } catch (err) {
+      setKillMessage({ ok: false, text: describeError(err, 'Could not cancel job.') });
+    }
+  };
+
+  const queueAgeText = (seconds?: number): string => {
+    if (seconds === undefined || seconds === null) return '—';
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+  };
 
   const validateConfig = async () => {
     setValidationLoading(true);
@@ -1613,6 +1694,134 @@ export default function SettingsPage() {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </section>
+
+              {/* Job Queue */}
+              <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
+                    <Layers size={18} />
+                  </span>
+                  <div className="flex-1">
+                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Job Queue</h2>
+                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                      Live queue depth, worker activity and active jobs{queueData ? ` · checked ${new Date(queueData.checked_at).toLocaleString()}` : ''}.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void refreshQueue()}
+                    disabled={queueLoading}
+                    className="flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 disabled:opacity-50"
+                  >
+                    {queueLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                    {queueLoading ? 'Checking…' : 'Refresh'}
+                  </button>
+                </div>
+                {queueError && (
+                  <div role="alert" className="mt-4 text-xs text-red-600 dark:text-red-400">{queueError}</div>
+                )}
+                {!queueData && !queueError && (
+                  <div className="mt-4 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                    <Loader2 size={16} className="animate-spin" /> Checking queue…
+                  </div>
+                )}
+                {queueData && (
+                  <div className="mt-4 space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      {(['queued', 'processing', 'failed'] as const).map((status) => (
+                        <span key={status} className="inline-flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-800 px-3 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                          <span className={`inline-block h-2 w-2 rounded-full ${status === 'queued' ? 'bg-amber-500' : status === 'processing' ? 'bg-blue-500' : 'bg-red-500'}`} />
+                          {status}: {queueData.db_counts[status] ?? 0}
+                        </span>
+                      ))}
+                      <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 dark:border-slate-800 px-3 py-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        workers: {queueData.workers.length}
+                      </span>
+                    </div>
+                    {queueData.celery_error && (
+                      <div role="status" className="text-xs text-amber-700 dark:text-amber-300">
+                        Worker detail unavailable: {queueData.celery_error}
+                      </div>
+                    )}
+                    {queueData.workers.map((worker) => (
+                      <div key={worker.name} className="text-xs text-slate-500 dark:text-slate-400">
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">{worker.name}</span>
+                        {' '}· {worker.active.length} active{worker.reserved > 0 && ` · ${worker.reserved} reserved`}
+                        {worker.active.slice(0, 3).map((task) => (
+                          <span key={task.task_id || task.job_id || task.task} className="ml-2">
+                            {task.job_id || task.task}{task.running_seconds !== undefined && task.running_seconds !== null ? ` (${queueAgeText(task.running_seconds)})` : ''}
+                          </span>
+                        ))}
+                      </div>
+                    ))}
+                    {killMessage && (
+                      <div role={killMessage.ok ? 'status' : 'alert'} className={`text-xs ${killMessage.ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600 dark:text-red-400'}`}>
+                        {killMessage.text}
+                      </div>
+                    )}
+                    {queueData.active_jobs.length === 0 ? (
+                      <div className="text-sm text-slate-500 dark:text-slate-400">No queued or running jobs.</div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-left text-sm">
+                          <thead>
+                            <tr className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              <th scope="col" className="px-3 py-2">Job</th>
+                              <th scope="col" className="px-3 py-2">Status</th>
+                              <th scope="col" className="px-3 py-2">Age</th>
+                              <th scope="col" className="px-3 py-2"><span className="sr-only">Actions</span></th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                            {queueData.active_jobs.map((job) => (
+                              <tr key={job.id}>
+                                <td className="px-3 py-2">
+                                  <div className="font-medium text-slate-900 dark:text-white">{job.name}</div>
+                                  <div className="font-mono text-[11px] text-slate-400 dark:text-slate-500">{job.id.slice(0, 8)}</div>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${job.status === 'processing' ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'}`}>
+                                    {job.status}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-slate-500 dark:text-slate-400">{queueAgeText(job.age_seconds)}</td>
+                                <td className="px-3 py-2 text-right">
+                                  {killArmed === job.id ? (
+                                    <span className="inline-flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => void killJob(job.id)}
+                                        className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-700"
+                                      >
+                                        Confirm kill
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setKillArmed(null)}
+                                        className="rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900"
+                                      >
+                                        Keep
+                                      </button>
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => { setKillArmed(job.id); setKillMessage(null); }}
+                                      className="rounded-lg border border-red-200 dark:border-red-500/20 px-3 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10"
+                                    >
+                                      Kill
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
               </section>

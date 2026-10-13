@@ -4299,6 +4299,53 @@ def _analysis_progress_plan(
     return [{"stage": key, "label": ANALYSIS_STAGE_LABELS[key]} for key in stage_keys]
 
 
+class _JobCancelled(Exception):
+    """Raised when an admin cancelled the job mid-pipeline.
+
+    Caught at the pipeline boundaries and translated into a clean
+    ``cancelled`` exit — never into ``failed``, and never with an error
+    stack. Doubles as the cooperative kill switch for Celery workers,
+    where broker revoke cannot stop threads-pool tasks mid-flight.
+    """
+
+    def __init__(self, job_id: str) -> None:
+        super().__init__(f"Job {job_id} was cancelled")
+        self.job_id = job_id
+
+
+def _job_cancelled(job_id: str) -> bool:
+    """Return whether an admin cancelled *job_id*.
+
+    Checks the database row first, then the job.json metadata file, so the
+    flag works across API/worker processes and for jobs without a DB row.
+    Never raises: cancellation is best-effort and must not break analysis
+    on a database or disk hiccup.
+    """
+    try:
+        with SessionLocal() as db:
+            status = db.query(Job.status).filter(Job.id == job_id).scalar()
+            if status is not None:
+                return str(status) == "cancelled"
+    except Exception:
+        logger.debug(
+            "Could not read cancel flag from DB for job %s", job_id, exc_info=True
+        )
+    try:
+        metadata_path = _job_metadata_path(job_id)
+        if metadata_path.exists():
+            stored = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if (
+                isinstance(stored, dict)
+                and str(stored.get("status") or "") == "cancelled"
+            ):
+                return True
+    except Exception:
+        logger.debug(
+            "Could not read cancel flag from disk for job %s", job_id, exc_info=True
+        )
+    return False
+
+
 def _set_job_progress(
     job_id: str,
     stage: str,
@@ -4336,6 +4383,13 @@ def _set_job_progress(
         return
 
     previous = job.get("progress") if isinstance(job.get("progress"), dict) else {}
+    if previous.get("stage") != stage and _job_cancelled(job_id):
+        # Cooperative cancellation: an admin kill lands as a DB/job.json
+        # flag (cross-process by design). Checked here — before recording
+        # anything — so an aborted stage leaves no polluted progress behind.
+        # Per-pair ticks reuse the stage and skip the lookup, so a long
+        # comparison phase costs no extra queries.
+        raise _JobCancelled(job_id)
     if percent is None:
         stage_floor = ANALYSIS_STAGE_PERCENT.get(stage, 0.0)
         if previous.get("stage") == stage:
@@ -9057,6 +9111,12 @@ async def _run_analysis(
             )
 
         return JSONResponse(content={"job_id": job_id, "status": "completed"})
+    except _JobCancelled:
+        # Admin cancellation: the status already reads "cancelled" (DB flag
+        # set by the cancel endpoint). Report it without touching job state
+        # and without logging an error stack.
+        logger.info("Analysis cancelled for job %s", job_id)
+        return JSONResponse(content={"job_id": job_id, "status": "cancelled"})
     except SQLAlchemyError as e:
         logger.exception(f"DB persistence failed for job {job_id}")
         if job_id in _jobs:
@@ -9144,6 +9204,8 @@ def _run_analysis_background(
                 starter_sources,
             )
         )
+    except _JobCancelled:
+        logger.info("Background analysis cancelled for job %s", job_id)
     except Exception:
         logger.exception("Background analysis failed for job %s", job_id)
         if job_id in _jobs:
@@ -9165,11 +9227,165 @@ async def list_jobs(request: Request):
     return JSONResponse(content={"jobs": _list_all_jobs(current_user)})
 
 
+@app.get("/api/jobs/queue")
+async def get_job_queue(request: Request, limit: int = 20):
+    """Queue overview for admins: DB counts, worker activity, active jobs.
+
+    Args:
+        request: Authenticated request (admin only).
+        limit: Maximum active jobs to list (1-100).
+
+    Returns:
+        DB status counts, per-worker Celery activity (best-effort), and the
+        newest active jobs with ages. Celery inspection never fails the
+        request: broker trouble is reported as ``celery_error``.
+    """
+    _require_current_user(request, admin_only=True)
+    limit = max(1, min(int(limit or 20), 100))
+
+    counts: dict[str, int] = {}
+    try:
+        with SessionLocal() as db:
+            rows = db.query(Job.status, func.count()).group_by(Job.status).all()
+            counts = {str(status or "unknown"): int(total) for status, total in rows}
+    except Exception:
+        logger.warning("Queue counts unavailable", exc_info=True)
+
+    workers: list[dict[str, Any]] = []
+    celery_error: str | None = None
+    try:
+        from src.backend.workers.celery_app import create_celery_app
+
+        celery_app = create_celery_app()
+        inspector = celery_app.control.inspect(timeout=3.0)
+        if inspector is None:
+            raise RuntimeError("inspect unavailable")
+        active = await run_in_threadpool(inspector.active) or {}
+        reserved = await run_in_threadpool(inspector.reserved) or {}
+        for name in sorted(set(active) | set(reserved)):
+            running = []
+            for task in active.get(name) or []:
+                kwargs = task.get("kwargs") or {}
+                started = task.get("time_start")
+                running.append(
+                    {
+                        "task_id": task.get("id"),
+                        "job_id": kwargs.get("job_id"),
+                        "task": str(task.get("name") or "").split(".")[-1],
+                        "running_seconds": (
+                            round(time.time() - float(started), 1) if started else None
+                        ),
+                    }
+                )
+            workers.append(
+                {
+                    "name": name,
+                    "active": running,
+                    "reserved": len(reserved.get(name) or []),
+                }
+            )
+    except Exception as exc:
+        celery_error = f"Worker inspect unavailable: {exc}"
+
+    active_jobs: list[dict[str, Any]] = []
+    try:
+        with SessionLocal() as db:
+            rows = (
+                db.query(Job)
+                .filter(Job.status.in_(["queued", "processing"]))
+                .order_by(Job.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            now = datetime.now(timezone.utc)
+            for row in rows:
+                created = getattr(row, "created_at", None)
+                age_seconds: float | None = None
+                if created is not None:
+                    try:
+                        started_at = created
+                        if started_at.tzinfo is None:
+                            started_at = started_at.replace(tzinfo=timezone.utc)
+                        age_seconds = round((now - started_at).total_seconds(), 1)
+                    except Exception:
+                        age_seconds = None
+                active_jobs.append(
+                    {
+                        "id": str(row.id),
+                        "name": row.name,
+                        "status": row.status,
+                        "created_at": created.isoformat() if created else None,
+                        "age_seconds": age_seconds,
+                    }
+                )
+    except Exception:
+        logger.warning("Active job listing unavailable", exc_info=True)
+
+    return JSONResponse(
+        content={
+            "db_counts": counts,
+            "workers": workers,
+            "celery_error": celery_error,
+            "active_jobs": active_jobs,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+
 @app.get("/api/job/{job_id}")
 @app.get("/api/jobs/{job_id}")
 async def get_job_status(job_id: str, request: Request):
     job = _require_job_access(job_id, request)
     return JSONResponse(content=job)
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, request: Request):
+    """Cancel a queued or running analysis job (admin only).
+
+    Cooperative cancellation: the job is marked ``cancelled`` in the
+    database (plus in-memory/job.json when present), which workers honor at
+    task start and at every pipeline stage boundary. Queued jobs therefore
+    die without ever running; a running job stops at its next stage. No
+    broker revoke is used — none exists that works on the threads pool.
+    """
+    _require_current_user(request, admin_only=True)
+    job = _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    status = str(job.get("status") or "")
+    if status == "cancelled":
+        return JSONResponse(
+            content={
+                "job_id": job_id,
+                "status": "cancelled",
+                "cancelled": True,
+                "message": "Job was already cancelled",
+            }
+        )
+    if status in ("completed", "failed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job already {status}; only queued or running jobs can be cancelled",
+        )
+    try:
+        _update_job_status_in_db(job_id, "cancelled", "Cancelled by admin")
+    except Exception:
+        logger.warning("Could not mark job %s cancelled in DB", job_id)
+    if job_id in _jobs:
+        try:
+            _jobs[job_id]["status"] = "cancelled"
+            _persist_job(job_id)
+        except Exception:
+            logger.warning("Could not mark job %s cancelled locally", job_id)
+    return JSONResponse(
+        content={
+            "job_id": job_id,
+            "status": "cancelled",
+            "cancelled": True,
+            "message": "Cancellation requested — running stages stop at the next boundary",
+        }
+    )
 
 
 def _load_viva_outcomes(job_id: str) -> list[dict[str, Any]]:
