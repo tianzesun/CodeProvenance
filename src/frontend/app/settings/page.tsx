@@ -727,9 +727,12 @@ export default function SettingsPage() {
     }
   };
 
-  // Load the service overview whenever the System tab opens.
+  // Load the service overview whenever the System tab opens — every time,
+  // not just the first: provider/default changes made on other tabs (or a
+  // previously failed fetch) would otherwise leave a stale tile that
+  // disagrees with the saved configuration.
   useEffect(() => {
-    if (activeTab === 'system' && !sysStatus && !sysLoading && !sysError) void refreshSystemStatus();
+    if (activeTab === 'system' && !sysLoading) void refreshSystemStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
