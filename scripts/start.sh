@@ -379,7 +379,18 @@ else
         if curl -s "http://$BACKEND_HOST:$BACKEND_PORT/health" >/dev/null 2>&1; then
             echo "✔ Backend ready (GPU container)"
             echo "--- container torch ---"
-            docker exec "$GPU_CONTAINER" "$GPU_PY" -c "import torch; print('torch', torch.__version__, '| CUDA build:', torch.version.cuda, '| cuda_available:', torch.cuda.is_available())" 2>&1 || echo "(torch probe failed — backend runs, but check GPU support)"
+            TORCH_INFO="$(docker exec "$GPU_CONTAINER" "$GPU_PY" -c "import torch; print('torch', torch.__version__, '| CUDA build:', torch.version.cuda, '| cuda_available:', torch.cuda.is_available())" 2>&1)" || TORCH_INFO="torch probe failed"
+            printf '%s\n' "$TORCH_INFO"
+            if printf '%s' "$TORCH_INFO" | grep -q "cuda_available: False" \
+                && docker exec "$GPU_CONTAINER" nvidia-smi -L 2>/dev/null | grep -qi "gb10\|blackwell"; then
+                echo "⚠️  GB10/Blackwell GPU detected but this image's torch has no CUDA:"
+                echo "   the base image predates GB10 support. Re-run with the newest"
+                echo "   NGC PyTorch py3 tag from the NGC catalog, e.g.:"
+                echo "     GPU_IMAGE=nvcr.io/nvidia/pytorch:<newest-tag>-py3 BACKEND_GPU=1 ./scripts/restart.sh"
+                echo "   (confirm the tag pulls first: docker pull <same image>)"
+            elif printf '%s' "$TORCH_INFO" | grep -q "cuda_available: False"; then
+                echo "⚠️  Container torch has no CUDA — check the image's CUDA build with: docker exec $GPU_CONTAINER $GPU_PY -c \"import torch; print(torch.version.cuda)\""
+            fi
             break
         fi
         if [ "$i" -eq 120 ]; then
