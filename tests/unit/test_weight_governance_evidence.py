@@ -275,3 +275,57 @@ class TestValidationChangedEngines:
         assert block["needs_validation"] is True
         assert block["changed_engines"] == [first_engine]
         assert any("validation_run_id" in warning for warning in block["warnings"])
+
+
+class TestGovernanceFullLoop:
+    """The user-visible flow through real endpoints: warn → attach → clear."""
+
+    def test_flag_warn_attach_clear(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Test that auto-attach resolves a flagged config end to end."""
+        import json
+
+        from src.backend.api import server
+        from src.backend.engines.scoring import fusion_engine
+
+        store = {
+            "config": {
+                "weights": {"ast": 0.5, "token": 0.5},
+                "advanced": {"weights_need_validation": True},
+            }
+        }
+        monkeypatch.setattr(
+            fusion_engine,
+            "load_engine_config",
+            lambda: copy.deepcopy(store["config"]),
+        )
+
+        def fake_save(config: dict) -> None:
+            store["config"] = copy.deepcopy(config)
+
+        monkeypatch.setattr(fusion_engine, "save_engine_config", fake_save)
+        (tmp_path / "run-1.json").write_text(json.dumps(_labeled_run("run-1")))
+        monkeypatch.setattr(server, "BENCHMARK_RUNS_DIR", tmp_path)
+        monkeypatch.setattr(server, "_authenticate_request", _fake_admin)
+        client = TestClient(server.app)
+        cookies = _cookie_jar()
+
+        flagged = client.get("/api/settings/validation", cookies=cookies)
+        assert flagged.status_code == 200, flagged.text
+        assert flagged.json()["weight_governance"]["needs_validation"] is True
+        assert any(
+            "validation_run_id" in warning
+            for warning in flagged.json()["weight_governance"]["warnings"]
+        )
+
+        attached = client.post(
+            "/api/settings/weight-governance-evidence/auto", cookies=cookies
+        )
+        assert attached.status_code == 200, attached.text
+        assert attached.json()["cleared"] is True
+
+        cleared = client.get("/api/settings/validation", cookies=cookies)
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json()["weight_governance"]["needs_validation"] is False
+        assert cleared.json()["valid"] is True
