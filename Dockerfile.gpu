@@ -28,13 +28,19 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/requirements.txt
-RUN grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' \
+# Dev/test tooling (pytest, black, ruff, flake8, mypy) has no runtime imports
+# and stays out of the image. The pip cache mount survives failed builds so
+# flaky networks resume downloads instead of restarting them — without
+# bloating the final image the way a kept cache dir would.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    grep -v -e '^torch==' -e '^--extra-index-url' -e '^#' -e '^[[:space:]]*$' \
+        -e '^pytest' -e '^black==' -e '^ruff==' -e '^flake8==' -e '^mypy==' \
         /tmp/requirements.txt > /tmp/requirements-notorch.txt \
     && PIP_ARGS="" \
     && if [ -n "$PIP_INDEX_URL" ]; then PIP_ARGS="$PIP_ARGS --index-url $PIP_INDEX_URL"; fi \
     && if [ -n "$PIP_TRUSTED_HOST" ]; then PIP_ARGS="$PIP_ARGS --trusted-host $PIP_TRUSTED_HOST"; fi \
     # shellcheck disable=SC2086: PIP_ARGS word-splitting is intentional here
-    && pip install --break-system-packages --retries 10 --timeout 60 $PIP_ARGS --no-cache-dir \
+    && pip install --break-system-packages --retries 10 --timeout 60 $PIP_ARGS \
         -r /tmp/requirements-notorch.txt \
     && rm -f /tmp/requirements.txt /tmp/requirements-notorch.txt
 

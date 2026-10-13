@@ -232,7 +232,7 @@ for url in ('https://pypi.org/simple/uvicorn/', 'https://files.pythonhosted.org/
     BUILT_HASH="$(docker image inspect -f '{{index .Config.Labels "req-hash"}}' "$GPU_IMG" 2>/dev/null || true)"
     if [ "$BUILT_HASH" != "$REQ_HASH" ]; then
         echo "Building GPU backend image (deps bake in; first build takes a while)..."
-        docker build --network host -f "$GPU_DOCKERFILE" \
+        DOCKER_BUILDKIT=1 docker build --network host -f "$GPU_DOCKERFILE" \
             --build-arg "BASE_IMAGE=$GPU_IMAGE" \
             --build-arg "PIP_INDEX_URL=${PIP_INDEX_URL:-}" \
             --build-arg "PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-}" \
