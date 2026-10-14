@@ -9388,6 +9388,59 @@ async def cancel_job(job_id: str, request: Request):
     )
 
 
+@app.post("/api/jobs/cancel-all")
+async def cancel_all_jobs(request: Request):
+    """Cancel every queued or running analysis job (admin only).
+
+    Same cooperative mechanism as the single-job endpoint: each active job
+    is marked ``cancelled`` (DB plus in-memory/job.json when present) and
+    workers honor the flag at task start and stage boundaries. Only
+    queued/processing rows are selected, so terminal jobs are never
+    touched. Never fails on a single bad row — per-job problems are
+    collected in the response.
+    """
+    _require_current_user(request, admin_only=True)
+    cancelled: list[str] = []
+    skipped: list[dict[str, str]] = []
+    try:
+        with SessionLocal() as db:
+            rows = (
+                db.query(Job)
+                .filter(Job.status.in_(["queued", "processing"]))
+                .order_by(Job.created_at.desc())
+                .all()
+            )
+            targets = [(str(row.id), str(row.status)) for row in rows]
+    except Exception:
+        logger.warning("Could not list active jobs for cancel-all", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not list active jobs")
+    for target_id, target_status in targets:
+        try:
+            _update_job_status_in_db(target_id, "cancelled", "Cancelled by admin")
+        except Exception:
+            logger.warning("Could not mark job %s cancelled in DB", target_id)
+            skipped.append({"id": target_id, "status": target_status})
+            continue
+        if target_id in _jobs:
+            try:
+                _jobs[target_id]["status"] = "cancelled"
+                _persist_job(target_id)
+            except Exception:
+                logger.warning("Could not mark job %s cancelled locally", target_id)
+        cancelled.append(target_id)
+    return JSONResponse(
+        content={
+            "cancelled": cancelled,
+            "skipped": skipped,
+            "message": (
+                f"Cancelled {len(cancelled)} job(s)"
+                if cancelled
+                else "No active jobs to cancel"
+            ),
+        }
+    )
+
+
 def _load_viva_outcomes(job_id: str) -> list[dict[str, Any]]:
     """Load recorded viva outcomes for a job as serialized dicts.
 

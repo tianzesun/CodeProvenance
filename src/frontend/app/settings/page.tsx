@@ -649,6 +649,7 @@ export default function SettingsPage() {
   const [queueError, setQueueError] = useState<string | null>(null);
   const [killArmed, setKillArmed] = useState<string | null>(null);
   const [killMessage, setKillMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [killAllArmed, setKillAllArmed] = useState<boolean>(false);
 
   const serviceTone = (status: string): string =>
     status === 'up'
@@ -824,6 +825,23 @@ export default function SettingsPage() {
       await refreshQueue();
     } catch (err) {
       setKillMessage({ ok: false, text: describeError(err, 'Could not cancel job.') });
+    }
+  };
+
+  const killAllJobs = async (): Promise<void> => {
+    setKillMessage(null);
+    try {
+      const res = await apiClient.post('/api/jobs/cancel-all', {});
+      const body = (res.data || {}) as { message?: string; cancelled?: unknown[]; skipped?: unknown[] };
+      const extra = Array.isArray(body.skipped) && body.skipped.length > 0 ? ` (${body.skipped.length} skipped)` : '';
+      setKillMessage({
+        ok: true,
+        text: (body.message || 'Bulk cancellation requested.') + extra,
+      });
+      setKillAllArmed(false);
+      await refreshQueue();
+    } catch (err) {
+      setKillMessage({ ok: false, text: describeError(err, 'Could not cancel jobs.') });
     }
   };
 
@@ -1747,6 +1765,34 @@ export default function SettingsPage() {
                     {queueLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                     {queueLoading ? 'Checking…' : 'Refresh'}
                   </button>
+                  {killAllArmed ? (
+                    <span className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void killAllJobs()}
+                        className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-red-700"
+                      >
+                        Confirm kill all ({queueData?.active_jobs.length ?? 0})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setKillAllArmed(false)}
+                        className="rounded-lg border border-slate-200 dark:border-slate-800 px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900"
+                      >
+                        Keep
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setKillAllArmed(true); setKillMessage(null); }}
+                      disabled={(queueData?.active_jobs.length ?? 0) === 0}
+                      title={(queueData?.active_jobs.length ?? 0) === 0 ? 'No active jobs to cancel' : undefined}
+                      className="flex shrink-0 items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/20 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-500/10"
+                    >
+                      Kill all
+                    </button>
+                  )}
                 </div>
                 {queueError && (
                   <div role="alert" className="mt-4 text-xs text-red-600 dark:text-red-400">{queueError}</div>

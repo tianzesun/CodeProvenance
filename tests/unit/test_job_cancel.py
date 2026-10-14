@@ -202,3 +202,43 @@ class TestCooperativeCancel:
             assert server._jobs[job_id]["status"] == "cancelled"
         finally:
             server._jobs.pop(job_id, None)
+
+
+class TestCancelAllJobsEndpoint:
+    """POST /api/jobs/cancel-all behavior."""
+
+    def test_cancels_active_leaves_terminal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that active jobs cancel while terminal rows are untouched."""
+        monkeypatch.setattr(server, "_authenticate_request", _fake_admin)
+        with SessionLocal() as db:
+            tenant = _make_tenant(db, "bulk")
+            mine_active = {
+                _make_job(db, tenant.id, "queued", "bq"),
+                _make_job(db, tenant.id, "processing", "bp"),
+            }
+            mine_done = _make_job(db, tenant.id, "completed", "bd")
+            mine_failed = _make_job(db, tenant.id, "failed", "bf")
+        client = TestClient(server.app)
+        response = client.post("/api/jobs/cancel-all", cookies=_cookie_jar())
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert mine_active <= set(body["cancelled"])
+        with SessionLocal() as db:
+            statuses = {
+                row.id: row.status
+                for row in db.query(Job)
+                .filter(Job.id.in_(list(mine_active) + [mine_done, mine_failed]))
+                .all()
+            }
+        assert all(statuses[job_id] == "cancelled" for job_id in mine_active)
+        assert statuses[mine_done] == "completed"
+        assert statuses[mine_failed] == "failed"
+
+    def test_cancel_all_requires_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that professors cannot bulk-cancel jobs."""
+        monkeypatch.setattr(server, "_authenticate_request", _fake_professor)
+        client = TestClient(server.app)
+        response = client.post("/api/jobs/cancel-all", cookies=_cookie_jar())
+        assert response.status_code == 403
