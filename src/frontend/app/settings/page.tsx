@@ -3,8 +3,7 @@
 
 'use client';
 
-import React from 'react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
@@ -156,6 +155,23 @@ const FIELD_TABS: Record<string, string> = {
 const MAX_SOURCE_URLS = 100;
 const FALLBACK_THRESHOLD = 0.75; // the "balanced" preset; was 0.82, which matched no preset
 
+// Which accordion holds each validated field. A section that is collapsed hides its errors, so a
+// failed save opens every section that contains one.
+const FIELD_ACCORDIONS: Record<string, string> = {
+  max_file_size_mb: 'systemLimits',
+  max_files_per_job: 'systemLimits',
+  batch_size: 'systemLimits',
+  source_scan_sites: 'publicSources',
+  webhook_url: 'webhooks',
+  email_from: 'emailDelivery',
+  email_host: 'emailDelivery',
+  email_port: 'emailDelivery',
+  audit_retention_days: 'auditLogging',
+  embedding_server_url: 'embeddingAdvanced',
+  embedding_server_port: 'embeddingAdvanced',
+  embedding_batch_size: 'embeddingAdvanced',
+};
+
 function tabForField(key: string): string | undefined {
   return FIELD_TABS[key] ?? FIELD_TABS[key.split(':')[0]];
 }
@@ -190,7 +206,19 @@ function safeHref(value: unknown): string | undefined {
 
 function formatPct(value: unknown): string {
   const n = Number(value);
-  return value === null || value === undefined || Number.isNaN(n) ? '—' : `${Math.round(n * 100)}%`;
+  return value === null || value === undefined || value === '' || Number.isNaN(n) ? '—' : `${Math.round(n * 100)}%`;
+}
+
+/** Locale date-time, or '' when the server sent nothing usable (never "Invalid Date"). */
+function formatDateTime(value: unknown): string {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('en-CA');
+}
+
+function checkedSuffix(value: unknown): string {
+  const text = formatDateTime(value);
+  return text ? `, last checked ${text}` : '';
 }
 
 function validateSettings(
@@ -212,7 +240,7 @@ function validateSettings(
     if (value === '' || typeof value !== 'number' || Number.isNaN(value)) {
       errors[key] = `${rule.label}: enter a number.`;
     } else if (value < rule.min || value > rule.max) {
-      errors[key] = `${rule.label} must be between ${rule.min.toLocaleString('en-US')} and ${rule.max.toLocaleString('en-US')}.`;
+      errors[key] = `${rule.label} must be between ${rule.min.toLocaleString('en-CA')} and ${rule.max.toLocaleString('en-CA')}.`;
     }
   }
 
@@ -345,6 +373,117 @@ const MAIN_TABS = [
   },
 ];
 
+const SENSITIVITY_PRESETS = [
+  { id: 'strict', label: 'Strict', hint: 'Flags more pairs, good for early triage' },
+  { id: 'balanced', label: 'Balanced', hint: 'Recommended for most courses' },
+  { id: 'conservative', label: 'Conservative', hint: 'Fewer flags, for formal cases' },
+] as const;
+
+// Calibration findings from the last read-only benchmark run.
+const CALIB_METRIC_LABELS: Record<string, string> = {
+  f1: 'F1',
+  auc_roc: 'AUC',
+  optimal_threshold: 'Best threshold',
+  accuracy: 'Accuracy',
+  precision: 'Precision',
+  recall: 'Recall',
+  total_pairs: 'Pairs',
+};
+const formatCalibMetric = (metric: string, value: number): string =>
+  metric === 'total_pairs' ? String(Math.round(value)) : value.toFixed(2);
+
+// Weight-governance audit trail (who changed what, against which proof).
+interface WeightAuditEntry {
+  id: string;
+  action: string;
+  actor_user_id?: string;
+  evidence?: Record<string, unknown>;
+  allowed?: boolean;
+  note?: string;
+  created_at?: string;
+}
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  weights_updated: 'Weights updated',
+  evidence_attached: 'Evidence attached',
+  reverted_to_defaults: 'Reverted to defaults',
+};
+
+// Shapes mirror GET /api/system/status.
+interface ServiceStatusEntry {
+  status: string;
+  label: string;
+  detail?: string;
+  latency_ms?: number;
+  verified?: boolean;
+  provider?: string;
+  base_url?: string;
+  model?: string;
+  models_available?: number;
+  default_provider?: string;
+  providers?: ServiceStatusEntry[];
+}
+interface SystemStatusPayload {
+  checked_at: string;
+  status: string;
+  services: Record<string, ServiceStatusEntry>;
+}
+
+// Shapes mirror GET /api/jobs/queue.
+interface QueueWorkerTask {
+  task_id?: string;
+  job_id?: string;
+  task: string;
+  running_seconds?: number;
+}
+interface QueueWorker {
+  name: string;
+  active: QueueWorkerTask[];
+  reserved: number;
+}
+interface QueueJob {
+  id: string;
+  name: string;
+  status: string;
+  created_at?: string;
+  age_seconds?: number;
+}
+interface QueuePayload {
+  db_counts: Record<string, number>;
+  workers: QueueWorker[];
+  celery_error?: string;
+  active_jobs: QueueJob[];
+  checked_at: string;
+}
+
+// A missing array or object in either payload used to throw during render and blank the whole page.
+function normalizeStatus(raw: unknown): SystemStatusPayload | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Partial<SystemStatusPayload>;
+  return {
+    checked_at: r.checked_at ?? '',
+    status: r.status ?? 'unknown',
+    services: r.services && typeof r.services === 'object' ? r.services : {},
+  };
+}
+
+function normalizeQueue(raw: unknown): QueuePayload | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Partial<QueuePayload>;
+  return {
+    db_counts: r.db_counts && typeof r.db_counts === 'object' ? r.db_counts : {},
+    workers: Array.isArray(r.workers)
+      ? r.workers.map((worker) => ({
+          ...worker,
+          active: Array.isArray(worker?.active) ? worker.active : [],
+          reserved: Number(worker?.reserved) || 0,
+        }))
+      : [],
+    celery_error: r.celery_error,
+    active_jobs: Array.isArray(r.active_jobs) ? r.active_jobs : [],
+    checked_at: r.checked_at ?? '',
+  };
+}
+
 export default function SettingsPage() {
   const { user, loading: authLoading } = useAuth();
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -358,17 +497,6 @@ export default function SettingsPage() {
 
   // Calibration findings from the last read-only benchmark run. Shown under
   // the Run Calibration button; cleared on each new run.
-  const CALIB_METRIC_LABELS: Record<string, string> = {
-    f1: 'F1',
-    auc_roc: 'AUC',
-    optimal_threshold: 'Best threshold',
-    accuracy: 'Accuracy',
-    precision: 'Precision',
-    recall: 'Recall',
-    total_pairs: 'Pairs',
-  };
-  const formatCalibMetric = (metric: string, value: number): string =>
-    metric === 'total_pairs' ? String(Math.round(value)) : value.toFixed(2);
   const [calibResult, setCalibResult] = useState<Record<string, number> | null>(null);
 
   // Weight-governance evidence form: the Configuration Check warns until a
@@ -380,20 +508,6 @@ export default function SettingsPage() {
   const [govConfirmRevert, setGovConfirmRevert] = useState<boolean>(false);
 
   // Weight-governance audit trail (who changed what, against which proof).
-  interface WeightAuditEntry {
-    id: string;
-    action: string;
-    actor_user_id?: string;
-    evidence?: Record<string, unknown>;
-    allowed?: boolean;
-    note?: string;
-    created_at?: string;
-  }
-  const AUDIT_ACTION_LABELS: Record<string, string> = {
-    weights_updated: 'Weights updated',
-    evidence_attached: 'Evidence attached',
-    reverted_to_defaults: 'Reverted to defaults',
-  };
   const [auditEntries, setAuditEntries] = useState<WeightAuditEntry[]>([]);
   const loadWeightAudit = async (): Promise<void> => {
     try {
@@ -406,7 +520,6 @@ export default function SettingsPage() {
   };
   useEffect(() => {
     if (validationResult?.weight_governance?.needs_validation) void loadWeightAudit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [validationResult?.weight_governance?.needs_validation]);
 
   const govEvidenceText = (value: unknown): string => {
@@ -434,24 +547,24 @@ export default function SettingsPage() {
   // aligned on wrap, resize, and font load.
   const tabListRef = useRef<HTMLDivElement | null>(null);
   const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const [indicator, setIndicator] = useState<{ x: number; width: number } | null>(null);
+  const [indicator, setIndicator] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const settingsReady = Boolean(settings);
 
+  // offsetLeft/offsetTop are relative to the tab list (it is `relative`), so the pill also lands on the
+  // right row when the tabs wrap on a narrow screen. The old version only measured x and width.
   const syncIndicator = useCallback(() => {
-    const list = tabListRef.current;
     const button = tabButtonRefs.current[activeTab];
-    if (!list || !button) return;
-    const listBox = list.getBoundingClientRect();
-    const buttonBox = button.getBoundingClientRect();
-    // Ignore zero-size measurements (hidden/collapsed container) so we never
-    // park the pill at 0px and lose the active tab's background.
-    if (buttonBox.width === 0 || listBox.width === 0) return;
-    setIndicator({ x: buttonBox.left - listBox.left, width: buttonBox.width });
+    if (!button || button.offsetWidth === 0) return;
+    const next = { x: button.offsetLeft, y: button.offsetTop, width: button.offsetWidth, height: button.offsetHeight };
+    setIndicator((prev) =>
+      prev && prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height
+        ? prev
+        : next,
+    );
   }, [activeTab]);
 
-  // Measure on mount and on every active-tab change. useLayoutEffect alone
-  // missed the first paint because the tab bar mounts only after the settings
-  // request resolves, and a missed measurement left the active tab invisible
-  // until the user clicked another tab.
+  // The tab bar only mounts once the settings request resolves, so `settingsReady` re-runs these effects
+  // at that moment; without it the first measurement was missed.
   useLayoutEffect(() => {
     syncIndicator();
     // Re-measure once webfonts settle, since a font swap reflows the labels.
@@ -464,12 +577,16 @@ export default function SettingsPage() {
         cancelled = true;
       };
     }
-  }, [syncIndicator]);
+  }, [syncIndicator, settingsReady]);
 
+  // Fires on resize, wrap and sidebar collapse, not just window resizes.
   useEffect(() => {
-    window.addEventListener('resize', syncIndicator);
-    return () => window.removeEventListener('resize', syncIndicator);
-  }, [syncIndicator]);
+    const list = tabListRef.current;
+    if (!list || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => syncIndicator());
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [syncIndicator, settingsReady]);
 
   const [accordions, setAccordions] = useState<Record<string, boolean>>({
     systemLimits: true,
@@ -551,6 +668,10 @@ export default function SettingsPage() {
       && JSON.stringify(buildPayload(settings as Settings, webhookUrl, sourceUrls, editedSecrets)) !== savedSnapshot,
     [settings, webhookUrl, sourceUrls, editedSecrets, savedSnapshot],
   );
+  const errorCount = Object.keys(fieldErrors).length;
+  const rawThreshold = Number(settings?.default_threshold ?? FALLBACK_THRESHOLD);
+  const threshold = Number.isFinite(rawThreshold) ? rawThreshold : FALLBACK_THRESHOLD;
+  const activePreset = SENSITIVITY_PRESETS.find((preset) => Math.abs(threshold - SENSITIVITY_THRESHOLDS[preset.id]) <= 0.005);
 
   // Leaving or reloading the page with unsaved edits would silently discard them.
   useEffect(() => {
@@ -625,55 +746,12 @@ export default function SettingsPage() {
 
   // Live service-health overview (database, embedding, LLM, GPU, disk) for
   // the System tab. Shapes mirror GET /api/system/status.
-  interface ServiceStatusEntry {
-    status: string;
-    label: string;
-    detail?: string;
-    latency_ms?: number;
-    verified?: boolean;
-    provider?: string;
-    base_url?: string;
-    model?: string;
-    models_available?: number;
-    default_provider?: string;
-    providers?: ServiceStatusEntry[];
-  }
-  interface SystemStatusPayload {
-    checked_at: string;
-    status: string;
-    services: Record<string, ServiceStatusEntry>;
-  }
   const [sysStatus, setSysStatus] = useState<SystemStatusPayload | null>(null);
   const [sysLoading, setSysLoading] = useState(false);
   const [sysError, setSysError] = useState<string | null>(null);
 
   // Job queue monitor (System tab): live counts, worker activity, active
   // jobs with admin kill. Shapes mirror GET /api/jobs/queue.
-  interface QueueWorkerTask {
-    task_id?: string;
-    job_id?: string;
-    task: string;
-    running_seconds?: number;
-  }
-  interface QueueWorker {
-    name: string;
-    active: QueueWorkerTask[];
-    reserved: number;
-  }
-  interface QueueJob {
-    id: string;
-    name: string;
-    status: string;
-    created_at?: string;
-    age_seconds?: number;
-  }
-  interface QueuePayload {
-    db_counts: Record<string, number>;
-    workers: QueueWorker[];
-    celery_error?: string;
-    active_jobs: QueueJob[];
-    checked_at: string;
-  }
   const [queueData, setQueueData] = useState<QueuePayload | null>(null);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
@@ -800,7 +878,7 @@ export default function SettingsPage() {
     setSysError(null);
     try {
       const res = await apiClient.get('/api/system/status');
-      setSysStatus((res.data || null) as SystemStatusPayload | null);
+      setSysStatus(normalizeStatus(res.data));
     } catch (err) {
       setSysError(describeError(err, 'Could not load service status.'));
     } finally {
@@ -817,35 +895,42 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  const refreshQueue = async (): Promise<void> => {
-    setQueueLoading(true);
-    setQueueError(null);
+  // Background polls are "silent": no spinner flicker every 10 s, and a poll never overlaps a slow one.
+  const queueInFlight = useRef(false);
+  const refreshQueue = async (options: { silent?: boolean } = {}): Promise<void> => {
+    if (options.silent && queueInFlight.current) return;
+    queueInFlight.current = true;
+    if (!options.silent) {
+      setQueueLoading(true);
+      setQueueError(null);
+    }
     try {
       const res = await apiClient.get('/api/jobs/queue');
-      setQueueData((res.data || null) as QueuePayload | null);
+      setQueueData(normalizeQueue(res.data));
+      setQueueError(null);
     } catch (err) {
       setQueueError(describeError(err, 'Could not load job queue.'));
     } finally {
-      setQueueLoading(false);
+      queueInFlight.current = false;
+      if (!options.silent) setQueueLoading(false);
     }
   };
 
-  // Queue monitor polls while the System tab is open so stuck jobs surface
-  // without manual refreshes; the timer dies with the tab switch.
+  // Queue monitor polls while the System tab is open so stuck jobs surface without manual refreshes.
+  // It pauses while the browser tab is hidden, and the timer dies with the tab switch.
   useEffect(() => {
     if (activeTab !== 'system') return;
     void refreshQueue();
     const timer = setInterval(() => {
-      void refreshQueue();
+      if (!document.hidden) void refreshQueue({ silent: true });
     }, 10000);
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   const killJob = async (jobId: string): Promise<void> => {
     setKillMessage(null);
     try {
-      const res = await apiClient.post(`/api/jobs/${jobId}/cancel`, {});
+      const res = await apiClient.post(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, {});
       const body = (res.data || {}) as { message?: string };
       setKillMessage({
         ok: true,
@@ -1002,6 +1087,10 @@ export default function SettingsPage() {
     if (errorKeys.length > 0) {
       const tab = tabForField(errorKeys[0]);
       if (tab) setActiveTab(tab);
+      const toOpen = errorKeys.map((key) => FIELD_ACCORDIONS[key]).filter(Boolean);
+      if (toOpen.length > 0) {
+        setAccordions((prev) => ({ ...prev, ...Object.fromEntries(toOpen.map((id) => [id, true])) }));
+      }
       setError(`Fix the ${errorKeys.length} highlighted field${errorKeys.length === 1 ? '' : 's'} before saving.`);
       return;
     }
@@ -1016,34 +1105,36 @@ export default function SettingsPage() {
     let ignoredProvider = '';
 
     try {
-      const saveRes = await apiClient.patch('/api/settings', buildPayload(settings, webhookUrl, sourceUrls, editedSecrets));
-      ignoredProvider = String(
-        ((saveRes.data as unknown as Record<string, unknown>)?.ignored as Record<string, unknown> | undefined)?.llm_provider || '',
-      );
-    } catch (err: unknown) {
-      setError(describeError(err, 'Failed to save settings.'));
-      setSaving(false);
-      return;
-    }
-
-    // The save itself worked. A failed re-read must not be reported as a failed save.
-    try {
-      const fresh = await apiClient.get('/api/settings');
-      applyLoaded(fresh.data);
-      const keptProvider = String((fresh.data as unknown as Record<string, unknown>)?.llm_provider || '');
-      if (ignoredProvider) {
-        setError(`The server refused the default provider value: ${ignoredProvider}`);
-      } else if (submittedProvider && keptProvider && keptProvider !== submittedProvider) {
-        setError(`The default provider change was not kept by the server (still “${keptProvider}”). Restart the backend with the latest pull and try again.`);
-      } else {
-        showSuccess('Settings saved. Recommended profile applied.');
+      try {
+        const saveRes = await apiClient.patch('/api/settings', buildPayload(settings, webhookUrl, sourceUrls, editedSecrets));
+        ignoredProvider = String(
+          ((saveRes.data as unknown as Record<string, unknown>)?.ignored as Record<string, unknown> | undefined)?.llm_provider || '',
+        );
+      } catch (err: unknown) {
+        setError(describeError(err, 'Failed to save settings.'));
+        return;
       }
-    } catch {
-      showSuccess('Settings saved, but the page couldn’t refresh. Reload to see the stored values.', 6000);
+
+      // The save itself worked. A failed re-read must not be reported as a failed save.
+      try {
+        const fresh = await apiClient.get('/api/settings');
+        applyLoaded(fresh.data);
+        const keptProvider = String((fresh.data as unknown as Record<string, unknown>)?.llm_provider || '');
+        if (ignoredProvider) {
+          setError(`The server refused the default provider value: ${ignoredProvider}`);
+        } else if (submittedProvider && keptProvider && keptProvider !== submittedProvider) {
+          setError(`The default provider change was not kept by the server (still “${keptProvider}”). Check that the backend is up to date and try again.`);
+        } else {
+          showSuccess('Settings saved.');
+        }
+      } catch {
+        showSuccess('Settings saved, but the page couldn’t refresh. Reload to see the stored values.', 6000);
+      }
+      // Any earlier configuration check described the old settings.
+      setValidationResult(null);
+    } finally {
+      setSaving(false);
     }
-    // Any earlier configuration check described the old settings.
-    setValidationResult(null);
-    setSaving(false);
   };
 
   const discardChanges = () => {
@@ -1051,6 +1142,37 @@ export default function SettingsPage() {
       applyLoaded(serverSettingsRef.current);
       setError(null);
     }
+  };
+
+  // Ctrl/Cmd+S saves instead of opening the browser's "save page" dialog.
+  const saveRef = useRef(saveSettings);
+  useEffect(() => {
+    saveRef.current = saveSettings;
+  });
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        void saveRef.current();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Arrow keys / Home / End move between tabs, as the ARIA tabs pattern expects.
+  const onTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const last = MAIN_TABS.length - 1;
+    let next = -1;
+    if (event.key === 'ArrowRight') next = index === last ? 0 : index + 1;
+    else if (event.key === 'ArrowLeft') next = index === 0 ? last : index - 1;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = last;
+    if (next === -1) return;
+    event.preventDefault();
+    const id = MAIN_TABS[next].id;
+    setActiveTab(id);
+    tabButtonRefs.current[id]?.focus();
   };
 
   if (authLoading || !settings) {
@@ -1076,7 +1198,7 @@ export default function SettingsPage() {
 
   return (
     <DashboardLayout requiredRole="admin">
-      <div className="theme-page-container space-y-6">
+      <div className={`theme-page-container space-y-6 ${dirty ? 'pb-24' : ''}`}>
         {/* Header - title and description follow the active category so the page
             does not keep claiming "Detection Settings" on every tab. */}
         <PageHeader
@@ -1107,7 +1229,7 @@ export default function SettingsPage() {
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
               >
                 {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                {saving ? 'Saving...' : 'Save Settings'}
+                {saving ? 'Saving...' : 'Save changes'}
               </button>
             </div>
           }
@@ -1116,42 +1238,43 @@ export default function SettingsPage() {
 
         {/* Notifications */}
         {error && <Notice tone="red" icon={AlertTriangle}>{error}</Notice>}
-        {success && <Notice tone="green" icon={Shield}>{success}</Notice>}
+        {success && <Notice tone="green" icon={CheckCircle}>{success}</Notice>}
 
         {/* Main Tab Navigation */}
-        <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Settings Categories</div>
-        <div role="tablist" aria-label="Settings categories" className="relative flex flex-wrap gap-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-2 shadow-sm mb-6" ref={tabListRef}>
+        <div role="tablist" aria-label="Settings categories" className="relative flex flex-wrap gap-2 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-2 shadow-sm" ref={tabListRef}>
           {indicator && (
             <span
               aria-hidden="true"
-              className="settings-tab-indicator absolute top-2 bottom-2 left-0 rounded-xl shadow-lg"
+              className="settings-tab-indicator absolute left-0 top-0 rounded-xl shadow-lg transition-[transform,width,height,background-color] duration-300 ease-out motion-reduce:transition-none"
               style={{
-                transform: `translateX(${indicator.x}px)`,
+                transform: `translate(${indicator.x}px, ${indicator.y}px)`,
                 width: indicator.width,
+                height: indicator.height,
                 backgroundColor: activeTabInfo?.accent ?? '#2563eb',
                 boxShadow: `0 10px 24px -12px ${activeTabInfo?.accent ?? '#2563eb'}`,
               }}
             />
           )}
-          {MAIN_TABS.map((tab) => (
+          {MAIN_TABS.map((tab, index) => (
             <button
               key={tab.id}
               type="button"
               ref={(node) => { tabButtonRefs.current[tab.id] = node; }}
               onClick={() => setActiveTab(tab.id)}
+              onKeyDown={(event) => onTabKeyDown(event, index)}
+              tabIndex={activeTab === tab.id ? 0 : -1}
               role="tab"
               id={`settings-tab-${tab.id}`}
               aria-selected={activeTab === tab.id}
               aria-controls="settings-tabpanel"
-              // The active tab always carries its own colour: before the pill
-              // is measured it is the whole highlight, afterwards it simply
-              // matches the pill sliding underneath it.
+              // Until the pill has been measured the active tab paints its own colour; after that
+              // the pill slides underneath and the button stays transparent.
               className={`relative inline-flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-colors duration-200 ${activeTab === tab.id
-                ? 'text-white shadow-lg'
+                ? 'text-white'
                 : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'
                 }`}
               style={
-                activeTab === tab.id
+                activeTab === tab.id && !indicator
                   ? { backgroundColor: tab.accent, boxShadow: `0 10px 24px -12px ${tab.accent}` }
                   : undefined
               }
@@ -1197,22 +1320,48 @@ export default function SettingsPage() {
                       min="0.5"
                       max="1.0"
                       step="0.01"
-                      value={settings.default_threshold ?? FALLBACK_THRESHOLD}
+                      value={threshold}
                       onChange={(event) => updateSetting('default_threshold', Number(event.target.value))}
                       aria-label="Default similarity threshold"
+                      aria-valuetext={`${Math.round(threshold * 100)}% similarity`}
                       className="flex-1 accent-blue-600"
                     />
-                    <div className="min-w-[5rem] text-right">
-                      <span className="text-2xl font-semibold text-blue-600 dark:text-blue-400">{((settings.default_threshold ?? FALLBACK_THRESHOLD) * 100).toFixed(0)}%</span>
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Cutoff</div>
+                    <div className="min-w-[4.5rem] text-right">
+                      <span className="text-2xl font-semibold tabular-nums text-blue-600 dark:text-blue-400">{Math.round(threshold * 100)}%</span>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">cutoff</div>
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${(settings.default_threshold ?? FALLBACK_THRESHOLD) >= 0.8 ? 'bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-300' : (settings.default_threshold ?? FALLBACK_THRESHOLD) >= 0.7 ? 'bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'bg-blue-100 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300'}`}>
-                      {(settings.default_threshold ?? FALLBACK_THRESHOLD) >= 0.8 ? 'Conservative' : (settings.default_threshold ?? FALLBACK_THRESHOLD) >= 0.7 ? 'Balanced' : 'Strict'}
-                    </span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 leading-6">This is the default for new jobs. Can be overridden per-job.</span>
+                  <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400" aria-hidden="true">
+                    <span>Flags more pairs</span>
+                    <span>Flags fewer pairs</span>
                   </div>
+                  <div role="group" aria-label="Sensitivity presets" className="grid gap-2 sm:grid-cols-3">
+                    {SENSITIVITY_PRESETS.map((preset) => {
+                      const selected = activePreset?.id === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => updateSensitivity(preset.id)}
+                          aria-pressed={selected}
+                          className={`rounded-xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${selected
+                            ? 'border-blue-600 bg-blue-50 dark:border-blue-500 dark:bg-blue-500/10'
+                            : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-900'
+                            }`}
+                        >
+                          <span className="flex items-baseline justify-between gap-2">
+                            <span className="text-sm font-semibold text-slate-900 dark:text-white">{preset.label}</span>
+                            <span className="text-sm tabular-nums text-slate-500 dark:text-slate-400">{Math.round(SENSITIVITY_THRESHOLDS[preset.id] * 100)}%</span>
+                          </span>
+                          <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">{preset.hint}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
+                    {activePreset ? `Matches the ${activePreset.label} preset.` : 'Custom value between presets.'}{' '}
+                    This is the default for new jobs and can be overridden per job.
+                  </p>
                   {fieldErrors.default_threshold && (
                     <p role="alert" className="text-xs text-red-600 dark:text-red-400">{fieldErrors.default_threshold}</p>
                   )}
@@ -1264,6 +1413,7 @@ export default function SettingsPage() {
                         key={spec.key}
                         type="button"
                         onClick={() => setSelectedProvider(spec.key)}
+                        aria-pressed={isActive}
                         className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${isActive
                           ? 'border-blue-600 bg-blue-600 text-white shadow-sm'
                           : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700 hover:text-slate-900 dark:hover:text-white'
@@ -1282,7 +1432,7 @@ export default function SettingsPage() {
                       <div className="flex items-center gap-2">
                         <div className={`h-2.5 w-2.5 rounded-full ${activeStatus.configured ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
                         <span className="text-sm font-semibold text-slate-900 dark:text-white">{activeSpec.label}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${activeStatus.configured ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${activeStatus.configured ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                           {activeStatus.label}
                         </span>
                       </div>
@@ -1489,7 +1639,7 @@ export default function SettingsPage() {
                       {settings.moss_user_id_configured ? 'MOSS configured' : 'MOSS not configured'}
                     </span>
                   </div>
-                  <TextInput label="MOSS User ID" type="password" autoComplete="off" value={settings.moss_user_id} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
+                  <TextInput label="MOSS User ID" type="password" autoComplete="new-password" value={settings.moss_user_id} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
                 </div>
               </Accordion>
 
@@ -1543,6 +1693,7 @@ export default function SettingsPage() {
                 icon={Target}
               >
                 <SegmentedOptions
+                  label="Sensitivity"
                   options={catalog.sensitivities || catalog.review_modes || []}
                   value={profile.sensitivity}
                   onChange={updateSensitivity}
@@ -1570,6 +1721,7 @@ export default function SettingsPage() {
                 onToggle={() => setAccordions(prev => ({ ...prev, starterCodeHandling: !prev.starterCodeHandling }))}
               >
                 <SegmentedOptions
+                  label="Starter code handling"
                   options={catalog.starter_code_handling || []}
                   value={profile.starter_code_handling}
                   onChange={(value) => updateProfile('starter_code_handling', value)}
@@ -1589,6 +1741,7 @@ export default function SettingsPage() {
                 onToggle={() => setAccordions(prev => ({ ...prev, previousTermMatching: !prev.previousTermMatching }))}
               >
                 <SegmentedOptions
+                  label="Previous term matching"
                   options={catalog.previous_term_matching || []}
                   value={profile.previous_term_matching}
                   onChange={(value) => updateProfile('previous_term_matching', value)}
@@ -1608,6 +1761,7 @@ export default function SettingsPage() {
                 onToggle={() => setAccordions(prev => ({ ...prev, aiRewriteDetection: !prev.aiRewriteDetection }))}
               >
                 <SegmentedOptions
+                  label="AI rewrite detection"
                   options={catalog.ai_rewrite_detection || []}
                   value={profile.ai_rewrite_detection}
                   onChange={(value) => updateProfile('ai_rewrite_detection', value)}
@@ -1627,6 +1781,7 @@ export default function SettingsPage() {
                 onToggle={() => setAccordions(prev => ({ ...prev, reviewQueueSize: !prev.reviewQueueSize }))}
               >
                 <SegmentedOptions
+                  label="Review queue size"
                   options={catalog.result_volume || []}
                   value={profile.result_volume}
                   onChange={(value) => updateProfile('result_volume', value)}
@@ -1638,10 +1793,14 @@ export default function SettingsPage() {
                 <div className="space-y-6">
                   <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
                     <div className="text-sm font-semibold text-slate-900 dark:text-white">Active Profile Summary</div>
-                    <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{applied.recommendation}</p>
-                    <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm font-medium text-slate-900 dark:text-white">
-                      {applied.summary}
-                    </div>
+                    {applied.recommendation && (
+                      <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{applied.recommendation}</p>
+                    )}
+                    {applied.summary && (
+                      <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm font-medium text-slate-900 dark:text-white">
+                        {applied.summary}
+                      </div>
+                    )}
 
                     {/* What this means for you */}
                     <div className="mt-5 space-y-2 border-t border-slate-100 dark:border-slate-800 pt-4">
@@ -1660,18 +1819,18 @@ export default function SettingsPage() {
 
                   {applied.warnings?.length > 0 && (
                     <section className="rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-5 text-sm text-amber-800 dark:text-amber-300">
-                      {applied.warnings.map((warning: string) => <div key={warning}>{warning}</div>)}
+                      {applied.warnings.map((warning: string, i: number) => <div key={`${i}-${warning}`}>{warning}</div>)}
                     </section>
                   )}
                 </div>
 
                 <aside className="space-y-6">
                   <section className="rounded-xl border border-blue-200 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/10 p-5">
-                    <div className="text-sm font-semibold text-blue-950">System handles automatically</div>
+                    <div className="text-sm font-semibold text-blue-950 dark:text-blue-200">System handles automatically</div>
                     <div className="mt-3 space-y-2 text-sm leading-6 text-blue-800 dark:text-blue-300">
                       <div>{'\u2022'} Starter code is excluded from comparisons</div>
                       <div>{'\u2022'} Previous-term submissions are matched when available</div>
-                      <div>{'\u2022'} Runtime behavior and identical wrong answers are compared</div>
+                      <div>{'\u2022'} Runtime behaviour and identical wrong answers are compared</div>
                       <div>{'\u2022'} Thresholds are automatically adjusted</div>
                     </div>
                   </section>
@@ -1724,7 +1883,7 @@ export default function SettingsPage() {
                   <div className="flex-1">
                     <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Service Status</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                      Live health of every service this app depends on{sysStatus ? ` · checked ${new Date(sysStatus.checked_at).toLocaleString()}` : ''}.
+                      Live health of every service this app depends on{checkedSuffix(sysStatus?.checked_at)}.
                     </p>
                   </div>
                   <button
@@ -1753,7 +1912,7 @@ export default function SettingsPage() {
                       return (
                         <div key={key} className={`rounded-lg border p-3 ${serviceTone(svc.status)}`}>
                           <div className="flex items-center justify-between gap-2">
-                            <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">{svc.label}</div>
+                            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">{svc.label}</div>
                             {typeof svc.latency_ms === 'number' && svc.latency_ms > 0 && (
                               <div className="text-[11px] text-slate-400 dark:text-slate-500">{svc.latency_ms} ms</div>
                             )}
@@ -1780,7 +1939,7 @@ export default function SettingsPage() {
                   <div className="flex-1">
                     <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Job Queue</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                      Live queue depth, worker activity and active jobs{queueData ? ` · checked ${new Date(queueData.checked_at).toLocaleString()}` : ''}.
+                      Live queue depth, worker activity and active jobs{checkedSuffix(queueData?.checked_at)}.
                     </p>
                   </div>
                   <button
@@ -1940,12 +2099,12 @@ export default function SettingsPage() {
                 </div>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">Default Threshold</div>
+                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Default Threshold</div>
                     <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{(Number(settings.default_threshold ?? FALLBACK_THRESHOLD) * 100).toFixed(0)}%</div>
                     <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Similarity cutoff</div>
                   </div>
                   <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">Debug Mode</div>
+                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Debug Mode</div>
                     <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">
                       {settings.debug_mode ? (
                         <span className="text-amber-600 dark:text-amber-400">Enabled</span>
@@ -1956,8 +2115,8 @@ export default function SettingsPage() {
                     <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Verbose logging</div>
                   </div>
                   <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300">Embedding Runtime</div>
-                    <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white capitalize">{settings.embedding_runtime?.replace(/_/g, ' ') || '—'}</div>
+                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Embedding Runtime</div>
+                    <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white capitalize">{String(settings.embedding_runtime || '').replace(/_/g, ' ') || '—'}</div>
                     <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{settings.embedding_model || '—'}</div>
                   </div>
                 </div>
@@ -2195,7 +2354,7 @@ export default function SettingsPage() {
                           {auditEntries.slice(0, 5).map((entry) => (
                             <li key={entry.id} className="text-xs text-amber-800 dark:text-amber-300">
                               {AUDIT_ACTION_LABELS[entry.action] || entry.action}
-                              {entry.created_at ? ` · ${new Date(entry.created_at).toLocaleString()}` : ''}
+                              {formatDateTime(entry.created_at) ? ` · ${formatDateTime(entry.created_at)}` : ''}
                               {typeof entry.allowed === 'boolean' ? (entry.allowed ? ' · allowed' : ' · flagged') : ''}
                               {typeof entry.evidence?.validation_run_id === 'string' && entry.evidence.validation_run_id ? ` · run ${entry.evidence.validation_run_id}` : ''}
                             </li>
@@ -2225,7 +2384,7 @@ export default function SettingsPage() {
               <section className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-5 shadow-sm">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
                       <Activity size={16} />
                       Improve accuracy from past reviews
                     </div>
@@ -2283,20 +2442,12 @@ export default function SettingsPage() {
               </section>
 
               {/* Advanced: Embedding & Resource Settings */}
-              <button
-                type="button"
-                onClick={() => setAccordions(prev => ({ ...prev, embeddingAdvanced: !prev.embeddingAdvanced }))}
-                aria-expanded={accordions.embeddingAdvanced}
-                className="flex w-full items-center justify-between rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 px-4 py-2.5 text-left text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+              <Accordion
+                title="Advanced: embedding and resources"
+                description="The model, hardware and server used to compare code submissions."
+                isOpen={accordions.embeddingAdvanced}
+                onToggle={() => setAccordions(prev => ({ ...prev, embeddingAdvanced: !prev.embeddingAdvanced }))}
               >
-                <span className="flex items-center gap-2">
-                  <Zap size={16} />
-                  Advanced: Embedding & Resource Settings
-                </span>
-                <span>{accordions.embeddingAdvanced ? 'Hide' : 'Show'}</span>
-              </button>
-
-              {accordions.embeddingAdvanced && (
                 <div className="space-y-4">
                   <div className="rounded-lg border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
                     These settings control how the system processes and compares code submissions. Changes apply when you save.
@@ -2310,25 +2461,66 @@ export default function SettingsPage() {
                     <TextInput label="Embedding Server Port" type="number" value={settings.embedding_server_port} onChange={(value) => updateNumber('embedding_server_port', value)} {...numberProps('embedding_server_port')} />
                   </div>
                 </div>
-              )}
+              </Accordion>
             </div>
           )}
         </div>
       </div>
+
+      {/* Floating save bar: the header's Save button scrolls out of view on the long System tab. */}
+      {dirty && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4">
+          <div
+            role="region"
+            aria-label="Unsaved changes"
+            className="pointer-events-auto flex w-full max-w-xl flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-900/95"
+          >
+            <div className="text-sm text-slate-700 dark:text-slate-200">
+              <span className="font-semibold">You have unsaved changes.</span>
+              {errorCount > 0 && (
+                <span className="ml-1 text-red-600 dark:text-red-400">
+                  {errorCount} field{errorCount === 1 ? '' : 's'} need{errorCount === 1 ? 's' : ''} attention.
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={discardChanges}
+                disabled={saving}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                onClick={saveSettings}
+                disabled={saving}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+              >
+                {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                {saving ? 'Saving...' : 'Save changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }
 
 function Accordion({ title, description, isOpen, onToggle, children }: { title: string; description?: string; isOpen: boolean; onToggle: () => void; children: React.ReactNode }) {
-  const panelId = `accordion-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  // useId, not a slug of the title: two sections with similar titles used to share an id, and the
+  // button pointed at a panel that does not exist while the section is collapsed.
+  const panelId = useId();
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-sm overflow-hidden">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-sm">
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={isOpen}
-        aria-controls={panelId}
-        className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-900 focus-visible:ring-2 focus-visible:ring-blue-200 rounded-t-2xl"
+        aria-controls={isOpen ? panelId : undefined}
+        className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40"
       >
         <div>
           <div className="text-lg font-semibold text-slate-900 dark:text-white">{title}</div>
@@ -2339,11 +2531,11 @@ function Accordion({ title, description, isOpen, onToggle, children }: { title: 
         <ChevronDown
           size={20}
           aria-hidden="true"
-          className={`text-slate-400 dark:text-slate-500 transition-transform ${isOpen ? 'rotate-180 text-blue-600 dark:text-blue-400' : ''}`}
+          className={`shrink-0 text-slate-400 dark:text-slate-500 transition-transform motion-reduce:transition-none ${isOpen ? 'rotate-180 text-blue-600 dark:text-blue-400' : ''}`}
         />
       </button>
       {isOpen && (
-        <div id={panelId} className="border-t border-slate-200 dark:border-slate-800 px-5 pb-5 pt-4 transition-all duration-200">
+        <div id={panelId} className="border-t border-slate-200 dark:border-slate-800 px-5 pb-5 pt-4">
           {children}
         </div>
       )}
@@ -2370,21 +2562,21 @@ function SettingsGroup({ title, description, children, icon: Icon }: { title: st
   );
 }
 
-function SegmentedOptions({ options, value, onChange }: { options: { id: string; label: string }[]; value: string; onChange: (id: string) => void }) {
+function SegmentedOptions({ label, options, value, onChange }: { label: string; options: { id: string; label: string }[]; value: string; onChange: (id: string) => void }) {
   // The options come from the server's catalog; without them this used to render nothing at all.
   if (options.length === 0) {
     return <p className="text-sm text-slate-500 dark:text-slate-400">Options aren’t available right now. Reload the page.</p>;
   }
 
   return (
-    <div role="group" className="flex flex-wrap gap-2">
+    <div role="group" aria-label={label} className="flex flex-wrap gap-2">
       {options.map((option) => (
         <button
           key={option.id}
           type="button"
           onClick={() => onChange(option.id)}
           aria-pressed={value === option.id}
-          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${value === option.id ? 'bg-blue-600 text-white' : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'
+          className={`rounded-lg px-3 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${value === option.id ? 'bg-blue-600 text-white' : 'border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900'
             }`}
         >
           {option.label}
@@ -2398,16 +2590,18 @@ const FIELD_CLASS = 'mt-1 h-11 w-full rounded-lg border bg-white dark:bg-slate-9
 const FIELD_OK = 'border-slate-200 dark:border-slate-800 focus:border-blue-500 dark:focus:border-blue-500 focus:ring-blue-500/20 dark:focus:ring-blue-500/20';
 const FIELD_BAD = 'border-red-300 dark:border-red-500/50 focus:border-red-400 focus:ring-red-500/20 dark:focus:ring-red-500/20';
 
-function FieldMessages({ error, hint }: { error?: string; hint?: string }) {
+function FieldMessages({ id, error, hint }: { id?: string; error?: string; hint?: string }) {
   return (
     <>
-      {error && <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
-      {!error && hint && <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">{hint}</p>}
+      {error && <p id={id} role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {!error && hint && <p id={id} className="mt-1 text-xs text-amber-700 dark:text-amber-300">{hint}</p>}
     </>
   );
 }
 
 function TextInput({ label, value, onChange, type = 'text', placeholder = '', error, hint, min, max, autoComplete }: { label: string; value: string | number; onChange: (value: string) => void; type?: string; placeholder?: string; error?: string; hint?: string; min?: number; max?: number; autoComplete?: string }) {
+  const messageId = useId();
+  const isNumber = type === 'number';
   return (
     <label className="block">
       <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{label}</span>
@@ -2417,20 +2611,24 @@ function TextInput({ label, value, onChange, type = 'text', placeholder = '', er
         placeholder={placeholder}
         min={min}
         max={max}
-        inputMode={type === 'number' ? 'numeric' : undefined}
+        inputMode={isNumber ? 'numeric' : undefined}
         // Secret fields use "new-password" so a browser doesn't fill in the admin's own saved login.
         autoComplete={autoComplete}
         spellCheck={false}
         aria-invalid={error ? true : undefined}
+        aria-describedby={error || hint ? messageId : undefined}
+        // A focused number box changes its value when the page is scrolled with the wheel or trackpad.
+        onWheel={isNumber ? (event) => event.currentTarget.blur() : undefined}
         onChange={(event) => onChange(event.target.value)}
         className={`${FIELD_CLASS} ${error ? FIELD_BAD : FIELD_OK}`}
       />
-      <FieldMessages error={error} hint={hint} />
+      <FieldMessages id={messageId} error={error} hint={hint} />
     </label>
   );
 }
 
 function TextAreaInput({ label, value, onChange, placeholder = '', error }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; error?: string }) {
+  const messageId = useId();
   return (
     <label className="block">
       <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{label}</span>
@@ -2441,9 +2639,10 @@ function TextAreaInput({ label, value, onChange, placeholder = '', error }: { la
         rows={5}
         spellCheck={false}
         aria-invalid={error ? true : undefined}
+        aria-describedby={error ? messageId : undefined}
         className={`mt-1 w-full rounded-lg border bg-white dark:bg-slate-900 px-3 py-3 text-sm text-slate-900 dark:text-white outline-none transition focus:ring-2 ${error ? FIELD_BAD : FIELD_OK}`}
       />
-      <FieldMessages error={error} />
+      <FieldMessages id={messageId} error={error} />
     </label>
   );
 }
@@ -2457,7 +2656,7 @@ function SelectInput({ label, value, options, onChange }: { label: string; value
         onChange={(event) => onChange(event.target.value)}
         className={`${FIELD_CLASS} ${FIELD_OK}`}
       >
-        {options.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        {options.map(([optionId, optionLabel]) => <option key={optionId} value={optionId}>{optionLabel}</option>)}
       </select>
     </label>
   );
