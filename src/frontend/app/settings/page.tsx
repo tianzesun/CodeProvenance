@@ -1432,45 +1432,42 @@ export default function SettingsPage() {
                 isOpen={accordions.publicSources}
                 onToggle={() => setAccordions(prev => ({ ...prev, publicSources: !prev.publicSources }))}
               >
-                <div className="space-y-4">
-                  <label className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-800 p-4">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(settings.source_scan_enabled)}
-                      onChange={(event) => updateSetting('source_scan_enabled', event.target.checked)}
-                      className="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-blue-600 dark:text-blue-400"
-                    />
-                    <span>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${settings.source_scan_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} aria-hidden="true" />
+                    <span className="flex-1">
                       <span className="block text-sm font-semibold text-slate-950 dark:text-white">Enable public source scanning</span>
-                      <span className="mt-1 block text-sm leading-6 text-slate-500 dark:text-slate-400">When enabled, each submission is compared against configured public code repositories and URLs.</span>
+                      <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
+                        {settings.source_scan_enabled
+                          ? sourceUrls.length > 0
+                            ? `Active · tracking ${sourceUrls.length} source${sourceUrls.length !== 1 ? 's' : ''}`
+                            : 'Active · no URLs yet — add at least one below'
+                          : 'Compare submissions against public code repositories and URLs'}
+                      </span>
                     </span>
-                  </label>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={Boolean(settings.source_scan_enabled)}
+                      aria-label="Enable public source scanning"
+                      onClick={() => updateSetting('source_scan_enabled', !settings.source_scan_enabled)}
+                      className={`relative h-6 w-11 shrink-0 rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 ${settings.source_scan_enabled ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-700'}`}
+                    >
+                      <span aria-hidden="true" className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${settings.source_scan_enabled ? 'left-[22px]' : 'left-0.5'}`} />
+                    </button>
+                  </div>
 
                   {settings.source_scan_enabled && (
-                    <>
-                      <div className="rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-sm text-blue-800 dark:text-blue-300">
-                        <span className="font-semibold">Status:</span> Public scanning is active. Add URLs below for repositories to scan.
-                        {sourceUrls.length > 0 && (
-                          <span className="block mt-1">Currently tracking <strong>{sourceUrls.length}</strong> source{sourceUrls.length !== 1 ? 's' : ''}.</span>
-                        )}
-                      </div>
-                      <TextAreaInput
-                        label="Source URLs (one per line)"
-                        // Raw text is kept as typed and parsed separately. The box used to be rebuilt from the
-                        // parsed list on every keystroke, which deleted a newline as soon as you typed it (so you
-                        // could not start a new line) and split URLs that contain commas.
-                        value={sourceUrlsText}
-                        error={fieldErrors.source_scan_sites}
-                        placeholder={'https://github.com/org/course-solutions\nhttps://raw.githubusercontent.com/org/repo/main/solution.py\nhttps://pastebin.com/raw/abc123'}
-                        onChange={setSourceUrlsText}
-                      />
-                    </>
-                  )}
-
-                  {!settings.source_scan_enabled && (
-                    <div className="rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm text-slate-500 dark:text-slate-400">
-                      Enable the toggle above to configure public source URLs.
-                    </div>
+                    <TextAreaInput
+                      label="Source URLs (one per line)"
+                      // Raw text is kept as typed and parsed separately. The box used to be rebuilt from the
+                      // parsed list on every keystroke, which deleted a newline as soon as you typed it (so you
+                      // could not start a new line) and split URLs that contain commas.
+                      value={sourceUrlsText}
+                      error={fieldErrors.source_scan_sites}
+                      placeholder={'https://github.com/org/course-solutions\nhttps://raw.githubusercontent.com/org/repo/main/solution.py\nhttps://pastebin.com/raw/abc123'}
+                      onChange={setSourceUrlsText}
+                    />
                   )}
                 </div>
               </Accordion>
