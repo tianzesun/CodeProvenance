@@ -12,7 +12,6 @@ import {
   AlertTriangle,
   Bot,
   ChevronDown,
-  Database,
   ExternalLink,
   FolderTree,
   Loader2,
@@ -2084,42 +2083,6 @@ export default function SettingsPage() {
                     )}
                   </div>
                 )}
-              </section>
-
-              {/* Configuration Card (static values — live health is in Service Status above) */}
-              <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400">
-                    <Database size={18} />
-                  </span>
-                  <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Configuration</h2>
-                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">Static configuration values. Live service health is shown above.</p>
-                  </div>
-                </div>
-                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-3">
-                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Default Threshold</div>
-                    <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">{(Number(settings.default_threshold ?? FALLBACK_THRESHOLD) * 100).toFixed(0)}%</div>
-                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Similarity cutoff</div>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-3">
-                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Debug Mode</div>
-                    <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white">
-                      {settings.debug_mode ? (
-                        <span className="text-amber-600 dark:text-amber-400">Enabled</span>
-                      ) : (
-                        <span className="text-slate-600 dark:text-slate-300">Disabled</span>
-                      )}
-                    </div>
-                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Verbose logging</div>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-3">
-                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">Embedding Runtime</div>
-                    <div className="mt-1 text-sm font-medium text-slate-900 dark:text-white capitalize">{String(settings.embedding_runtime || '').replace(/_/g, ' ') || '—'}</div>
-                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{settings.embedding_model || '—'}</div>
-                  </div>
-                </div>
               </section>
 
               {/* Webhooks */}
