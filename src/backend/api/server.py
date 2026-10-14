@@ -17907,6 +17907,8 @@ _install_outer_middleware()
 
 _cleanup_worker_started = False
 _cleanup_worker_lock = threading.Lock()
+_queue_watchdog_started = False
+_queue_watchdog_lock = threading.Lock()
 
 
 def _start_cleanup_worker() -> None:
@@ -17926,9 +17928,22 @@ def _start_cleanup_worker() -> None:
     ).start()
 
 
+def _start_queue_watchdog() -> None:
+    """Start the stuck-queue watchdog once per process (see workers/queue_watchdog)."""
+    global _queue_watchdog_started
+    with _queue_watchdog_lock:
+        if _queue_watchdog_started:
+            return
+        _queue_watchdog_started = True
+    from src.backend.workers.queue_watchdog import _watchdog_loop
+
+    threading.Thread(target=_watchdog_loop, daemon=True, name="queue-watchdog").start()
+
+
 @app.on_event("startup")
 def _start_background_workers() -> None:
     _start_cleanup_worker()
+    _start_queue_watchdog()
 
 
 def main():
