@@ -356,6 +356,21 @@ export default function SettingsPage() {
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [validationLoading, setValidationLoading] = useState<boolean>(false);
 
+  // Calibration findings from the last read-only benchmark run. Shown under
+  // the Run Calibration button; cleared on each new run.
+  const CALIB_METRIC_LABELS: Record<string, string> = {
+    f1: 'F1',
+    auc_roc: 'AUC',
+    optimal_threshold: 'Best threshold',
+    accuracy: 'Accuracy',
+    precision: 'Precision',
+    recall: 'Recall',
+    total_pairs: 'Pairs',
+  };
+  const formatCalibMetric = (metric: string, value: number): string =>
+    metric === 'total_pairs' ? String(Math.round(value)) : value.toFixed(2);
+  const [calibResult, setCalibResult] = useState<Record<string, number> | null>(null);
+
   // Weight-governance evidence form: the Configuration Check warns until a
   // default weight change names its validation run, benchmark dataset and
   // metric snapshot. This records that evidence so the warnings can clear.
@@ -905,9 +920,22 @@ export default function SettingsPage() {
     }
     setCalibrating(true);
     setError(null);
+    setCalibResult(null);
     try {
       const res = await apiClient.post('/api/settings/calibrate');
-      showSuccess('Calibration completed: ' + (res.data?.message || 'OK'), 5000);
+      const raw = ((res.data || {}) as Record<string, unknown>).results as Record<string, unknown> | undefined;
+      const picked: Record<string, number> = {};
+      for (const key of ['f1', 'auc_roc', 'optimal_threshold', 'accuracy', 'precision', 'recall', 'total_pairs']) {
+        const value = raw?.[key];
+        if (typeof value === 'number' && Number.isFinite(value)) picked[key] = value;
+      }
+      setCalibResult(picked);
+      const current = (settings as unknown as Record<string, unknown>)?.default_threshold;
+      const currentText = typeof current === 'number' ? ` (current default ${current})` : '';
+      showSuccess(
+        `Calibration completed: F1 ${picked.f1?.toFixed(2) ?? '—'} · AUC ${picked.auc_roc?.toFixed(2) ?? '—'} · best threshold ${picked.optimal_threshold?.toFixed(2) ?? '—'}${currentText}. No settings were changed.`,
+        8000,
+      );
       // Refresh settings after calibration
       const fresh = await apiClient.get('/api/settings');
       applyLoaded(fresh.data);
@@ -2149,6 +2177,21 @@ export default function SettingsPage() {
                     </button>
                   )}
                 </div>
+                {calibResult && Object.keys(calibResult).length > 0 && (
+                  <div className="mt-4 rounded-lg bg-white/70 dark:bg-slate-950/50 p-3">
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-amber-900 dark:text-amber-200">
+                      {Object.entries(calibResult).map(([metric, value]) => (
+                        <span key={metric}>
+                          {CALIB_METRIC_LABELS[metric] || metric}:{' '}
+                          <strong className="font-semibold">{formatCalibMetric(metric, value)}</strong>
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                      Read-only run — no settings were changed. If you agree with the best threshold, apply it from Detection Settings and save.
+                    </p>
+                  </div>
+                )}
               </section>
 
               {/* Advanced: Embedding & Resource Settings */}

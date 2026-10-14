@@ -17316,12 +17316,20 @@ async def update_engine_config(config_update: dict[str, Any]):
 
 
 @app.post("/api/settings/calibrate")
-async def trigger_calibration():
-    """Trigger automatic engine calibration."""
+async def trigger_calibration(request: Request) -> dict[str, Any]:
+    """Run a read-only calibration benchmark (admin only).
+
+    Measures current-engine accuracy on synthetic labeled pairs and reports
+    the optimal threshold. Changes nothing: applying any finding is a
+    separate, deliberate settings save.
+    """
+    _require_current_user(request, admin_only=True)
     try:
         from src.backend.engines.scoring.fusion_engine import FusionEngine
 
-        result = FusionEngine.run_calibration_benchmark()
+        # CPU-bound for minutes: keep it off the event loop so the API stays
+        # responsive while calibration runs.
+        result = await run_in_threadpool(FusionEngine.run_calibration_benchmark)
 
         if result.get("status") == "failed":
             raise HTTPException(
@@ -17335,7 +17343,9 @@ async def trigger_calibration():
             "results": result,
         }
 
-    except Exception as e:
+    except HTTPException:
+        raise
+    except Exception:
         logger.exception("Engine calibration failed")
         raise HTTPException(
             status_code=500, detail="Calibration failed. See server logs for details."
