@@ -10,6 +10,27 @@ from src.backend.config.database import SessionLocal
 from src.backend.models.database import Job, Tenant, User
 
 
+def _delete_cancel_test_rows() -> None:
+    """Remove cancel-test rows so reruns never pollute the workspace listing."""
+    with SessionLocal() as db:
+        db.query(Job).filter(Job.id.like("cancel-%")).delete(synchronize_session=False)
+        db.query(User).filter(User.email.like("cancel-%@%")).delete(
+            synchronize_session=False
+        )
+        db.query(Tenant).filter(Tenant.name.like("Cancel Workspace %")).delete(
+            synchronize_session=False
+        )
+        db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cancel_rows():
+    """Each test starts with no cancel-test rows from earlier tests."""
+    _delete_cancel_test_rows()
+    yield
+    _delete_cancel_test_rows()
+
+
 def _cookie_jar() -> dict[str, str]:
     """Return a valid session cookie accepted by the auth middleware."""
     from datetime import datetime, timedelta, timezone

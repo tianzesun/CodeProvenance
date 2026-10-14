@@ -395,6 +395,35 @@ class TestEngineConfigAdminGate:
         assert saved["weights"] == {"ast": 0.6, "token": 0.4}
 
 
+def _delete_audit_test_rows() -> None:
+    """Remove audit-test rows so reruns never pollute the workspace listing."""
+    from src.backend.models.database import Tenant, User, WeightAudit
+
+    with SessionLocal() as db:
+        user_ids = [
+            u.id for u in db.query(User).filter(User.email.like("audit-%@%")).all()
+        ]
+        if user_ids:
+            db.query(WeightAudit).filter(
+                WeightAudit.actor_user_id.in_(user_ids)
+            ).delete(synchronize_session=False)
+        db.query(User).filter(User.email.like("audit-%@%")).delete(
+            synchronize_session=False
+        )
+        db.query(Tenant).filter(Tenant.name.like("Audit Workspace %")).delete(
+            synchronize_session=False
+        )
+        db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_audit_rows():
+    """Each test starts with no audit-test rows from earlier tests."""
+    _delete_audit_test_rows()
+    yield
+    _delete_audit_test_rows()
+
+
 def _admin_user_with_row(monkeypatch: pytest.MonkeyPatch, tag: str):
     """Create a tenant + admin user row; fake auth as that user id."""
     from src.backend.api import server
@@ -565,8 +594,20 @@ class TestWeightAuditTrail:
     ) -> None:
         """Test that the history endpoint serves newest-first entries."""
         from src.backend.api import server
+        from src.backend.models.database import WeightAudit
 
-        _admin_user_with_row(monkeypatch, "history")
+        user_id = _admin_user_with_row(monkeypatch, "history")
+        with SessionLocal() as db:
+            db.add(
+                WeightAudit(
+                    action="weights_updated",
+                    actor_user_id=user_id,
+                    weights_before={"ast": 0.5},
+                    weights_after={"ast": 0.6},
+                    allowed=True,
+                )
+            )
+            db.commit()
         client = TestClient(server.app)
         response = client.get("/api/settings/weight-audit", cookies=_cookie_jar())
         assert response.status_code == 200, response.text

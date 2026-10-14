@@ -10,6 +10,30 @@ from jose import jwt as jose_jwt
 from src.backend.api import server
 from src.backend.api.server import AUTH_COOKIE_NAME
 from src.backend.config.database import SessionLocal
+
+
+def _delete_llm_default_test_rows() -> None:
+    """Remove settings-test rows so reruns never pollute the workspace listing."""
+    from src.backend.models.database import Tenant, User
+
+    with SessionLocal() as db:
+        db.query(User).filter(User.email.like("llm-default-%@%")).delete(
+            synchronize_session=False
+        )
+        db.query(Tenant).filter(Tenant.name == "LLM Default Workspace").delete(
+            synchronize_session=False
+        )
+        db.commit()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_llm_default_rows():
+    """Each test starts with no settings-test rows from earlier tests."""
+    _delete_llm_default_test_rows()
+    yield
+    _delete_llm_default_test_rows()
+
+
 from src.backend.config.settings import settings as app_settings
 from src.backend.engines.scoring.fusion_engine import FusionEngine
 from src.backend.models.database import Tenant, User
