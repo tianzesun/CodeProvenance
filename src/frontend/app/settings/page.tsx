@@ -1160,7 +1160,7 @@ export default function SettingsPage() {
               {tab.label}
               {errorsByTab[tab.id] > 0 && (
                 <span
-                  className="ml-0.5 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white"
+                  className="ml-0.5 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-semibold text-white"
                   title="Fields that need attention"
                 >
                   {errorsByTab[tab.id]}
@@ -1173,7 +1173,7 @@ export default function SettingsPage() {
 
         {/* Tab Content - All sections shown per category. Keyed on activeTab so
             the entrance animation replays on every category switch. */}
-        <div key={activeTab} id="settings-tabpanel" role="tabpanel" aria-labelledby={`settings-tab-${activeTab}`} className="animate-tab-content space-y-8">
+        <div key={activeTab} id="settings-tabpanel" role="tabpanel" aria-labelledby={`settings-tab-${activeTab}`} className="animate-tab-content space-y-6">
           {/* DETECTION SETTINGS */}
           {activeTab === 'detection' && (
             <div className="space-y-6">
@@ -1184,7 +1184,7 @@ export default function SettingsPage() {
                     <Target size={18} />
                   </span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Default Similarity Threshold</h2>
+                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Default Similarity Threshold</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
                       Sets the minimum score for flagging a pair as suspicious. The Sensitivity preset (Review &amp; Workflow) sets this automatically; use the slider to fine-tune. Higher cutoff = fewer flags; lower = catches more but increases false positives.
                     </p>
@@ -1203,8 +1203,8 @@ export default function SettingsPage() {
                       className="flex-1 accent-blue-600"
                     />
                     <div className="min-w-[5rem] text-right">
-                      <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">{((settings.default_threshold ?? FALLBACK_THRESHOLD) * 100).toFixed(0)}%</span>
-                      <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">Cutoff</div>
+                      <span className="text-2xl font-semibold text-blue-600 dark:text-blue-400">{((settings.default_threshold ?? FALLBACK_THRESHOLD) * 100).toFixed(0)}%</span>
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Cutoff</div>
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -1248,7 +1248,7 @@ export default function SettingsPage() {
                     <Bot size={18} />
                   </span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">AI Provider Integration</h2>
+                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white">AI Provider Integration</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
                       Connect AI services for enhanced detection capabilities - AI-assisted rewrite analysis, code explanation generation, and evidence summarization.
                     </p>
@@ -1282,7 +1282,7 @@ export default function SettingsPage() {
                       <div className="flex items-center gap-2">
                         <div className={`h-2.5 w-2.5 rounded-full ${activeStatus.configured ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
                         <span className="text-sm font-semibold text-slate-900 dark:text-white">{activeSpec.label}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${activeStatus.configured ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
+                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${activeStatus.configured ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                           {activeStatus.label}
                         </span>
                       </div>
@@ -1436,7 +1436,7 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3">
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${settings.source_scan_enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} aria-hidden="true" />
                     <span className="flex-1">
-                      <span className="block text-sm font-semibold text-slate-950 dark:text-white">Enable public source scanning</span>
+                      <span className="block text-sm font-semibold text-slate-900 dark:text-white">Enable public source scanning</span>
                       <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">
                         {settings.source_scan_enabled
                           ? sourceUrls.length > 0
@@ -1637,9 +1637,9 @@ export default function SettingsPage() {
               <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
                 <div className="space-y-6">
                   <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
-                    <div className="text-sm font-semibold text-slate-950 dark:text-white">Active Profile Summary</div>
+                    <div className="text-sm font-semibold text-slate-900 dark:text-white">Active Profile Summary</div>
                     <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">{applied.recommendation}</p>
-                    <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm font-medium text-slate-950 dark:text-white">
+                    <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm font-medium text-slate-900 dark:text-white">
                       {applied.summary}
                     </div>
 
@@ -1677,7 +1677,7 @@ export default function SettingsPage() {
                   </section>
 
                   <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
-                    <div className="text-sm font-semibold text-slate-950 dark:text-white">Profile Quick Stats</div>
+                    <div className="text-sm font-semibold text-slate-900 dark:text-white">Profile Quick Stats</div>
                     <div className="mt-3 space-y-3 text-sm">
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600 dark:text-slate-300">Sensitivity</span>
@@ -1722,7 +1722,7 @@ export default function SettingsPage() {
                     <Activity size={18} />
                   </span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Service Status</h2>
+                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Service Status</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
                       Live health of every service this app depends on{sysStatus ? ` · checked ${new Date(sysStatus.checked_at).toLocaleString()}` : ''}.
                     </p>
@@ -1778,7 +1778,7 @@ export default function SettingsPage() {
                     <Layers size={18} />
                   </span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Job Queue</h2>
+                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Job Queue</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
                       Live queue depth, worker activity and active jobs{queueData ? ` · checked ${new Date(queueData.checked_at).toLocaleString()}` : ''}.
                     </p>
@@ -1934,7 +1934,7 @@ export default function SettingsPage() {
                     <Database size={18} />
                   </span>
                   <div className="flex-1">
-                    <h2 className="text-lg font-semibold text-slate-950 dark:text-white">Configuration</h2>
+                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Configuration</h2>
                     <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">Static configuration values. Live service health is shown above.</p>
                   </div>
                 </div>
@@ -2047,7 +2047,7 @@ export default function SettingsPage() {
                       type="button"
                       onClick={sendTestEmail}
                       disabled={testingEmail || dirty}
-                      className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
                     >
                       {testingEmail ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                       {testingEmail ? 'Sending...' : 'Send test email'}
@@ -2096,7 +2096,7 @@ export default function SettingsPage() {
                     type="button"
                     onClick={validateConfig}
                     disabled={validationLoading}
-                    className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-50"
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
                   >
                     {validationLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                     {validationLoading ? 'Checking...' : 'Check My Settings'}
@@ -2222,7 +2222,7 @@ export default function SettingsPage() {
               </Accordion>
 
               {/* Improve accuracy from past reviews */}
-              <section className="rounded-xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-5 shadow-sm">
+              <section className="rounded-2xl border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/10 p-5 shadow-sm">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
@@ -2331,7 +2331,7 @@ function Accordion({ title, description, isOpen, onToggle, children }: { title: 
         className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-900 focus-visible:ring-2 focus-visible:ring-blue-200 rounded-t-2xl"
       >
         <div>
-          <div className="text-lg font-semibold text-slate-950 dark:text-white">{title}</div>
+          <div className="text-lg font-semibold text-slate-900 dark:text-white">{title}</div>
           {description && (
             <div className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{description}</div>
           )}
@@ -2361,7 +2361,7 @@ function SettingsGroup({ title, description, children, icon: Icon }: { title: st
           </span>
         )}
         <div className="flex-1">
-          <h2 className="text-lg font-semibold text-slate-950 dark:text-white">{title}</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h2>
           <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{description}</p>
         </div>
       </div>
@@ -2394,9 +2394,9 @@ function SegmentedOptions({ options, value, onChange }: { options: { id: string;
   );
 }
 
-const FIELD_CLASS = 'mt-1 h-11 w-full rounded-lg border bg-white dark:bg-slate-900 px-3 text-sm text-slate-900 dark:text-white outline-none transition focus:ring-4';
-const FIELD_OK = 'border-slate-200 dark:border-slate-800 focus:border-blue-300 dark:focus:border-blue-500 focus:ring-blue-50 dark:focus:ring-blue-500/20';
-const FIELD_BAD = 'border-red-300 dark:border-red-500/50 focus:border-red-400 focus:ring-red-100 dark:focus:ring-red-500/20';
+const FIELD_CLASS = 'mt-1 h-11 w-full rounded-lg border bg-white dark:bg-slate-900 px-3 text-sm text-slate-900 dark:text-white outline-none transition focus:ring-2';
+const FIELD_OK = 'border-slate-200 dark:border-slate-800 focus:border-blue-500 dark:focus:border-blue-500 focus:ring-blue-500/20 dark:focus:ring-blue-500/20';
+const FIELD_BAD = 'border-red-300 dark:border-red-500/50 focus:border-red-400 focus:ring-red-500/20 dark:focus:ring-red-500/20';
 
 function FieldMessages({ error, hint }: { error?: string; hint?: string }) {
   return (
@@ -2441,7 +2441,7 @@ function TextAreaInput({ label, value, onChange, placeholder = '', error }: { la
         rows={5}
         spellCheck={false}
         aria-invalid={error ? true : undefined}
-        className={`mt-1 w-full rounded-lg border bg-white dark:bg-slate-900 px-3 py-3 text-sm text-slate-900 dark:text-white outline-none transition focus:ring-4 ${error ? FIELD_BAD : FIELD_OK}`}
+        className={`mt-1 w-full rounded-lg border bg-white dark:bg-slate-900 px-3 py-3 text-sm text-slate-900 dark:text-white outline-none transition focus:ring-2 ${error ? FIELD_BAD : FIELD_OK}`}
       />
       <FieldMessages error={error} />
     </label>
