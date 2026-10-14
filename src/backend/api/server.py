@@ -103,6 +103,7 @@ from src.backend.models.database import (
     Tenant,
     User,
     VivaOutcome,
+    WeightAudit,
 )
 from src.backend.workers.dispatch import dispatch_analysis
 
@@ -17069,6 +17070,7 @@ async def update_settings(request: Request):
 
     if "engine_weights" in data:
         proposed_weights = _normalize_engine_weights(data["engine_weights"])
+        previous_weights = dict(engine_config.get("weights", {}))
         governance_result = evaluate_weight_change_governance(
             engine_config.get("weights", {}),
             proposed_weights,
@@ -17077,6 +17079,17 @@ async def update_settings(request: Request):
         engine_config["weights"] = proposed_weights
         if governance_result.requires_validation and not governance_result.allowed:
             engine_config.setdefault("advanced", {})["weights_need_validation"] = True
+        submitted_evidence = data.get("weight_governance_evidence")
+        _record_weight_audit(
+            "weights_updated",
+            actor_user_id=current_user.get("id"),
+            weights_before=previous_weights,
+            weights_after=proposed_weights,
+            evidence=(
+                submitted_evidence if isinstance(submitted_evidence, dict) else None
+            ),
+            allowed=governance_result.allowed,
+        )
     elif "professor_profile" in data:
         from src.backend.engines.scoring.professor_profiles import (
             apply_professor_profile,
@@ -17302,7 +17315,7 @@ async def get_engine_config(request: Request):
 @app.put("/api/settings/engine-config")
 async def update_engine_config(request: Request, config_update: dict[str, Any]):
     """Update engine configuration (admin only)."""
-    _require_current_user(request, admin_only=True)
+    current_user = _require_current_user(request, admin_only=True)
     from src.backend.engines.scoring.fusion_engine import (
         load_engine_config,
         save_engine_config,
@@ -17354,6 +17367,19 @@ async def update_engine_config(request: Request, config_update: dict[str, Any]):
 
         # Save configuration
         save_engine_config(updated_config)
+        if "weights" in config_update:
+            _record_weight_audit(
+                "weights_updated",
+                actor_user_id=current_user.get("id"),
+                weights_before=current_config.get("weights", {}),
+                weights_after=updated_config.get("weights", {}),
+                evidence=(
+                    config_update.get("weight_governance_evidence")
+                    if isinstance(config_update.get("weight_governance_evidence"), dict)
+                    else None
+                ),
+                allowed=governance_result.allowed if governance_result else None,
+            )
 
         response: dict[str, Any] = {
             "success": True,
@@ -17493,7 +17519,7 @@ async def attach_weight_governance_evidence(request: Request) -> dict[str, Any]:
     split. This endpoint stores that evidence; when it satisfies governance
     the pending-validation flag is cleared as well.
     """
-    _require_current_user(request, admin_only=True)
+    current_user = _require_current_user(request, admin_only=True)
     from src.backend.engines.scoring.fusion_engine import (
         DEFAULT_WEIGHTS,
         load_engine_config,
@@ -17536,6 +17562,13 @@ async def attach_weight_governance_evidence(request: Request) -> dict[str, Any]:
     if cleared:
         advanced.pop("weights_need_validation", None)
     save_engine_config(config)
+    _record_weight_audit(
+        "evidence_attached",
+        actor_user_id=current_user.get("id"),
+        weights_after=config.get("weights", {}),
+        evidence=evidence,
+        allowed=cleared,
+    )
     return {
         "ok": cleared,
         "cleared": cleared,
@@ -17577,6 +17610,48 @@ def _direct_changed_engines(
         if abs(before - after) > tolerance:
             changed.append(str(key))
     return sorted(changed)
+
+
+def _record_weight_audit(
+    action: str,
+    actor_user_id: str | None = None,
+    weights_before: dict[str, Any] | None = None,
+    weights_after: dict[str, Any] | None = None,
+    evidence: dict[str, Any] | None = None,
+    allowed: bool | None = None,
+    note: str | None = None,
+) -> None:
+    """Append a weight-governance audit row; never raises.
+
+    The audit trail must not break the action it records: any persistence
+    failure is logged and swallowed. Callers pass plain JSON-safe dicts.
+
+    Args:
+        action: One of ``weights_updated``, ``evidence_attached``,
+            ``reverted_to_defaults``.
+        actor_user_id: Admin user id, when a principal is available.
+        weights_before: Weights before the change, if known.
+        weights_after: Weights after the change, if known.
+        evidence: Validation evidence attached or used, if any.
+        allowed: Governance verdict, when one was computed.
+        note: Free-text context.
+    """
+    try:
+        with SessionLocal() as db:
+            db.add(
+                WeightAudit(
+                    action=action,
+                    actor_user_id=actor_user_id,
+                    weights_before=weights_before,
+                    weights_after=weights_after,
+                    evidence=evidence,
+                    allowed=allowed,
+                    note=note,
+                )
+            )
+            db.commit()
+    except Exception:
+        logger.warning("Could not record weight audit event", exc_info=True)
 
 
 def _latest_labeled_benchmark_run() -> tuple[str, dict[str, Any]] | None:
@@ -17679,7 +17754,7 @@ async def attach_weight_governance_evidence_auto(
     benchmark run exists: the run id, dataset and metric snapshot are taken
     from the stored run instead of typed by hand.
     """
-    _require_current_user(request, admin_only=True)
+    current_user = _require_current_user(request, admin_only=True)
     from src.backend.engines.scoring.fusion_engine import (
         DEFAULT_WEIGHTS,
         load_engine_config,
@@ -17709,6 +17784,14 @@ async def attach_weight_governance_evidence_auto(
     if cleared:
         advanced.pop("weights_need_validation", None)
     save_engine_config(config)
+    _record_weight_audit(
+        "evidence_attached",
+        actor_user_id=current_user.get("id"),
+        weights_after=config.get("weights", {}),
+        evidence=evidence,
+        allowed=cleared,
+        note=f"auto-attached from benchmark run {run_id}",
+    )
     snapshot = evidence["metric_snapshot"]
     return {
         "ok": cleared,
@@ -17738,7 +17821,7 @@ async def revert_weight_governance_to_defaults(
     leaving an unevidenced change flagged forever, restore the validated
     shipped defaults so there is nothing left to validate.
     """
-    _require_current_user(request, admin_only=True)
+    current_user = _require_current_user(request, admin_only=True)
     from src.backend.engines.scoring.fusion_engine import (
         DEFAULT_WEIGHTS,
         load_engine_config,
@@ -17746,6 +17829,7 @@ async def revert_weight_governance_to_defaults(
     )
 
     config = load_engine_config()
+    previous_weights = dict(config.get("weights", {}))
     config["weights"] = dict(DEFAULT_WEIGHTS)
     advanced = config.get("advanced")
     if not isinstance(advanced, dict):
@@ -17753,12 +17837,63 @@ async def revert_weight_governance_to_defaults(
     advanced.pop("weights_need_validation", None)
     advanced.pop("weight_governance_evidence", None)
     save_engine_config(config)
+    _record_weight_audit(
+        "reverted_to_defaults",
+        actor_user_id=current_user.get("id"),
+        weights_before=previous_weights,
+        weights_after=config.get("weights", {}),
+        allowed=True,
+    )
     return {
         "ok": True,
         "cleared": True,
         "message": "Default weights reverted to shipped values — validation warnings cleared.",
         "weights": config["weights"],
     }
+
+
+@app.get("/api/settings/weight-audit")
+async def list_weight_audit(request: Request, limit: int = 20):
+    """Recent weight-governance audit entries, newest first (admin only).
+
+    Args:
+        request: Authenticated request (admin only).
+        limit: Maximum entries to return (1-100).
+
+    Returns:
+        The audit trail backing the Configuration Check governance panel.
+    """
+    _require_current_user(request, admin_only=True)
+    limit = max(1, min(int(limit or 20), 100))
+    entries: list[dict[str, Any]] = []
+    try:
+        with SessionLocal() as db:
+            rows = (
+                db.query(WeightAudit)
+                .order_by(WeightAudit.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            for row in rows:
+                created = getattr(row, "created_at", None)
+                entries.append(
+                    {
+                        "id": str(row.id),
+                        "action": row.action,
+                        "actor_user_id": (
+                            str(row.actor_user_id) if row.actor_user_id else None
+                        ),
+                        "weights_before": row.weights_before,
+                        "weights_after": row.weights_after,
+                        "evidence": row.evidence,
+                        "allowed": row.allowed,
+                        "note": row.note,
+                        "created_at": created.isoformat() if created else None,
+                    }
+                )
+    except Exception:
+        logger.warning("Weight audit listing unavailable", exc_info=True)
+    return JSONResponse(content={"entries": entries})
 
 
 def _cleanup_expired_jobs():

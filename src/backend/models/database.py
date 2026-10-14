@@ -1253,3 +1253,45 @@ class BandThreshold(Base):
 
     created_at = created_at_column()
     updated_at = updated_at_column()
+
+
+#: Allowed ``weight_audit.action`` values. ``weights_updated`` covers every
+#: persisted default-weight change (settings save, engine-config PUT,
+#: benchmark apply); ``evidence_attached`` a validation proof recorded
+#: against the pending change; ``reverted_to_defaults`` the honest reset.
+WEIGHT_AUDIT_ACTIONS = (
+    "weights_updated",
+    "evidence_attached",
+    "reverted_to_defaults",
+)
+
+
+class WeightAudit(Base):
+    """Tamper-evident log of default fusion-weight governance events.
+
+    Weight changes, validation evidence and reverts are recorded here at
+    write time so the Configuration Check — and any future audit — can show
+    who changed what, against which proof, without trusting a YAML file on
+    local disk. Rows are append-only; nothing in the application updates or
+    deletes them.
+    """
+
+    __tablename__ = "weight_audit"
+
+    __table_args__ = (
+        Index("idx_weight_audit_created_at", "created_at"),
+        Index("idx_weight_audit_action", "action"),
+        CheckConstraint(
+            _in("action", WEIGHT_AUDIT_ACTIONS), name="ck_weight_audit_action"
+        ),
+    )
+
+    id = uuid_pk()
+    action = Column(String(40), nullable=False)
+    actor_user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+    weights_before = Column(JSONB, nullable=True)
+    weights_after = Column(JSONB, nullable=True)
+    evidence = Column(JSONB, nullable=True)
+    allowed = Column(Boolean, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = created_at_column()

@@ -379,6 +379,36 @@ export default function SettingsPage() {
   const [govMessage, setGovMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [govConfirmRevert, setGovConfirmRevert] = useState<boolean>(false);
 
+  // Weight-governance audit trail (who changed what, against which proof).
+  interface WeightAuditEntry {
+    id: string;
+    action: string;
+    actor_user_id?: string;
+    evidence?: Record<string, unknown>;
+    allowed?: boolean;
+    note?: string;
+    created_at?: string;
+  }
+  const AUDIT_ACTION_LABELS: Record<string, string> = {
+    weights_updated: 'Weights updated',
+    evidence_attached: 'Evidence attached',
+    reverted_to_defaults: 'Reverted to defaults',
+  };
+  const [auditEntries, setAuditEntries] = useState<WeightAuditEntry[]>([]);
+  const loadWeightAudit = async (): Promise<void> => {
+    try {
+      const res = await apiClient.get('/api/settings/weight-audit');
+      const entries = ((res.data || {}) as { entries?: unknown }).entries;
+      setAuditEntries(Array.isArray(entries) ? (entries as WeightAuditEntry[]) : []);
+    } catch {
+      setAuditEntries([]);
+    }
+  };
+  useEffect(() => {
+    if (validationResult?.weight_governance?.needs_validation) void loadWeightAudit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [validationResult?.weight_governance?.needs_validation]);
+
   const govEvidenceText = (value: unknown): string => {
     if (typeof value === 'string') return value;
     if (value === null || value === undefined) return '';
@@ -2161,6 +2191,21 @@ export default function SettingsPage() {
                     <div className="mt-2 text-xs text-amber-800 dark:text-amber-300">
                       Split: <span className="font-semibold">validation</span> (fixed — default weights must be tuned against the validation split, never the locked test set).
                     </div>
+                    {auditEntries.length > 0 && (
+                      <div className="mt-3 border-t border-amber-200/70 dark:border-amber-500/10 pt-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300">History</div>
+                        <ul className="mt-1 space-y-1">
+                          {auditEntries.slice(0, 5).map((entry) => (
+                            <li key={entry.id} className="text-xs text-amber-800 dark:text-amber-300">
+                              {AUDIT_ACTION_LABELS[entry.action] || entry.action}
+                              {entry.created_at ? ` · ${new Date(entry.created_at).toLocaleString()}` : ''}
+                              {typeof entry.allowed === 'boolean' ? (entry.allowed ? ' · allowed' : ' · flagged') : ''}
+                              {typeof entry.evidence?.validation_run_id === 'string' && entry.evidence.validation_run_id ? ` · run ${entry.evidence.validation_run_id}` : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     {govMessage && (
                       <div role={govMessage.ok ? 'status' : 'alert'} className={`mt-3 text-xs ${govMessage.ok ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-600 dark:text-red-400'}`}>
                         {govMessage.text}

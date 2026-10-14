@@ -1,10 +1,12 @@
 """Unit tests for weight-governance evidence endpoints (no real config writes)."""
 
 import copy
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 
+from src.backend.config.database import SessionLocal
 from src.backend.config.settings import settings as app_settings
 
 
@@ -391,3 +393,208 @@ class TestEngineConfigAdminGate:
         )
         assert response.status_code == 200, response.text
         assert saved["weights"] == {"ast": 0.6, "token": 0.4}
+
+
+def _admin_user_with_row(monkeypatch: pytest.MonkeyPatch, tag: str):
+    """Create a tenant + admin user row; fake auth as that user id."""
+    from src.backend.api import server
+    from src.backend.models.database import Tenant, User
+
+    email = f"audit-{tag}-{uuid.uuid4().hex[:8]}@example.com"
+    with SessionLocal() as db:
+        tenant = Tenant(
+            name=f"Audit Workspace {tag}",
+            api_key_hash=f"test-hash-{uuid.uuid4().hex}",
+        )
+        db.add(tenant)
+        db.flush()
+        user = User(
+            tenant_id=tenant.id,
+            email=email,
+            full_name="Audit Admin",
+            password_hash="already-hashed",
+            role="admin",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        tenant_id = str(tenant.id)
+        user_id = str(user.id)
+
+    def fake_auth(request):
+        return {"id": user_id, "role": "admin", "tenant_id": tenant_id}
+
+    monkeypatch.setattr(server, "_authenticate_request", fake_auth)
+    return user_id
+
+
+class TestWeightAuditTrail:
+    """Audit rows for every governance mutation plus the history endpoint."""
+
+    def test_manual_attach_records_audit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that manual evidence attach writes who/what/proof."""
+        from src.backend.api import server
+        from src.backend.engines.scoring import fusion_engine
+        from src.backend.models.database import WeightAudit
+
+        user_id = _admin_user_with_row(monkeypatch, "manual")
+        monkeypatch.setattr(
+            fusion_engine, "load_engine_config", lambda: _stored_config()
+        )
+        saved: dict = {}
+
+        def fake_save(config: dict) -> None:
+            saved.update(copy.deepcopy(config))
+
+        monkeypatch.setattr(fusion_engine, "save_engine_config", fake_save)
+        client = TestClient(server.app)
+        response = client.post(
+            "/api/settings/weight-governance-evidence",
+            json=_evidence_payload(),
+            cookies=_cookie_jar(),
+        )
+        assert response.status_code == 200, response.text
+        with SessionLocal() as db:
+            rows = (
+                db.query(WeightAudit)
+                .filter(WeightAudit.actor_user_id == user_id)
+                .order_by(WeightAudit.created_at.desc())
+                .all()
+            )
+            assert len(rows) == 1
+            assert rows[0].action == "evidence_attached"
+            assert rows[0].allowed is True
+            assert (rows[0].evidence or {}).get("validation_run_id") == "val-2026-01-01"
+
+    def test_auto_attach_and_revert_record_audit(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Test that auto-attach and revert write distinguishable rows."""
+        import json
+
+        from src.backend.api import server
+        from src.backend.engines.scoring import fusion_engine
+        from src.backend.models.database import WeightAudit
+
+        user_id = _admin_user_with_row(monkeypatch, "auto")
+        (tmp_path / "run-9.json").write_text(
+            json.dumps(
+                {
+                    "run_id": "run-9",
+                    "dataset_id": "pan-validation",
+                    "has_ground_truth": True,
+                    "pair_results": [{"a": 1}],
+                    "tool_scores": {"integritydesk": {}},
+                    "evaluation": {"integritydesk": {"f1": 0.9}},
+                }
+            )
+        )
+        monkeypatch.setattr(server, "BENCHMARK_RUNS_DIR", tmp_path)
+        monkeypatch.setattr(
+            fusion_engine, "load_engine_config", lambda: _stored_config()
+        )
+        saved: dict = {}
+
+        def fake_save(config: dict) -> None:
+            saved.update(copy.deepcopy(config))
+
+        monkeypatch.setattr(fusion_engine, "save_engine_config", fake_save)
+        client = TestClient(server.app)
+        auto = client.post(
+            "/api/settings/weight-governance-evidence/auto", cookies=_cookie_jar()
+        )
+        assert auto.status_code == 200, auto.text
+        revert = client.post(
+            "/api/settings/weight-governance-revert", cookies=_cookie_jar()
+        )
+        assert revert.status_code == 200, revert.text
+        with SessionLocal() as db:
+            actions = [
+                row.action
+                for row in db.query(WeightAudit)
+                .filter(WeightAudit.actor_user_id == user_id)
+                .order_by(WeightAudit.created_at.asc())
+                .all()
+            ]
+            assert actions == ["evidence_attached", "reverted_to_defaults"]
+
+    def test_put_weights_records_audit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that a PUT weight change records before/after."""
+        from src.backend.api import server
+        from src.backend.engines.scoring import fusion_engine
+        from src.backend.models.database import WeightAudit
+
+        user_id = _admin_user_with_row(monkeypatch, "put")
+        monkeypatch.setattr(
+            fusion_engine, "load_engine_config", lambda: _stored_config()
+        )
+        saved: dict = {}
+
+        def fake_save(config: dict) -> None:
+            saved.update(copy.deepcopy(config))
+
+        monkeypatch.setattr(fusion_engine, "save_engine_config", fake_save)
+        client = TestClient(server.app)
+        response = client.put(
+            "/api/settings/engine-config",
+            json={
+                "weights": {"ast": 0.6, "token": 0.4},
+                "weight_governance_evidence": {
+                    "validation_run_id": "val-1",
+                    "benchmark_dataset_id": "pan",
+                    "metric_snapshot": "F1 0.9",
+                    "split": "validation",
+                },
+            },
+            cookies=_cookie_jar(),
+        )
+        assert response.status_code == 200, response.text
+        with SessionLocal() as db:
+            row = (
+                db.query(WeightAudit)
+                .filter(WeightAudit.actor_user_id == user_id)
+                .order_by(WeightAudit.created_at.desc())
+                .first()
+            )
+            assert row is not None
+            assert row.action == "weights_updated"
+            assert row.weights_after == {"ast": 0.6, "token": 0.4}
+
+    def test_history_endpoint_lists_entries(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that the history endpoint serves newest-first entries."""
+        from src.backend.api import server
+
+        _admin_user_with_row(monkeypatch, "history")
+        client = TestClient(server.app)
+        response = client.get("/api/settings/weight-audit", cookies=_cookie_jar())
+        assert response.status_code == 200, response.text
+        entries = response.json()["entries"]
+        assert isinstance(entries, list)
+        assert any(entry["action"] == "weights_updated" for entry in entries)
+
+    def test_history_requires_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that professors cannot read the audit trail."""
+        from src.backend.api import server
+
+        monkeypatch.setattr(server, "_authenticate_request", _fake_professor)
+        client = TestClient(server.app)
+        response = client.get("/api/settings/weight-audit", cookies=_cookie_jar())
+        assert response.status_code == 403
+
+    def test_model_matches_migration(self) -> None:
+        """Test that the ORM columns match the migration DDL."""
+        from src.backend.models.database import WeightAudit
+
+        assert set(WeightAudit.__table__.columns.keys()) == {
+            "id",
+            "action",
+            "actor_user_id",
+            "weights_before",
+            "weights_after",
+            "evidence",
+            "allowed",
+            "note",
+            "created_at",
+        }
