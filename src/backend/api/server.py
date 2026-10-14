@@ -17276,8 +17276,9 @@ async def test_email_delivery(request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/settings/engine-config")
-async def get_engine_config():
-    """Get current engine configuration for settings page."""
+async def get_engine_config(request: Request):
+    """Get current engine configuration for settings page (admin only)."""
+    _require_current_user(request, admin_only=True)
     from src.backend.engines.scoring.fusion_engine import load_engine_config
 
     config = load_engine_config()
@@ -17299,8 +17300,9 @@ async def get_engine_config():
 
 
 @app.put("/api/settings/engine-config")
-async def update_engine_config(config_update: dict[str, Any]):
+async def update_engine_config(request: Request, config_update: dict[str, Any]):
     """Update engine configuration (admin only)."""
+    _require_current_user(request, admin_only=True)
     from src.backend.engines.scoring.fusion_engine import (
         load_engine_config,
         save_engine_config,

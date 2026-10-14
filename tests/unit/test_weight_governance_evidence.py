@@ -329,3 +329,65 @@ class TestGovernanceFullLoop:
         assert cleared.status_code == 200, cleared.text
         assert cleared.json()["weight_governance"]["needs_validation"] is False
         assert cleared.json()["valid"] is True
+
+
+class TestEngineConfigAdminGate:
+    """GET/PUT /api/settings/engine-config are admin-only."""
+
+    def test_get_requires_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that professors cannot read engine configuration."""
+        from src.backend.api import server
+
+        monkeypatch.setattr(server, "_authenticate_request", _fake_professor)
+        client = TestClient(server.app)
+        response = client.get("/api/settings/engine-config", cookies=_cookie_jar())
+        assert response.status_code == 403
+
+    def test_put_requires_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that professors cannot rewrite engine weights."""
+        from src.backend.api import server
+
+        monkeypatch.setattr(server, "_authenticate_request", _fake_professor)
+        client = TestClient(server.app)
+        response = client.put(
+            "/api/settings/engine-config",
+            json={"weights": {"ast": 0.9, "token": 0.1}},
+            cookies=_cookie_jar(),
+        )
+        assert response.status_code == 403
+
+    def test_admin_put_with_evidence_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that admins with evidence can still update weights."""
+        from src.backend.api import server
+        from src.backend.engines.scoring import fusion_engine
+
+        monkeypatch.setattr(server, "_authenticate_request", _fake_admin)
+        monkeypatch.setattr(
+            fusion_engine,
+            "load_engine_config",
+            lambda: {"weights": {"ast": 0.5, "token": 0.5}, "advanced": {}},
+        )
+        saved: dict = {}
+
+        def fake_save(config: dict) -> None:
+            saved.update(copy.deepcopy(config))
+
+        monkeypatch.setattr(fusion_engine, "save_engine_config", fake_save)
+        client = TestClient(server.app)
+        response = client.put(
+            "/api/settings/engine-config",
+            json={
+                "weights": {"ast": 0.6, "token": 0.4},
+                "weight_governance_evidence": {
+                    "validation_run_id": "val-1",
+                    "benchmark_dataset_id": "pan",
+                    "metric_snapshot": "F1 0.9",
+                    "split": "validation",
+                },
+            },
+            cookies=_cookie_jar(),
+        )
+        assert response.status_code == 200, response.text
+        assert saved["weights"] == {"ast": 0.6, "token": 0.4}
