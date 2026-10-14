@@ -374,6 +374,12 @@ else
     docker exec "$GPU_CONTAINER" pkill -f "uvicorn src.backend.api.server:app" 2>/dev/null || true
     sleep 1
     mapfile -t ENV_ARGS < <(build_env_args)
+    # HF weights (Binoculars pair etc.) persist in the mounted repo so holder
+    # recreates skip re-downloads over flaky links. Respects an explicit
+    # HF_HOME in .env.local when present.
+    if ! grep -q "^HF_HOME=" "$ENV_FILE" 2>/dev/null; then
+        ENV_ARGS+=(-e HF_HOME=/app/.hf-cache)
+    fi
     docker exec -d "${PROXY_ARGS[@]}" "${ENV_ARGS[@]}" "$GPU_CONTAINER" bash -c "cd /app && exec $GPU_PY -m uvicorn src.backend.api.server:app --host 127.0.0.1 --port $BACKEND_PORT --log-level warning >> /app/logs/backend.log 2>&1"
     echo "Waiting for backend (first boot imports torch/transformers — can take minutes on ARM)..."
     for i in $(seq 1 120); do
