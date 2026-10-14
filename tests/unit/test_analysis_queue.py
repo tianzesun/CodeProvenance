@@ -59,6 +59,19 @@ class TestCeleryAppConfig:
         override_setting("CELERY_WORKER_CONCURRENCY", 2)
         assert celery_app_module.worker_concurrency() == 2
 
+    def test_upload_task_is_registered(self) -> None:
+        """A worker must know the task or every job dies on receipt.
+
+        Regression: autodiscover only imports ``<package>.tasks``, so the
+        analysis_tasks module never loaded and live workers raised
+        ``KeyError`` per message while jobs sat queued forever with a
+        healthy-looking worker.
+        """
+        assert (
+            "src.backend.workers.analysis_tasks.run_upload_analysis"
+            in celery_app_module.celery_app.tasks
+        )
+
 
 class TestRunUploadAnalysisTask:
     """The task body must forward broker scalars to the real pipeline."""

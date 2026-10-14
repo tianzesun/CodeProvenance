@@ -77,6 +77,17 @@ def create_celery_app() -> object:
 celery_app = create_celery_app()
 
 
+# Task registration. Celery's autodiscover only imports `<package>.tasks`,
+# so our `analysis_tasks` module would never load and workers would reject
+# every job with ``KeyError: ...run_upload_analysis`` (jobs stuck queued
+# forever with a live worker). Import here — after `celery_app` exists —
+# rather than at the top, which would be circular. (batch_processor.py owns
+# a separate legacy Celery app; its tasks are out of scope here.)
+from src.backend.workers import analysis_tasks as _analysis_tasks  # noqa: F401
+
+assert "src.backend.workers.analysis_tasks.run_upload_analysis" in celery_app.tasks
+
+
 def worker_concurrency() -> int:
     """Public accessor so deploy scripts and tests share one resolution."""
     return _worker_concurrency()
