@@ -8,6 +8,7 @@ broken probability mapping.
 """
 
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 from src.backend.engines.ai.binoculars_detector import BinocularsDetector
@@ -136,7 +137,7 @@ class TestBinocularsDetector:
 
         assert result["ai_probability"] >= 0.40
 
-    @patch("sys.modules", new={"binoculars": None})
+    @patch.dict(sys.modules, {"binoculars": None})
     def test_graceful_degradation_when_package_missing(self):
         detector = BinocularsDetector()
         result = detector.analyze(
@@ -150,8 +151,10 @@ class TestBinocularsDetector:
 
     def test_is_available_returns_false_when_not_loaded(self):
         detector = BinocularsDetector()
-        # Force failure path
-        with patch("sys.modules", {"binoculars": None}):
+        # Force failure path. Only the binoculars entry is masked — replacing
+        # the whole registry would force every lazy import (including torch)
+        # to re-execute and poison later tests.
+        with patch.dict(sys.modules, {"binoculars": None}):
             assert detector.is_available() is False
 
 
@@ -265,22 +268,24 @@ def test_loaded_pair_is_cached_across_detectors() -> None:
 
 
 def test_bf16_env_override_beats_cpu_detection() -> None:
-    """BINOCULARS_BF16 forces either path, capable CPU or not."""
+    """BINOCULARS_BF16 forces either path, capable hardware or not."""
     from src.backend.engines.ai import binoculars_detector as module
 
     forced_off = patch.dict(os.environ, {"BINOCULARS_BF16": "0"})
     capable = patch.object(module, "_cpu_has_native_bf16", return_value=True)
-    with forced_off, capable:
+    cuda = patch.object(module, "_cuda_available", return_value=True)
+    with forced_off, capable, cuda:
         assert module._bfloat16_enabled() is False
 
     forced_on = patch.dict(os.environ, {"BINOCULARS_BF16": "1"})
     incapable = patch.object(module, "_cpu_has_native_bf16", return_value=False)
-    with forced_on, incapable:
+    no_cuda = patch.object(module, "_cuda_available", return_value=False)
+    with forced_on, incapable, no_cuda:
         assert module._bfloat16_enabled() is True
 
 
 def test_bf16_defaults_to_cpu_capability() -> None:
-    """Without env, bf16 follows native support — emulated bf16 is unusable.
+    """Without env or CUDA, bf16 follows native support — emulated bf16 is unusable.
 
     Regression: the old default was always-on, and torch's emulated bf16 ran
     GEMM ~159x slower on an AVX2-only host, stranding AI jobs for an hour.
@@ -289,10 +294,30 @@ def test_bf16_defaults_to_cpu_capability() -> None:
 
     with patch.dict(os.environ, {}, clear=False):
         os.environ.pop("BINOCULARS_BF16", None)
-        with patch.object(module, "_cpu_has_native_bf16", return_value=True):
+        no_cuda = patch.object(module, "_cuda_available", return_value=False)
+        with no_cuda, patch.object(module, "_cpu_has_native_bf16", return_value=True):
             assert module._bfloat16_enabled() is True
-        with patch.object(module, "_cpu_has_native_bf16", return_value=False):
+        with no_cuda, patch.object(module, "_cpu_has_native_bf16", return_value=False):
             assert module._bfloat16_enabled() is False
+
+
+def test_bf16_prefers_cuda_over_cpu_probe() -> None:
+    """Any CUDA device means native bf16 — the CPU probe is irrelevant there."""
+    from src.backend.engines.ai import binoculars_detector as module
+
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("BINOCULARS_BF16", None)
+        cuda = patch.object(module, "_cuda_available", return_value=True)
+        incapable = patch.object(module, "_cpu_has_native_bf16", return_value=False)
+        with cuda, incapable:
+            assert module._bfloat16_enabled() is True
+
+
+def test_cuda_probe_is_a_plain_bool() -> None:
+    """_cuda_available answers bool, torch or no torch."""
+    from src.backend.engines.ai import binoculars_detector as module
+
+    assert isinstance(module._cuda_available(), bool)
 
 
 def test_cpu_bf16_probe_is_a_bool() -> None:

@@ -56,6 +56,7 @@ UNCALIBRATED_MAX_CONFIDENCE = 0.3
 AI_ANCHOR_PROBABILITY = 0.95
 HUMAN_ANCHOR_PROBABILITY = 0.05
 
+
 def _env_float(name: str) -> float | None:
     raw = os.environ.get(name)
     if raw is None or not raw.strip():
@@ -140,17 +141,38 @@ def _cpu_has_native_bf16() -> bool:
     return _NATIVE_BF16
 
 
+def _cuda_available() -> bool:
+    """Whether torch can see a CUDA device right now.
+
+    The upstream Binoculars package loads both models onto CUDA whenever it
+    is available, so this decides the dtype policy below — not the device.
+    Guarded import: a torch-less environment simply reports no GPU. Any
+    import-time failure (broken install, half-initialized reimport) also
+    reports no GPU — a probe must never raise.
+    """
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
 def _bfloat16_enabled() -> bool:
     """Resolve whether to load the model pair in bfloat16.
 
     An explicit ``BINOCULARS_BF16`` (0/1) always wins so operators can force
-    either path; otherwise bf16 is used only when the CPU can run it without
-    emulation, which keeps memory small on capable hosts and keeps inference
-    usable everywhere else.
+    either path. Otherwise bf16 is used whenever the math runs natively:
+    on any CUDA device (halves VRAM at full speed — the models already live
+    on GPU there), else only when the CPU itself has native bf16 (ARM ``bf16``
+    / x86 ``avx512_bf16``), since emulation measured 159x slower GEMM and
+    turned single-file jobs into hour-long runs.
     """
     env = os.environ.get("BINOCULARS_BF16")
     if env is not None:
         return env != "0"
+    if _cuda_available():
+        return True
     return _cpu_has_native_bf16()
 
 
@@ -179,7 +201,9 @@ def binoculars_score_to_probability(
     """
     fpr_threshold = BINOCULARS_FPR_THRESHOLD if fpr_threshold is None else fpr_threshold
     accuracy_threshold = (
-        BINOCULARS_ACCURACY_THRESHOLD if accuracy_threshold is None else accuracy_threshold
+        BINOCULARS_ACCURACY_THRESHOLD
+        if accuracy_threshold is None
+        else accuracy_threshold
     )
     if raw_score != raw_score:  # NaN guard
         return 0.5
@@ -266,14 +290,19 @@ class BinocularsDetector:
                 if permanent or time.monotonic() - failed_at < _RETRY_AFTER_SECONDS:
                     return False
             try:
-                # bf16 halves memory but is emulated (100x+ slower) on CPUs
-                # without native support, so default to fp32 there; the env
-                # var forces either path.
+                # bf16 halves memory. On CUDA it always runs natively at full
+                # speed; on CPU it is emulated (100x+ slower) without native
+                # support, so default to fp32 there. The env var forces
+                # either path (see _bfloat16_enabled).
                 use_bfloat16 = _bfloat16_enabled()
                 try:
-                    max_token_observed = int(os.environ.get("BINOCULARS_MAX_TOKENS", "512"))
+                    max_token_observed = int(
+                        os.environ.get("BINOCULARS_MAX_TOKENS", "512")
+                    )
                 except ValueError:
-                    logger.warning("Ignoring non-integer BINOCULARS_MAX_TOKENS; using 512")
+                    logger.warning(
+                        "Ignoring non-integer BINOCULARS_MAX_TOKENS; using 512"
+                    )
                     max_token_observed = 512
                 cache_key = (
                     self.model,
@@ -304,7 +333,10 @@ class BinocularsDetector:
                     self.performer,
                 )
             except Exception as exc:
-                _LOAD_FAILURES[failure_key] = (time.monotonic(), isinstance(exc, ImportError))
+                _LOAD_FAILURES[failure_key] = (
+                    time.monotonic(),
+                    isinstance(exc, ImportError),
+                )
                 logger.warning(
                     "BinocularsDetector could not be loaded: %s. "
                     "Falling back to heuristic signals only. "
