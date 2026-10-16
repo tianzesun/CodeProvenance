@@ -16,6 +16,7 @@ if (!backendOrigin) {
 }
 
 const nextConfig: NextConfig = {
+  basePath: '/codeprovenance',
   async rewrites() {
     return [
       { source: '/api/:path*', destination: `${backendOrigin}/api/:path*` },
