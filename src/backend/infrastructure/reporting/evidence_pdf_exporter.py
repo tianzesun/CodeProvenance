@@ -122,6 +122,8 @@ class EvidenceChainPdfExporter:
         output_path: Path | None = None,
     ) -> Path | None:
         """Generate a complete evidence chain PDF."""
+        if not isinstance(case_data, dict):
+            raise ValueError("case_data must be a dict")
         if PDF_BACKEND is None:
             logger.error("No PDF backend available. Install weasyprint or pdfkit.")
             return None
@@ -342,12 +344,12 @@ class EvidenceChainPdfExporter:
 
     @staticmethod
     def _risk_label(score: float) -> str:
-        if score >= 0.85:
+        if score >= 0.75:
             return "Critical"
-        if score >= 0.65:
+        if score >= 0.50:
             return "High"
-        if score >= 0.40:
-            return "Medium"
+        if score >= 0.25:
+            return "Moderate"
         return "Low"
 
     @staticmethod
@@ -360,9 +362,10 @@ class EvidenceChainPdfExporter:
 
     @staticmethod
     def _consensus_label(index: float) -> str:
-        if index > 0.8:
+        """Label confidence of ensemble consensus across engines."""
+        if index >= 0.8:
             return "Strong Consensus"
-        if index > 0.5:
+        if index >= 0.5:
             return "Moderate Consensus"
         return "Weak Consensus"
 

@@ -33,11 +33,10 @@ TEMPLATES = {
 }
 
 RECOMMENDATIONS = [
-    (0.9, "Strong evidence of plagiarism. Recommend immediate action."),
-    (0.75, "Likely plagiarism. Recommend detailed review."),
-    (0.6, "Suspicious. Manual inspection needed."),
-    (0.4, "Some similarities detected. May be coincidence."),
-    (0.0, "No significant similarity detected."),
+    (0.75, "Strong evidence of plagiarism. Recommend immediate action."),
+    (0.6, "Likely plagiarism. Recommend detailed review."),
+    (0.45, "Suspicious. Manual inspection needed."),
+    (0.25, "Some similarities detected. May be coincidence."),
 ]
 
 
@@ -51,19 +50,21 @@ def _level(impact):
 
 def _get_rec(score):
     for t, rec in RECOMMENDATIONS:
-        if score > t:
+        if score >= t:
             return rec
     return "Review recommended."
 
 
 def _label(score):
-    if score > 0.9:
+    if score >= 0.75:
         return "HIGH RISK"
-    if score > 0.75:
+    if score >= 0.6:
         return "MEDIUM RISK"
-    if score > 0.6:
+    if score >= 0.45:
         return "SUSPICIOUS"
-    return "LOW RISK"
+    if score >= 0.25:
+        return "LOW RISK"
+    return "CLEAN"
 
 
 @dataclass
