@@ -157,6 +157,37 @@ def test_normalize_job_preserves_analysis_sections() -> None:
     assert normalized["web_analysis"]["submissions"] == []
 
 
+def test_normalize_job_exposes_history_table_aliases() -> None:
+    """The history table reads total_submissions / high_similarity_count.
+
+    Regression: the job dict carried file_count and summary.suspicious_pairs,
+    but the frontend RawJob type expected total_submissions /
+    high_similarity_count, so the Submissions column always showed 0 and
+    High Risk always showed "—".
+    """
+    normalized = _normalize_job(
+        {
+            "id": "job-alias",
+            "course_name": "Course",
+            "assignment_name": "Assignment",
+            "threshold": 0.7,
+            "status": "completed",
+            "file_count": 5,
+            "results": [
+                {"file_a": "a.py", "file_b": "b.py", "score": 0.91},
+                {"file_a": "a.py", "file_b": "c.py", "score": 0.32},
+                {"file_a": "b.py", "file_b": "c.py", "score": 0.75},
+            ],
+            "submissions": {"a.py": "x = 1", "b.py": "x = 2", "c.py": "x = 3"},
+        }
+    )
+
+    assert normalized["total_submissions"] == 5
+    # 2 of 3 pairs score >= the 0.7 threshold
+    assert normalized["high_similarity_count"] == 2
+    assert normalized["summary"]["suspicious_pairs"] == 2
+
+
 def test_fusion_debug_logs_engine_contributions() -> None:
     """Flagged pairs should explain which engines fired."""
 

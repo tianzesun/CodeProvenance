@@ -4077,6 +4077,14 @@ def _normalize_job(job: dict[str, Any], from_disk: bool = False) -> dict[str, An
             }
         )
     )
+    # Aliases the history table reads. The job dict carries ``file_count`` and
+    # ``summary.suspicious_pairs``; the frontend's RawJob type expects
+    # ``total_submissions`` / ``high_similarity_count``. Without these the
+    # Submissions column always showed 0 and High Risk always showed "—".
+    normalized["total_submissions"] = normalized["file_count"]
+    normalized["high_similarity_count"] = int(
+        normalized["summary"].get("suspicious_pairs") or 0
+    )
     normalized["review_status"] = (
         normalized.get("review_status")
         if normalized.get("review_status") in REVIEW_STATUSES
@@ -4801,7 +4809,29 @@ def _load_job_from_db(job_id: str) -> dict[str, Any] | None:
                     for r in sim_results
                 ],
                 "submissions": submissions,
-                "summary": {"total_pairs": len(sim_results)},
+                "summary": {
+                    "total_pairs": len(sim_results),
+                    "suspicious_pairs": sum(
+                        1
+                        for r in sim_results
+                        if float(r.similarity_score or 0)
+                        >= (
+                            float(db_job.threshold)
+                            if db_job.threshold is not None
+                            else 0.5
+                        )
+                    ),
+                },
+                # Aliases the history table reads (see _normalize_job).
+                "total_submissions": db_job.total_submissions or len(subs),
+                "high_similarity_count": sum(
+                    1
+                    for r in sim_results
+                    if float(r.similarity_score or 0)
+                    >= (
+                        float(db_job.threshold) if db_job.threshold is not None else 0.5
+                    )
+                ),
                 "review_status": "unreviewed",
                 "review_notes": "",
                 "submission_count": len(subs),
