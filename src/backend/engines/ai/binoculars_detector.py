@@ -47,14 +47,14 @@ BINOCULARS_ACCURACY_THRESHOLD = 0.9015310749276843
 # (BINOCULARS_FPR_THRESHOLD / BINOCULARS_ACCURACY_THRESHOLD) or accept that the
 # result is reported as uncalibrated and its influence is reduced.
 PUBLISHED_PAIR = ("tiiuae/falcon-7b", "tiiuae/falcon-7b-instruct")
-#: Additional observer/performer pairs whose score distribution is close enough
-#: to the published thresholds that the uncalibrated shrink is unnecessary.
-#: The Qwen2.5-0.5B pair is the standard small Binoculars pair: AI code
-#: consistently scores at or below the FPR threshold and human code above the
-#: accuracy threshold, so the default anchors (0.95 / 0.05) are correct.
-KNOWN_CALIBRATED_PAIRS: set[tuple[str, str]] = {
-    ("qwen/qwen2.5-0.5b", "qwen/qwen2.5-0.5b-instruct"),
-}
+#: Additional observer/performer pairs whose score distribution was MEASURED
+#: to sit on the published thresholds' scale. Add a pair only after running
+#: scripts/probe-binoculars.py against AIGCodeSet: the Qwen2.5-0.5B default
+#: was removed after that probe showed it at chance on code (AI median raw
+#: 1.087 vs human 1.065, best single-threshold split 62%, distributions fully
+#: overlapping), i.e. Falcon-fitted anchors label real submissions with
+#: numbers that mean nothing for this pair.
+KNOWN_CALIBRATED_PAIRS: set[tuple[str, str]] = set()
 #: How far an uncalibrated probability is pulled toward 0.5 (1.0 = no shrinkage).
 UNCALIBRATED_SHRINK = 0.4
 UNCALIBRATED_MAX_CONFIDENCE = 0.3

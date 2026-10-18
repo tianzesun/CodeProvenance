@@ -22,7 +22,10 @@ import logging
 import math
 from typing import Any, ClassVar
 
-from src.backend.engines.ai.binoculars_detector import BinocularsDetector
+from src.backend.engines.ai.binoculars_detector import (
+    BinocularsDetector,
+    is_calibrated,
+)
 from src.backend.engines.similarity.ai_detection import AIDetectionEngine
 
 logger = logging.getLogger(__name__)
@@ -239,8 +242,24 @@ class AIDetectionOrchestrator:
                 "layers": {},
             }
 
-        # Layer 1: Binoculars
-        bino_result = self.binoculars.analyze(code, language=language)
+        # Layer 1: Binoculars — only when the active pair's thresholds are
+        # trustworthy (published pair, a measured pair in KNOWN_CALIBRATED_PAIRS,
+        # or operator-supplied env thresholds). The default Qwen2.5-0.5B pair
+        # measured at chance on AIGCodeSet (AI median raw 1.087 vs human 1.065,
+        # best single-threshold split 62% — see scripts/probe-binoculars.py), so
+        # an uncalibrated pair abstains entirely: no signal, no model load, no
+        # vote. Every downstream branch already handles available=False.
+        if is_calibrated(self.binoculars.model, self.binoculars.performer):
+            bino_result = self.binoculars.analyze(code, language=language)
+        else:
+            bino_result = {
+                "ai_probability": 0.5,
+                "confidence": 0.0,
+                "raw_score": None,
+                "label": "UNCERTAIN (pair not calibrated for code)",
+                "available": False,
+                "calibrated": False,
+            }
 
         # Layer 3: Legacy multi-signal engine
         legacy_result = self.legacy_engine.analyze(code, language=language)
@@ -330,8 +349,10 @@ class AIDetectionOrchestrator:
             raw_confidence = 0.6 * bino_conf + 0.4 * legacy_conf
         else:
             raw_confidence = legacy_conf
-        fused_probability, safeguarded_confidence, safeguard_notes = apply_fp_safeguards(
-            fused_probability, raw_confidence, signals, self._safeguards_config()
+        fused_probability, safeguarded_confidence, safeguard_notes = (
+            apply_fp_safeguards(
+                fused_probability, raw_confidence, signals, self._safeguards_config()
+            )
         )
         combined_confidence = safeguarded_confidence
 
@@ -353,6 +374,7 @@ class AIDetectionOrchestrator:
                 # the raw score a compressed result cannot be debugged.
                 "raw_score": bino_result.get("raw_score"),
                 "label": bino_result.get("label"),
+                "calibrated": bino_result.get("calibrated"),
             },
             "legacy": {
                 "ai_probability": legacy_result.get("ai_probability"),
