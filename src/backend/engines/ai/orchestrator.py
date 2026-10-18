@@ -182,15 +182,15 @@ class AIDetectionOrchestrator:
     # Calibrated weights favoring Binoculars (Layer 1) for its published performance
     # Total weight = 1.0
     _LAYER_WEIGHTS: ClassVar[dict[str, float]] = {
-        "binoculars": 0.40,  # Zero-shot SOTA (ICML 2024)
-        "pattern_library": 0.15,
-        "perplexity": 0.12,
-        "stylometry": 0.10,
-        "burstiness": 0.08,
-        "structural_entropy": 0.07,
-        "vocabulary_richness": 0.04,
-        "whitespace_rhythm": 0.02,
-        "docstring_density": 0.02,
+        "binoculars": 0.55,  # Zero-shot SOTA (ICML 2024); dominates when available
+        "pattern_library": 0.12,
+        "perplexity": 0.10,
+        "stylometry": 0.08,
+        "burstiness": 0.06,
+        "structural_entropy": 0.04,
+        "vocabulary_richness": 0.03,
+        "whitespace_rhythm": 0.01,
+        "docstring_density": 0.01,
     }
 
     def __init__(self) -> None:

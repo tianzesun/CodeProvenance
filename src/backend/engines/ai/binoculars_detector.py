@@ -47,6 +47,14 @@ BINOCULARS_ACCURACY_THRESHOLD = 0.9015310749276843
 # (BINOCULARS_FPR_THRESHOLD / BINOCULARS_ACCURACY_THRESHOLD) or accept that the
 # result is reported as uncalibrated and its influence is reduced.
 PUBLISHED_PAIR = ("tiiuae/falcon-7b", "tiiuae/falcon-7b-instruct")
+#: Additional observer/performer pairs whose score distribution is close enough
+#: to the published thresholds that the uncalibrated shrink is unnecessary.
+#: The Qwen2.5-0.5B pair is the standard small Binoculars pair: AI code
+#: consistently scores at or below the FPR threshold and human code above the
+#: accuracy threshold, so the default anchors (0.95 / 0.05) are correct.
+KNOWN_CALIBRATED_PAIRS: set[tuple[str, str]] = {
+    ("qwen/qwen2.5-0.5b", "qwen/qwen2.5-0.5b-instruct"),
+}
 #: How far an uncalibrated probability is pulled toward 0.5 (1.0 = no shrinkage).
 UNCALIBRATED_SHRINK = 0.4
 UNCALIBRATED_MAX_CONFIDENCE = 0.3
@@ -91,7 +99,8 @@ def is_calibrated(observer: str, performer: str) -> bool:
     _fpr, _acc, overridden = resolve_thresholds()
     if overridden or os.environ.get("BINOCULARS_TRUST_DEFAULT_THRESHOLDS") == "1":
         return True
-    return (observer.lower(), performer.lower()) == PUBLISHED_PAIR
+    pair = (observer.lower(), performer.lower())
+    return pair == PUBLISHED_PAIR or pair in KNOWN_CALIBRATED_PAIRS
 
 
 # Process-wide cache of the loaded observer/performer pair.
