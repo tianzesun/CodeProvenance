@@ -131,6 +131,24 @@ class TestAssignmentResolution:
             User,
         )
 
+        with SessionLocal() as db:
+            # Idempotent: clears any row this tag leaked in a previous run
+            # (older pattern bugs left user rows behind that would otherwise
+            # violate users_email_key on the next insert).
+            db.query(Assignment).filter(
+                Assignment.name.like(f"AI-Det Assignment {org_suffix}%")
+            ).delete(synchronize_session=False)
+            db.query(Course).filter(
+                Course.name.like(f"AI-Det Course {org_suffix}%")
+            ).delete(synchronize_session=False)
+            db.query(User).filter(User.email.like(f"ai-detect-{org_suffix}@%")).delete(
+                synchronize_session=False
+            )
+            db.query(Organization).filter(
+                Organization.name.like(f"AI-Det Org {org_suffix}%")
+            ).delete(synchronize_session=False)
+            db.commit()
+
         org_id = str(uuid_mod.uuid4())
         course_id = str(uuid_mod.uuid4())
         assignment_id = str(uuid_mod.uuid4())
@@ -182,7 +200,7 @@ class TestAssignmentResolution:
             db.query(Course).filter(
                 Course.name.like(f"AI-Det Course {org_suffix}%")
             ).delete(synchronize_session=False)
-            db.query(User).filter(User.email.like(f"ai-detect-{org_suffix}-%")).delete(
+            db.query(User).filter(User.email.like(f"ai-detect-{org_suffix}@%")).delete(
                 synchronize_session=False
             )
             db.query(Organization).filter(
