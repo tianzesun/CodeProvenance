@@ -374,10 +374,13 @@ class BinocularsDetector:
                 logger.warning(
                     "BinocularsDetector could not be loaded: %s. "
                     "Falling back to heuristic signals only. "
-                    "Install with: pip install "
+                    "Install with: pip install transformers sentencepiece numpy "
+                    "&& pip install --no-deps "
                     "git+https://github.com/ahans30/Binoculars.git "
-                    "(the PyPI 'binoculars' package is an unrelated statistics "
-                    "library, not the AI detector)",
+                    "(--no-deps is required: the package pins transformers "
+                    "4.31.0 built from source, which fails on Python 3.12; "
+                    "any modern transformers works. The PyPI 'binoculars' "
+                    "package is an unrelated statistics library)",
                     exc,
                 )
                 self._available = False

@@ -13,7 +13,11 @@ echo ""
 echo "=== 1b. binoculars package ==="
 source venv/bin/activate 2>/dev/null || true
 python3 -c "import binoculars; print('  installed:', binoculars.__file__)" 2>/dev/null \
-    || echo "  MISSING — install with: pip install git+https://github.com/ahans30/Binoculars.git"
+    || echo "  MISSING — install with:"
+echo "    pip install transformers sentencepiece numpy"
+echo "    pip install --no-deps git+https://github.com/ahans30/Binoculars.git"
+echo "  (--no-deps is required: the package pins transformers 4.31.0 built"
+echo "   from source, which fails on Python 3.12; any modern transformers works)"
 
 echo ""
 echo "=== 2. HF cache (models must be present offline) ==="

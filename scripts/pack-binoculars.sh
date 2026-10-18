@@ -46,6 +46,7 @@ echo "Bundle ready: $OUT ($(du -sh "$OUT" | cut -f1))"
 echo ""
 echo "On the target server, run:"
 echo "  pip install --no-deps $OUT/binoculars-*.whl"
+echo "  # (also ensure runtime deps: pip install transformers sentencepiece numpy)"
 if [ -f "$OUT/qwen-models.tar.gz" ]; then
     echo "  mkdir -p ~/.cache/huggingface/hub"
     echo "  tar xzf $OUT/qwen-models.tar.gz -C ~/.cache/huggingface/hub"
