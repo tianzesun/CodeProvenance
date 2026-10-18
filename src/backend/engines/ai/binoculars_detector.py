@@ -54,6 +54,11 @@ PUBLISHED_PAIR = ("tiiuae/falcon-7b", "tiiuae/falcon-7b-instruct")
 #: 1.087 vs human 1.065, best single-threshold split 62%, distributions fully
 #: overlapping), i.e. Falcon-fitted anchors label real submissions with
 #: numbers that mean nothing for this pair.
+#: Measured 2026-10-18 on the same probe: Qwen2.5-1.5B also at chance (60%);
+#: a deepseek-coder-6.7b base/instruct pair reached 76.7% (AI median 0.884 vs
+#: human 1.088, zero human false positives at the split but ~53% recall) —
+#: promising for a future high-precision flag layer, below the bar for
+#: voting in scores.
 KNOWN_CALIBRATED_PAIRS: set[tuple[str, str]] = set()
 #: How far an uncalibrated probability is pulled toward 0.5 (1.0 = no shrinkage).
 UNCALIBRATED_SHRINK = 0.4
