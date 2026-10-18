@@ -41,4 +41,4 @@ PY
 
 echo ""
 echo "Download complete. Materialise with:"
-echo "  python -m src.backend.scripts.build_aigcodeset"
+echo "  python -m src.backend.engines.ai.build_aigcodeset"
