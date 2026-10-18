@@ -10,6 +10,12 @@ grep -E "^BINOCULARS_ENABLED" src/backend/.env.local 2>/dev/null || echo "BINOCU
 grep -E "^HF_HOME" src/backend/.env.local 2>/dev/null || echo "HF_HOME not set (defaults to ~/.cache/huggingface)"
 
 echo ""
+echo "=== 1b. binoculars package ==="
+source venv/bin/activate 2>/dev/null || true
+python3 -c "import binoculars; print('  installed:', binoculars.__file__)" 2>/dev/null \
+    || echo "  MISSING — install with: pip install git+https://github.com/ahans30/Binoculars.git"
+
+echo ""
 echo "=== 2. HF cache (models must be present offline) ==="
 HF_DIR="${HF_HOME:-$HOME/.cache/huggingface}"
 echo "HF cache dir: $HF_DIR"

@@ -302,15 +302,33 @@ def test_bf16_defaults_to_cpu_capability() -> None:
 
 
 def test_bf16_prefers_cuda_over_cpu_probe() -> None:
-    """Any CUDA device means native bf16 — the CPU probe is irrelevant there."""
+    """A bf16-capable CUDA device wins over the CPU probe."""
     from src.backend.engines.ai import binoculars_detector as module
 
     with patch.dict(os.environ, {}, clear=False):
         os.environ.pop("BINOCULARS_BF16", None)
         cuda = patch.object(module, "_cuda_available", return_value=True)
-        incapable = patch.object(module, "_cpu_has_native_bf16", return_value=False)
-        with cuda, incapable:
+        capable = patch.object(module, "_cuda_supports_bf16", return_value=True)
+        incapable_cpu = patch.object(module, "_cpu_has_native_bf16", return_value=False)
+        with cuda, capable, incapable_cpu:
             assert module._bfloat16_enabled() is True
+
+
+def test_bf16_falls_back_to_cpu_probe_on_pre_ampere_cuda() -> None:
+    """CUDA without native bf16 (e.g. Turing T4) must not force bf16.
+
+    bf16 math requires Ampere (sm_80+). A T4 advertises CUDA but has no
+    native bf16, so the policy returns fp32 — the CPU probe is irrelevant
+    there because the inference runs on the GPU.
+    """
+    from src.backend.engines.ai import binoculars_detector as module
+
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("BINOCULARS_BF16", None)
+        cuda = patch.object(module, "_cuda_available", return_value=True)
+        incapable = patch.object(module, "_cuda_supports_bf16", return_value=False)
+        with cuda, incapable:
+            assert module._bfloat16_enabled() is False
 
 
 def test_cuda_probe_is_a_plain_bool() -> None:

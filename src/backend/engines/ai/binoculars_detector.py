@@ -167,21 +167,46 @@ def _cuda_available() -> bool:
         return False
 
 
+def _cuda_supports_bf16() -> bool:
+    """Whether the current CUDA device natively supports bfloat16.
+
+    bf16 math was introduced on Ampere (A100, sm_80). Older CUDA devices —
+    notably the Turing T4 (sm_75) — lack native bf16: torch either errors
+    or silently emulates it at a large slowdown. ``torch.cuda.
+    is_bf16_supported()`` is the authoritative check; when absent (very old
+    torch) fall back to the compute-capability comparison. Any failure
+    reports False so the detector stays on fp32, which is always correct.
+    """
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return False
+        checker = getattr(torch.cuda, "is_bf16_supported", None)
+        if callable(checker):
+            return bool(checker())
+        return torch.cuda.get_device_capability() >= (8, 0)
+    except Exception:
+        return False
+
+
 def _bfloat16_enabled() -> bool:
     """Resolve whether to load the model pair in bfloat16.
 
     An explicit ``BINOCULARS_BF16`` (0/1) always wins so operators can force
     either path. Otherwise bf16 is used whenever the math runs natively:
-    on any CUDA device (halves VRAM at full speed — the models already live
-    on GPU there), else only when the CPU itself has native bf16 (ARM ``bf16``
-    / x86 ``avx512_bf16``), since emulation measured 159x slower GEMM and
-    turned single-file jobs into hour-long runs.
+    on a CUDA device that supports it (Ampere+; halves VRAM at full speed —
+    the models already live on GPU there), else only when the CPU itself has
+    native bf16 (ARM ``bf16`` / x86 ``avx512_bf16``), since emulation measured
+    159x slower GEMM and turned single-file jobs into hour-long runs. Pre-
+    Ampere CUDA devices (Turing T4, sm_75) have no native bf16 and take the
+    fp32 path.
     """
     env = os.environ.get("BINOCULARS_BF16")
     if env is not None:
         return env != "0"
     if _cuda_available():
-        return True
+        return _cuda_supports_bf16()
     return _cpu_has_native_bf16()
 
 
