@@ -33,6 +33,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.backend.engines.ai.orchestrator import AIDetectionOrchestrator  # noqa: E402
 
 THRESHOLDS = (0.40, 0.50, 0.70)  # medium band, neutral cut, high band
+CORPORA = ("kaggle_student_code", "ir_plag_originals", "poolc_sample")
 
 
 def _iter_kaggle_student(dataset_root: Path) -> list[tuple[str, str, str]]:
@@ -139,12 +140,21 @@ def main() -> int:
     args = parser.parse_args()
 
     dataset_root = REPO_ROOT / "data" / "datasets"
-    everything = [
-        *_iter_kaggle_student(dataset_root),
-        *_iter_ir_plag_originals(dataset_root),
-        *_iter_poolc_sample(dataset_root, args.poolc_n),
-    ]
-    items = [i for i in everything if not args.corpora or i[0] in args.corpora]
+    # Build only the requested corpora. PoolC needs pyarrow, and building it
+    # eagerly made ``--corpora kaggle_student_code`` fail on machines without
+    # that optional package.
+    selected = set(args.corpora or CORPORA)
+    unknown = sorted(selected - set(CORPORA))
+    if unknown:
+        print(f"Unknown corpora: {', '.join(unknown)} (known: {', '.join(CORPORA)})")
+        return 1
+    items: list[tuple[str, str, str]] = []
+    if "kaggle_student_code" in selected:
+        items.extend(_iter_kaggle_student(dataset_root))
+    if "ir_plag_originals" in selected:
+        items.extend(_iter_ir_plag_originals(dataset_root))
+    if "poolc_sample" in selected:
+        items.extend(_iter_poolc_sample(dataset_root, args.poolc_n))
 
     if args.limit and args.limit > 0:
         if args.per_corpus:
