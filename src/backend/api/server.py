@@ -7833,10 +7833,11 @@ async def detect_ai_generated_code(
                 )
                 if (
                     current_user
-                    and current_user.get("tenant_id")
+                    and current_user.get("organization_id")
                     and (
                         course is None
-                        or str(course.tenant_id) != str(current_user["tenant_id"])
+                        or str(course.organization_id)
+                        != str(current_user["organization_id"])
                     )
                 ):
                     return JSONResponse(

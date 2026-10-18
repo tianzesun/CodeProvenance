@@ -93,3 +93,183 @@ class TestFinalizeAIDetectionJob:
             assert server._jobs["job-bad"]["status"] == "failed"
         finally:
             server._jobs.pop("job-bad", None)
+
+
+class TestAssignmentResolution:
+    """POST /api/ai-detect with assignment_id resolves course via organization_id.
+
+    Regression: the endpoint compared course.tenant_id (nonexistent) against
+    current_user["tenant_id"], crashing with AttributeError for every
+    authenticated user who selected an assignment.
+    """
+
+    def _cookie_jar(self, user_id: str) -> dict[str, str]:
+        from datetime import datetime, timedelta, timezone
+
+        from jose import jwt as jose_jwt
+
+        from src.backend.api.server import AUTH_COOKIE_NAME
+        from src.backend.config.settings import settings as app_settings
+
+        now = datetime.now(timezone.utc)
+        token = jose_jwt.encode(
+            {"sub": user_id, "exp": now + timedelta(minutes=30), "iat": now},
+            app_settings.auth_jwt_secret or "unit-test-secret",
+            algorithm="HS256",
+        )
+        return {AUTH_COOKIE_NAME: token}
+
+    def _seed_org_course_assignment(self, org_suffix: str):
+        """Create org + course + assignment + user with matching organization_id."""
+        import uuid as uuid_mod
+
+        from src.backend.config.database import SessionLocal
+        from src.backend.models.database import (
+            Assignment,
+            Course,
+            Organization,
+            User,
+        )
+
+        org_id = str(uuid_mod.uuid4())
+        course_id = str(uuid_mod.uuid4())
+        assignment_id = str(uuid_mod.uuid4())
+        user_id = str(uuid_mod.uuid4())
+
+        with SessionLocal() as db:
+            db.add(Organization(id=org_id, name=f"AI-Det Org {org_suffix}"))
+            db.add(
+                Course(
+                    id=course_id,
+                    organization_id=org_id,
+                    name=f"AI-Det Course {org_suffix}",
+                )
+            )
+            db.add(
+                Assignment(
+                    id=assignment_id,
+                    course_id=course_id,
+                    name=f"AI-Det Assignment {org_suffix}",
+                )
+            )
+            db.add(
+                User(
+                    id=user_id,
+                    organization_id=org_id,
+                    email=f"ai-detect-{org_suffix}@example.com",
+                    full_name=f"AI Det {org_suffix}",
+                    password_hash="x",
+                    role="professor",
+                    is_active=True,
+                )
+            )
+            db.commit()
+        return org_id, course_id, assignment_id, user_id
+
+    def _cleanup(self, org_suffix: str) -> None:
+        from src.backend.config.database import SessionLocal
+        from src.backend.models.database import (
+            Assignment,
+            Course,
+            Organization,
+            User,
+        )
+
+        with SessionLocal() as db:
+            db.query(Assignment).filter(
+                Assignment.name.like(f"AI-Det Assignment {org_suffix}%")
+            ).delete(synchronize_session=False)
+            db.query(Course).filter(
+                Course.name.like(f"AI-Det Course {org_suffix}%")
+            ).delete(synchronize_session=False)
+            db.query(User).filter(User.email.like(f"ai-detect-{org_suffix}-%")).delete(
+                synchronize_session=False
+            )
+            db.query(Organization).filter(
+                Organization.name.like(f"AI-Det Org {org_suffix}%")
+            ).delete(synchronize_session=False)
+            db.commit()
+
+    def test_same_org_assignment_resolves_without_error(self, monkeypatch) -> None:
+        """A user in the same org as the course gets a 200, not an AttributeError."""
+        from fastapi.testclient import TestClient
+
+        tag = "same-org"
+        org_id, course_id, assignment_id, user_id = self._seed_org_course_assignment(
+            tag
+        )
+        try:
+
+            def fake_auth(*args, **kwargs):
+                return {
+                    "id": user_id,
+                    "role": "professor",
+                    "tenant_id": None,
+                    "organization_id": org_id,
+                }
+
+            monkeypatch.setattr(server, "_authenticate_request", fake_auth)
+            monkeypatch.setattr(server, "_finalize_ai_detection_job", lambda *a: None)
+
+            client = TestClient(server.app)
+            resp = client.post(
+                "/api/ai-detect",
+                data={"assignment_id": assignment_id},
+                files=[
+                    (
+                        "files",
+                        (
+                            "test.py",
+                            b"print('hello world this is long enough')\n",
+                            "text/x-python",
+                        ),
+                    )
+                ],
+                cookies=self._cookie_jar(user_id),
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert "job_id" in body
+            server._jobs.pop(body["job_id"], None)
+        finally:
+            self._cleanup(tag)
+
+    def test_cross_org_assignment_returns_403(self, monkeypatch) -> None:
+        """A user in a different org than the course gets 403, not a crash."""
+        from fastapi.testclient import TestClient
+
+        tag_a, tag_b = "org-a", "org-b"
+        org_a, _, assignment_id, _ = self._seed_org_course_assignment(tag_a)
+        org_b, _, _, user_b_id = self._seed_org_course_assignment(tag_b)
+        try:
+
+            def fake_auth(*args, **kwargs):
+                return {
+                    "id": user_b_id,
+                    "role": "professor",
+                    "tenant_id": None,
+                    "organization_id": org_b,
+                }
+
+            monkeypatch.setattr(server, "_authenticate_request", fake_auth)
+
+            client = TestClient(server.app)
+            resp = client.post(
+                "/api/ai-detect",
+                data={"assignment_id": assignment_id},
+                files=[
+                    (
+                        "files",
+                        (
+                            "test.py",
+                            b"print('hello world this is long enough')\n",
+                            "text/x-python",
+                        ),
+                    )
+                ],
+                cookies=self._cookie_jar(user_b_id),
+            )
+            assert resp.status_code == 403, resp.text
+        finally:
+            self._cleanup(tag_a)
+            self._cleanup(tag_b)
