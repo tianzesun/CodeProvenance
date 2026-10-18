@@ -348,6 +348,11 @@ class AIDetectionOrchestrator:
                 "ai_probability": bino_result.get("ai_probability"),
                 "confidence": bino_result.get("confidence"),
                 "available": bino_result.get("available", False),
+                # raw ratio + label kept for diagnostics: the mapped
+                # probability clamps at the anchors (0.95/0.05), so without
+                # the raw score a compressed result cannot be debugged.
+                "raw_score": bino_result.get("raw_score"),
+                "label": bino_result.get("label"),
             },
             "legacy": {
                 "ai_probability": legacy_result.get("ai_probability"),
