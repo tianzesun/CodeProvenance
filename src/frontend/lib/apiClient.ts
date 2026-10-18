@@ -35,7 +35,7 @@ function flushQueue(error?: unknown) {
 // and caused protected endpoints to reject otherwise valid sessions.
 
 export const apiClient: AxiosInstance = axios.create({
-  baseURL: '/codeprovenance',
+  baseURL: process.env.NEXT_PUBLIC_BASE_PATH || '',
   withCredentials: true,
   timeout: 120000, // 2 minutes for plagiarism checks and long-running operations
 });

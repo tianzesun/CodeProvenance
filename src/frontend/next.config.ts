@@ -16,7 +16,7 @@ if (!backendOrigin) {
 }
 
 const nextConfig: NextConfig = {
-  basePath: '/codeprovenance',
+  basePath: process.env.NEXT_PUBLIC_BASE_PATH || '',
   async rewrites() {
     return [
       { source: '/api/:path*', destination: `${backendOrigin}/api/:path*` },
