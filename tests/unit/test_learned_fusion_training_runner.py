@@ -1,6 +1,7 @@
 """Unit tests for the learned fusion training runner helpers."""
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -352,6 +353,20 @@ class TestPoolcLoader:
         assert len(pairs) == 10
         assert sum(pair.label for pair in pairs) == 5
         assert {pair.metadata["group"] for pair in pairs} == {"1-1", "1-2"}
+
+    def test_missing_pyarrow_names_the_fix(self, tmp_path, monkeypatch):
+        """An absent pyarrow must not surface as a bare ModuleNotFoundError."""
+        dataset = tmp_path / "poolc_600k_python" / "data"
+        dataset.mkdir(parents=True)
+        (dataset / "train-00000-of-00001.parquet").write_bytes(b"")
+        monkeypatch.setitem(sys.modules, "pyarrow", None)
+
+        runner = LearnedFusionTrainingRunner(
+            output_dir=tmp_path / "reports", dataset_roots=[tmp_path]
+        )
+
+        with pytest.raises(ImportError, match="pip install pyarrow"):
+            runner._load_poolc_pairs()
 
 
 class TestFeatureCache:

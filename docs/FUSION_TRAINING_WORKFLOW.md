@@ -281,6 +281,16 @@ Two rules make the evaluation honest enough to act on:
   dominates: ~1.9 s/pair on a CPU laptop). `--cache` makes a long run resumable
   and makes alternative training mixes cost only a logistic fit.
 
+These three corpora are CSV/py files. Adding `poolc_600k_python` is the one step
+that needs an extra package: its `.parquet` shards are read with `pyarrow`, which
+is not in `requirements.txt`, so a fresh server venv fails with an opaque
+`ModuleNotFoundError` unless it is installed:
+
+```bash
+$PYTHON_BIN -m pip install pyarrow
+$PYTHON_BIN -c "import pyarrow.parquet; print('pyarrow ok')"
+```
+
 ### Warning: what PoolC labels actually mean
 
 `poolc_600k_python` is the largest corpus in the repo (598736 pairs in the

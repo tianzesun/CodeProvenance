@@ -3526,7 +3526,13 @@ def _load_poolc_pair_dataset(
     if not parquet_files:
         return {}, []
 
-    import pyarrow.parquet as pq
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        raise ImportError(
+            "PoolC parquet loading requires pyarrow. "
+            "Run: ./venv/bin/pip install pyarrow"
+        )
 
     submissions: dict[str, str] = {}
     explicit_pairs: list[dict[str, Any]] = []

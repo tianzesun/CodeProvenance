@@ -565,7 +565,14 @@ class LearnedFusionTrainingRunner:
         if not shards:
             raise FileNotFoundError(f"No PoolC parquet shards under {root / 'data'}")
 
-        import pyarrow.parquet as pq
+        try:
+            import pyarrow.parquet as pq
+        except ImportError:
+            raise ImportError(
+                "Reading the PoolC parquet shards requires pyarrow. "
+                "Run: ./venv/bin/pip install pyarrow (or drop "
+                "poolc_600k_python from --datasets)"
+            )
 
         cap = self.max_pairs_per_dataset
         if cap is None:
