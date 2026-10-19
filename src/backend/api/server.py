@@ -16,6 +16,7 @@ sys.path.insert(0, str(project_root))
 
 import csv
 import hashlib
+import importlib.util
 import json
 import logging
 import math
@@ -3528,11 +3529,17 @@ def _load_poolc_pair_dataset(
 
     try:
         import pyarrow.parquet as pq
-    except ImportError:
+    except ImportError as exc:
+        if importlib.util.find_spec("pyarrow") is None:
+            raise ImportError(
+                "PoolC parquet loading requires pyarrow. "
+                "Run: ./venv/bin/pip install 'pyarrow<26'"
+            ) from exc
         raise ImportError(
-            "PoolC parquet loading requires pyarrow. "
-            "Run: ./venv/bin/pip install pyarrow"
-        )
+            f"pyarrow is installed but cannot be imported: {exc}. "
+            "This repo pins numpy==1.26.3, and pyarrow 26+ requires numpy>=2, "
+            "so install a compatible build: ./venv/bin/pip install 'pyarrow<26'"
+        ) from exc
 
     submissions: dict[str, str] = {}
     explicit_pairs: list[dict[str, Any]] = []

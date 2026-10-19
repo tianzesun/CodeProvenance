@@ -283,13 +283,20 @@ Two rules make the evaluation honest enough to act on:
 
 These three corpora are CSV/py files. Adding `poolc_600k_python` is the one step
 that needs an extra package: its `.parquet` shards are read with `pyarrow`, which
-is not in `requirements.txt`, so a fresh server venv fails with an opaque
-`ModuleNotFoundError` unless it is installed:
+is not in `requirements.txt`, so a fresh server venv fails unless it is
+installed — and it must be **younger than 26**:
 
 ```bash
-$PYTHON_BIN -m pip install pyarrow
-$PYTHON_BIN -c "import pyarrow.parquet; print('pyarrow ok')"
+$PYTHON_BIN -m pip install 'pyarrow<26'
+$PYTHON_BIN -c "import pyarrow.parquet, pyarrow; print('pyarrow', pyarrow.__version__)"
 ```
+
+`requirements.txt` pins `numpy==1.26.3` (for the torch build), while pyarrow 26
+and newer require `numpy>=2`. A plain `pip install pyarrow` therefore installs a
+build that imports as `ImportError: pyarrow requires NumPy 2.0 or newer, found
+1.26.3`. Verified against numpy 1.26.3: 22.0.0, 23.0.1, 24.0.0 and 25.0.0 import
+fine, 26.0.0 does not. Do not "fix" this by upgrading numpy: torch in this repo
+is built against the numpy 1.x ABI.
 
 ### Warning: what PoolC labels actually mean
 

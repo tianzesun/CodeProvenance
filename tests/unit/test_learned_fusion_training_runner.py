@@ -355,7 +355,7 @@ class TestPoolcLoader:
         assert {pair.metadata["group"] for pair in pairs} == {"1-1", "1-2"}
 
     def test_missing_pyarrow_names_the_fix(self, tmp_path, monkeypatch):
-        """An absent pyarrow must not surface as a bare ModuleNotFoundError."""
+        """Absent pyarrow must not surface as a bare ModuleNotFoundError."""
         dataset = tmp_path / "poolc_600k_python" / "data"
         dataset.mkdir(parents=True)
         (dataset / "train-00000-of-00001.parquet").write_bytes(b"")
@@ -365,7 +365,37 @@ class TestPoolcLoader:
             output_dir=tmp_path / "reports", dataset_roots=[tmp_path]
         )
 
-        with pytest.raises(ImportError, match="pip install pyarrow"):
+        with pytest.raises(ImportError, match="pip install 'pyarrow<26'"):
+            runner._load_poolc_pairs()
+
+    def test_broken_pyarrow_reports_the_real_cause(self, tmp_path, monkeypatch):
+        """Installed-but-unimportable pyarrow keeps the underlying error.
+
+        An unpinned ``pip install pyarrow`` gets 26+, which requires numpy>=2
+        while this repo pins numpy==1.26.3. Telling the operator to install
+        pyarrow in that state sends them in a circle.
+        """
+        import importlib.util
+
+        dataset = tmp_path / "poolc_600k_python" / "data"
+        dataset.mkdir(parents=True)
+        (dataset / "train-00000-of-00001.parquet").write_bytes(b"")
+
+        real_find_spec = importlib.util.find_spec
+        monkeypatch.setattr(
+            importlib.util,
+            "find_spec",
+            lambda name, package=None: (
+                object() if name == "pyarrow" else real_find_spec(name, package)
+            ),
+        )
+        monkeypatch.setitem(sys.modules, "pyarrow", None)
+
+        runner = LearnedFusionTrainingRunner(
+            output_dir=tmp_path / "reports", dataset_roots=[tmp_path]
+        )
+
+        with pytest.raises(ImportError, match="cannot be imported"):
             runner._load_poolc_pairs()
 
 
