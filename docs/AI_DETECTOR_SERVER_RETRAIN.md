@@ -253,6 +253,17 @@ Interpretation:
 - Numbers are **not comparable** with the laptop's or any transformer-era
   figure unless the same perplexity model is in use on both hosts.
 
+Blend tuning does not need another corpus run: the dumps above record
+`ml_score`/`heuristic_score`/`lines` per file, and
+
+```bash
+python scripts/sweep_ml_blend.py --fp-dump /tmp/opencode/G_codelm \
+    --ai-dump /tmp/opencode/G_codelm_ai.json --weights 0.5,0.65,0.8,1.0
+```
+
+replays the shipped `blend_ml_heuristic` over them (the 2026-10-18 sweep showed
+the shipped 0.50 is already the best operating point).
+
 ## Rollback
 
 A model and a perplexity model are a **pair**: the loader takes the newest

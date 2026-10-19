@@ -190,3 +190,46 @@ Two conclusions this measurement forces:
    raise recall without touching the student false-positive rate. Runbook:
    [`docs/AI_DETECTOR_SERVER_RETRAIN.md`](AI_DETECTOR_SERVER_RETRAIN.md).
 
+### Outcome (same day): the code LM shipped — and it moved the FP side, not recall
+
+The lever above was executed on the deployment host: a 488 MB slim cache of
+`microsoft/CodeGPT-small-py`, then a grouped retrain on the same 7140 samples
+(classifier's own grouped holdout AUC 0.6862, vs ~0.66 on statistical features).
+Same guard, same corpora:
+
+| | statistical perplexity | code LM |
+| --- | ---: | ---: |
+| student flagged @0.40 (n=174) | 11.5% | **6.3%** |
+| student flagged @0.50 | 4.6% | 4.0% |
+| student flagged @0.70 | 2.87% | 2.87% |
+| student mean | 0.2878 | 0.2731 |
+| AIGCodeSet AI recall@0.40 (n=400) | 6.0% | 6.5% |
+| fused AUC (AI vs AIGCodeSet human, n=400+400) | 0.6067 | 0.5902 (within noise) |
+
+The code LM roughly **halved the medium-band false-positive rate at flat
+recall** — a straight win for institutional trust — but did not raise detection.
+Two measured reasons:
+
+1. **The benchmark is dominated by files the length gate deliberately mutes.**
+   75.5% of AIGCodeSet AI samples are ≤25 lines (median 15, many 3), where the
+   classifier weight is 0.10; 44% of the Kaggle student files are also ≤25
+   lines. Only assignment-sized code (≥60 lines) gives the classifier its 0.50
+   weight — so the fused AUC understates behaviour on real submissions.
+2. **The fused score ranks real student code above AI code.** AIGCodeSet AI
+   mean 0.197 vs Kaggle student mean 0.273 — the same inversion the 2026-08-22
+   section measured as a raw-classifier AUC of 0.382. Better perplexity features
+   did not fix a *distribution* problem.
+
+Re-tuning the blend is not the fix either. `scripts/sweep_ml_blend.py` replays
+the shipped `blend_ml_heuristic` over the dumps (`--fp-dump` / `--ai-dump`, and
+it refuses to print when the replay disagrees with the dumped caps), and it
+shows the shipped 0.50 is already the best operating point: raising it to 1.00
+bought +0.015 AUC while more than doubling student flags at 0.40 (5.7% → 12.1%)
+and moving AI recall only 6.5% → 7.5%.
+
+The remaining lever is the one the 2026-08-22 section already named: **train and
+evaluate on labelled student submissions** (≥300 AI + ≥300 human,
+`docs/AI_HOLDOUT_COLLECTION.md`), so the decision boundary is fitted to the
+product's real input distribution instead of competitive-programming snippets.
+
+
