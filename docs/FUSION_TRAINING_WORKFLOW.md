@@ -53,6 +53,26 @@ The command searches these roots by default:
 - `data/datasets`
 - `data/bigger_datasets`
 
+### Getting a corpus onto the training machine
+
+`data/*` is gitignored, so a corpus exists only on the machine that downloaded
+it. A retrain therefore needs those directories copied (or re-downloaded) first:
+
+| Corpus | Size on disk |
+| --- | ---: |
+| `poolc_600k_python` (1 of 9 shards) | 218 MB |
+| `conplag` | 74 MB |
+| `IR-Plag-Dataset` | 4.0 MB |
+| `kaggle_student_code` | 736 KB |
+
+Extraction cost is dominated by the embedding feature: measured on a CPU-only
+laptop, one pair costs `1.86 s` with the embedding on and `0.096 s` with it off.
+So 20000 pairs is roughly 10 hours of CPU, and proportionally less with a CUDA
+embedding runtime. Do not turn the embedding off to save time: the artifact
+would then be fitted with `embedding == 0` everywhere while production feeds it
+real values, which silently discards the feature. `--cache` is the intended way
+to pay that cost once.
+
 You can override this on another machine with `--dataset-roots`.
 
 ## Before You Start
