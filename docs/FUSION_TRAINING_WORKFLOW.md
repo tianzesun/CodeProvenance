@@ -16,8 +16,9 @@ The workflow now supports three separate commands:
   - Trains supervised fusion models on labeled local datasets.
   - Exports feature tables, trains several candidate models, saves the best model, and writes Markdown and JSON reports.
 - `fusion-train-learned`
-  - Trains the production scorer (a calibrated logistic model over the six
-    production features) on combined labeled datasets.
+  - Trains the production scorer (a calibrated logistic model over the seven
+    production features: ast, fingerprint, embedding, ngram, winnowing,
+    logic_flow, coverage) on combined labeled datasets.
   - Writes the JSON artifact consumed by `BatchDetectionService` at
     `src/backend/engines/similarity/models/learned_fusion_model.json`, so the
     production similarity score becomes `P(plagiarism | features)` instead of
@@ -33,6 +34,19 @@ The supervised training workflow currently knows how to load:
 - `IR-Plag-Dataset`
 - `codexglue_clone`
 - `poj104`
+
+`fusion-train-learned` has its own list, because a corpus is only usable there
+if its labels describe pairs of *correctly labelled* submissions:
+
+- `IR-Plag-Dataset` (Java, 483 pairs) — each case contributes
+  original-vs-plagiarized and original-vs-non-plagiarized pairs. The negatives
+  are two independent solutions of the same assignment.
+- `conplag` (Java, 911 pairs) — contest pairs with a plagiarized / not
+  plagiarized verdict; negatives are again same-problem.
+- `kaggle_student_code` (Python, 293 pairs) — submissions from one classroom
+  with an explicit cheating label. 100 positive / 193 negative.
+- `poolc_600k_python` (Python, ~600k pairs, sampled) — **read the warning in
+  Step 6 before using this one.**
 
 The command searches these roots by default:
 
@@ -188,8 +202,8 @@ If your server stores the datasets elsewhere, replace `"$DATA_ROOT_1"` and
 
 ## Step 6: Train The Production Learned-Fusion Artifact
 
-Train the scorer that production actually uses on the two plagiarism datasets
-currently in the repo (IR-Plag + ConPlag):
+Train the scorer that production actually uses. The reference recipe reproduces
+the currently shipped artifact:
 
 ```bash
 $PYTHON_BIN -m src.backend.benchmark fusion-train-learned \
@@ -197,14 +211,89 @@ $PYTHON_BIN -m src.backend.benchmark fusion-train-learned \
   --output "$REPORT_ROOT/learned_fusion"
 ```
 
+Reference result of that recipe (shipped artifact, 2026-08-22): out-of-fold AUC
+`0.8650` vs production rule `0.8090` on 1371 pairs, per dataset IR-Plag
+`0.7021` and conplag `0.7950`.
+
+**Read the per-dataset numbers, not the combined one.** The combined AUC is
+flattered by the two corpora being separable from each other; the per-dataset
+rows are the honest generalisation estimate.
+
 What success looks like:
 
-- the report shows `Learned Fusion (LOGO) AUC` above `Production Fused AUC`
-  (recent reference run: 0.8585 vs 0.8145 on 1141 combined pairs)
+- the report shows the out-of-fold `Learned fusion` AUC above `Production fused
+  (rule)` on the same pairs
+- **no per-dataset row regresses** against the currently shipped artifact
 - the artifact `src/backend/engines/similarity/models/learned_fusion_model.json`
   is rewritten
-- the report lists per-dataset LOGO AUC (honest generalization, leaving each
-  plagiarism case or ConPlag problem out)
+
+### Adding the Python corpora
+
+`kaggle_student_code` is the closest thing the repo has to the production
+input: Python submissions from one class, with cheating labels.
+
+```bash
+$PYTHON_BIN -m src.backend.benchmark fusion-train-learned \
+  --datasets IR-Plag-Dataset conplag kaggle_student_code \
+  --cv-folds 5 \
+  --cache "$REPORT_ROOT/learned_fusion/features.jsonl" \
+  --output "$REPORT_ROOT/learned_fusion"
+```
+
+Two rules make the evaluation honest enough to act on:
+
+- **Grouped folds.** `--cv-folds 5` assigns every fold key to one fold, and the
+  fold key is namespaced by dataset (`<dataset>::<case|problem|group>`), so
+  unrelated corpora never share a fold. `--cv-folds 0` keeps the original
+  leave-one-group-out, which is only affordable when few groups exist.
+- **A cache.** Feature extraction is the expensive step (the embedding feature
+  dominates: ~1.9 s/pair on a CPU laptop). `--cache` makes a long run resumable
+  and makes alternative training mixes cost only a logistic fit.
+
+### Warning: what PoolC labels actually mean
+
+`poolc_600k_python` is the largest corpus in the repo (598736 pairs in the
+single downloaded shard), but its labels are *not* plagiarism labels:
+
+- every pair of accepted solutions to the **same** competitive-programming
+  problem is labelled `similar` (299963 pairs), including pairs whose token
+  overlap is only ~0.29 — two different programs that happen to solve the same
+  task;
+- every **cross-problem** pair is labelled `different` (298773 pairs), i.e. the
+  negatives are trivially easy and are *not* the case the product scores.
+
+Training on its negatives teaches "different problems look different", which
+the rule scorer already knows, and training on its easy positives moves the
+decision boundary down for pairs that a human would not call plagiarized. So the
+loader admits its positives and, by default, **no** negatives
+(`--poolc-negative-ratio 0`). Use it to add Python and short-file diversity
+only, and always check the per-dataset rows for IR-Plag, conplag and
+kaggle_student_code before shipping:
+
+```bash
+$PYTHON_BIN -m src.backend.benchmark fusion-train-learned \
+  --datasets IR-Plag-Dataset conplag kaggle_student_code poolc_600k_python \
+  --max-pairs 20000 \
+  --cv-folds 5 \
+  --poolc-negative-ratio 0.0 \
+  --cache "$REPORT_ROOT/learned_fusion/features.jsonl" \
+  --output "$REPORT_ROOT/learned_fusion"
+```
+
+`--max-pairs` is required in practice: it is the number of PoolC pairs whose
+features are extracted, and PoolC alone defaults to 20000 when omitted.
+
+### Decision rule
+
+Ship the new artifact only when all of the following hold:
+
+1. the per-dataset out-of-fold AUC for IR-Plag, conplag and kaggle_student_code
+   is at least as high as the currently shipped artifact's on the same corpora;
+2. the learned out-of-fold AUC beats the rule baseline on those same corpora;
+3. `reports/engine_evaluation` run against IR-Plag does not lose AUC.
+
+Otherwise keep the existing artifact: it is a tracked file, so the rollback is
+`git checkout -- src/backend/engines/similarity/models/learned_fusion_model.json`.
 
 After this step, `BatchDetectionService` uses the learned score as the primary
 similarity score with the rule-based confidence kept in the `fused_score`
