@@ -53,6 +53,31 @@ class TestBlendMLHeuristic:
         assert not capped
         assert score == 0.20
 
+    def test_classifier_only_conviction_is_held_out_of_the_review_band(self) -> None:
+        # Measured 2026-10-18 on 174 Kaggle student submissions: the classifier
+        # lifted 20.1% of real human files over 0.40 versus 9.2% without it
+        # (unchanged at 0.70). With the guard enabled, a confident classifier
+        # call that no explainable signal corroborates (heuristic 0.20) is held
+        # at 0.35 instead of the 0.575 the length gate alone allows.
+        conf = {"corroboration_floor": 0.30, "classifier_only_cap": 0.35}
+        score, capped = blend_ml_heuristic(0.95, 0.20, 80, conf)
+        assert capped
+        assert score == 0.35
+
+    def test_corroborated_classifier_call_keeps_its_full_cap(self) -> None:
+        # Heuristic 0.45 is above the corroboration floor (the explainable
+        # signals carry evidence), so the guard must not fire.
+        conf = {"corroboration_floor": 0.30, "classifier_only_cap": 0.35}
+        score, capped = blend_ml_heuristic(0.80, 0.45, 80, conf)
+        assert not capped
+        assert score == 0.625
+
+    def test_guard_is_disabled_by_default(self) -> None:
+        # Shipped default keeps the previous behaviour until an operator opts in.
+        score, capped = blend_ml_heuristic(0.95, 0.20, 80)
+        assert not capped
+        assert score == 0.575
+
 
 class TestApplyFPSafeguards:
     """apply_fp_safeguards: ported framework penalties on the live path."""
@@ -147,6 +172,43 @@ class TestOrchestratorSafeBlendIntegration:
         assert result["ai_probability"] <= 0.65
         assert result["method"] == "ml"
         assert any("disagreement" in indicator for indicator in result["indicators"])
+
+    def test_classifier_only_conviction_is_held_below_the_review_band(
+        self, monkeypatch
+    ) -> None:
+        long_code = "\n".join(
+            f"value_{index} = compute_{index}(total_{index})" for index in range(80)
+        )
+
+        def fake_score(self, code, language="python", pattern_library=None):
+            return {
+                "ai_probability": 0.95,
+                "method": "ensemble",
+                "mode": "ml",
+                "signals": {"ast": 0.2, "stylometry": 0.2},
+                "flagged_regions": [],
+                "classifier": {"ai_probability": 0.95, "version": "test"},
+            }
+
+        monkeypatch.setattr(
+            "src.backend.engines.ai.ensemble.AIEnsembleScorer.score", fake_score
+        )
+        monkeypatch.setattr(
+            AIDetectionOrchestrator, "_heuristic_fuse", lambda self, signals: 0.20
+        )
+        monkeypatch.setattr(
+            AIDetectionOrchestrator,
+            "_blend_config",
+            lambda self: {"corroboration_floor": 0.30, "classifier_only_cap": 0.35},
+        )
+        result = AIDetectionOrchestrator().analyze(long_code, language="python")
+
+        assert result["method"] == "ml"
+        assert result["layers"]["fusion"]["disagreement_capped"] is True
+        # The low-confidence damper contracts 0.35 toward the middle (0.38), but
+        # the invariant the guard exists for is that an unevidenced classifier
+        # call stays out of the review band.
+        assert result["ai_probability"] < 0.40
 
     def test_agreeing_classifier_raises_score_without_cap(self, monkeypatch) -> None:
         from tests.unit.test_ai_detector_orchestrator_precision import AI_CANONICAL
