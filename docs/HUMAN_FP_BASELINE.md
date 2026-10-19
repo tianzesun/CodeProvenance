@@ -232,4 +232,15 @@ evaluate on labelled student submissions** (≥300 AI + ≥300 human,
 `docs/AI_HOLDOUT_COLLECTION.md`), so the decision boundary is fitted to the
 product's real input distribution instead of competitive-programming snippets.
 
+Product consequence (same day): the gate is a *product* behaviour, not just a
+tuning knob, so a file at or below `ml_min_lines` now carries an explicit
+reviewer-facing indicator from the orchestrator fusion path —
+
+> Short file (N lines) — limited signal: the classifier is down-weighted, so
+> this score rests mainly on style heuristics
+
+`AIDetectionPanel` already renders `indicators`, so no frontend change was
+needed. A 20% reading on a 12-line snippet is not a verdict from the trained
+model, and the product no longer presents it as one.
+
 

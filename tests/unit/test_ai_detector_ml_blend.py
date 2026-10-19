@@ -1,10 +1,28 @@
 """Unit tests for the orchestrator safe-blend fusion and FP safeguards."""
 
 from src.backend.engines.ai.orchestrator import (
+    DEFAULT_ML_BLEND,
     AIDetectionOrchestrator,
     apply_fp_safeguards,
+    blend_config,
     blend_ml_heuristic,
 )
+
+
+def _fake_ml_score(probability: float):
+    """Stand-in for AIEnsembleScorer.score reporting a trained classifier."""
+
+    def fake_score(self, code, language="python", pattern_library=None):
+        return {
+            "ai_probability": probability,
+            "method": "ensemble",
+            "mode": "ml",
+            "signals": {"ast": 0.2, "stylometry": 0.2},
+            "flagged_regions": [],
+            "classifier": {"ai_probability": probability, "version": "test"},
+        }
+
+    return fake_score
 
 
 class TestBlendMLHeuristic:
@@ -75,6 +93,14 @@ class TestBlendMLHeuristic:
         assert not capped
         assert score == 0.575
 
+    def test_blend_config_merges_defaults_with_overrides(self) -> None:
+        # The disclosure in ``analyze`` and the blend must read one config, so
+        # the merge lives in blend_config.
+        merged = blend_config({"ml_base_weight": 0.7})
+        assert merged["ml_base_weight"] == 0.7
+        assert merged["ml_min_lines"] == DEFAULT_ML_BLEND["ml_min_lines"]
+        assert blend_config(None) == DEFAULT_ML_BLEND
+
 
 class TestApplyFPSafeguards:
     """apply_fp_safeguards: ported framework penalties on the live path."""
@@ -137,6 +163,51 @@ class TestApplyFPSafeguards:
 
 class TestOrchestratorSafeBlendIntegration:
     """The orchestrator must expose the blend, not trust the classifier."""
+
+    def test_short_file_discloses_the_down_weighted_classifier(
+        self, monkeypatch
+    ) -> None:
+        # Below ml_min_lines the length gate holds the classifier at ~0.10
+        # weight, so the fused score is mostly the stylistic heuristic. A
+        # reviewer must be told that, instead of being shown a bare number that
+        # reads like a verdict from the trained model.
+        short_code = "\n".join(
+            f"row_{index} = load_{index}(path_{index})" for index in range(10)
+        )
+
+        monkeypatch.setattr(
+            "src.backend.engines.ai.ensemble.AIEnsembleScorer.score",
+            _fake_ml_score(0.9),
+        )
+        monkeypatch.setattr(
+            AIDetectionOrchestrator, "_heuristic_fuse", lambda self, signals: 0.2
+        )
+        result = AIDetectionOrchestrator().analyze(short_code, language="python")
+
+        assert result["layers"]["fusion"]["line_count"] == 10
+        assert any(
+            "Short file (10 lines)" in indicator and "limited signal" in indicator
+            for indicator in result["indicators"]
+        )
+
+    def test_disclosure_stops_above_the_length_gate(self, monkeypatch) -> None:
+        # 26 lines is the first length the gate lets through (weight > 0.10), so
+        # the classifier earns enough weight for the disclosure to stop.
+        code = "\n".join(
+            f"row_{index} = load_{index}(path_{index})" for index in range(26)
+        )
+
+        monkeypatch.setattr(
+            "src.backend.engines.ai.ensemble.AIEnsembleScorer.score",
+            _fake_ml_score(0.9),
+        )
+        monkeypatch.setattr(
+            AIDetectionOrchestrator, "_heuristic_fuse", lambda self, signals: 0.2
+        )
+        result = AIDetectionOrchestrator().analyze(code, language="python")
+
+        assert result["layers"]["fusion"]["line_count"] == 26
+        assert not any("Short file" in indicator for indicator in result["indicators"])
 
     def test_disagreeing_classifier_is_capped_and_flagged(self, monkeypatch) -> None:
         long_code = "\n".join(

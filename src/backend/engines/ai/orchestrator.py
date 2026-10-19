@@ -49,6 +49,15 @@ DEFAULT_ML_BLEND: dict[str, float] = {
 }
 
 
+def blend_config(config: dict[str, Any] | None = None) -> dict[str, float]:
+    """Merged blend configuration: shipped defaults plus operator overrides.
+
+    One place for the merge so the orchestrator's length-gate disclosure and
+    ``blend_ml_heuristic`` can never disagree about the thresholds.
+    """
+    return {**DEFAULT_ML_BLEND, **(config or {})}
+
+
 def blend_ml_heuristic(
     ml_score: float,
     heuristic_score: float,
@@ -68,7 +77,7 @@ def blend_ml_heuristic(
 
     Returns (blended_score, disagreement_capped).
     """
-    conf = {**DEFAULT_ML_BLEND, **(config or {})}
+    conf = blend_config(config)
     min_lines = float(conf["ml_min_lines"])
     full_lines = float(conf["ml_full_lines"])
     if line_count <= min_lines:
@@ -322,11 +331,12 @@ class AIDetectionOrchestrator:
             # blend_ml_heuristic for the length gate and disagreement cap).
             heuristic_probability = self._heuristic_fuse(signals)
             line_count = len(code.splitlines())
+            blend_conf = blend_config(self._blend_config())
             fused_probability, capped = blend_ml_heuristic(
                 float(ml_probability),
                 heuristic_probability,
                 line_count,
-                self._blend_config(),
+                blend_conf,
             )
             fusion_debug = {
                 "strategy": "ml_blend",
@@ -335,6 +345,15 @@ class AIDetectionOrchestrator:
                 "line_count": line_count,
                 "disagreement_capped": capped,
             }
+            if line_count <= float(blend_conf["ml_min_lines"]):
+                # The length gate holds the classifier at ~0.10 weight below
+                # ``ml_min_lines``, so the fused number is almost entirely the
+                # stylistic heuristic. Say so, rather than letting a short file's
+                # score read as a verdict from the trained model.
+                fusion_notes.append(
+                    f"Short file ({line_count} lines) — limited signal: the classifier "
+                    "is down-weighted, so this score rests mainly on style heuristics"
+                )
             if capped:
                 fusion_notes.append(
                     "Classifier/heuristic disagreement — score capped, "
