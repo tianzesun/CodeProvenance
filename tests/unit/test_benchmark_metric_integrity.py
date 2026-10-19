@@ -114,6 +114,78 @@ def test_benchmark_pair_scores_keep_raw_score_as_primary() -> None:
     assert positive.features["baseline_adjusted_score"] == 0.0
 
 
+def test_compare_pairs_reports_progress_per_pair() -> None:
+    """Long benchmark extractions must report progress while they run.
+
+    Extraction is one blocking call, so the counters are the only way an
+    operator can tell a slow GPU job apart from a hung one.
+    """
+
+    class Extractor:
+        def extract(
+            self,
+            code_a: str,
+            code_b: str,
+            filename_a: str | None = None,
+            filename_b: str | None = None,
+        ) -> _DummyFeatures:
+            return _DummyFeatures(0.60)
+
+    class Fusion:
+        def fuse(
+            self, features: _DummyFeatures, logic_flow: float = 0.0
+        ) -> _DummyFused:
+            return _DummyFused(features.ast)
+
+    service = BatchDetectionService.__new__(BatchDetectionService)
+    service.extractor = Extractor()
+    service.fusion = Fusion()
+
+    seen: list[tuple[int, int]] = []
+    results = service.compare_pairs(
+        {"a.py": "base", "b.py": "plag", "c.py": "clean"},
+        [
+            {"file_a": "a.py", "file_b": "b.py", "label": 3},
+            {"file_a": "a.py", "file_b": "c.py", "label": 0},
+        ],
+        progress_callback=lambda done, total, _fa, _fb: seen.append((done, total)),
+    )
+
+    assert len(results) == 2
+    assert seen == [(1, 2), (2, 2)]
+
+
+def test_compare_pairs_without_callback_still_works() -> None:
+    """The callback is optional; benchmark callers may pass nothing."""
+
+    class Extractor:
+        def extract(
+            self,
+            code_a: str,
+            code_b: str,
+            filename_a: str | None = None,
+            filename_b: str | None = None,
+        ) -> _DummyFeatures:
+            return _DummyFeatures(0.60)
+
+    class Fusion:
+        def fuse(
+            self, features: _DummyFeatures, logic_flow: float = 0.0
+        ) -> _DummyFused:
+            return _DummyFused(features.ast)
+
+    service = BatchDetectionService.__new__(BatchDetectionService)
+    service.extractor = Extractor()
+    service.fusion = Fusion()
+
+    results = service.compare_pairs(
+        {"a.py": "base", "b.py": "plag"},
+        [{"file_a": "a.py", "file_b": "b.py", "label": 3}],
+    )
+
+    assert len(results) == 1
+
+
 def test_binary_metrics_at_threshold_uses_inclusive_boundary() -> None:
     """Scores equal to the threshold should count as positive predictions."""
     metrics = server._binary_metrics_at_threshold(

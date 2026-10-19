@@ -531,13 +531,27 @@ class BatchDetectionService:
         )
 
     def compare_pairs(
-        self, submissions: dict[str, str], pairs: list[dict[str, Any]]
+        self,
+        submissions: dict[str, str],
+        pairs: list[dict[str, Any]],
+        progress_callback: Callable[[int, int, str, str], None] | None = None,
     ) -> list[ComparisonResult]:
-        """Compare an explicit set of labeled benchmark pairs."""
+        """Compare an explicit set of labeled benchmark pairs.
+
+        Args:
+            submissions: Mapping of submission name to source code.
+            pairs: Benchmarked pairs, each with ``file_a``/``file_b`` and label.
+            progress_callback: Optional ``callback(completed, total, file_a,
+                file_b)`` invoked after every pair finishes. Extraction is a
+                single blocking call, so without this a long benchmark run
+                reports nothing until it is done.
+        """
         from src.backend.engines.similarity.code_matching import CodeHighlighter
 
         highlighter = CodeHighlighter(min_match_length=4)
         scored_pairs = []
+        total_pairs = len(pairs)
+        completed_pairs = 0
         for pair in pairs:
             fa = str(pair.get("file_a", ""))
             fb = str(pair.get("file_b", ""))
@@ -588,6 +602,12 @@ class BatchDetectionService:
                     "code_b": cb,
                 }
             )
+            completed_pairs += 1
+            if progress_callback is not None:
+                try:
+                    progress_callback(completed_pairs, total_pairs, fa, fb)
+                except Exception as exc:  # pragma: no cover - reporting only
+                    logger.debug("Progress callback failed: %s", exc)
 
         clean_baseline = _clean_similarity_baseline(
             [item["raw_score"] for item in scored_pairs if item["label"] < 2]

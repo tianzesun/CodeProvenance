@@ -69,6 +69,33 @@ class LearnedFusionScorer:
         """Order of coefficients used by the loaded model."""
         return list(self._feature_names)
 
+    # The trainer has stored its headline AUC under different keys as it
+    # evolved (the shipped artifact says ``logo_auc_roc``, newer runs say
+    # ``cv_auc_roc``). Look for all of them so the load log never reports a
+    # bare 0.0000 next to a perfectly valid model.
+    _AUC_KEYS: Tuple[Tuple[str, str], ...] = (
+        ("cv_auc_roc", "CV AUC"),
+        ("logo_auc_roc", "LOGO AUC"),
+        ("auc_roc", "AUC"),
+    )
+
+    @property
+    def _reported_auc(self) -> float:
+        """Headline AUC recorded in the artifact metadata, else 0.0."""
+        for key, _label in self._AUC_KEYS:
+            value = self._metadata.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+        return 0.0
+
+    @property
+    def _auc_label(self) -> str:
+        """Evaluation protocol the reported AUC came from."""
+        for key, label in self._AUC_KEYS:
+            if isinstance(self._metadata.get(key), (int, float)):
+                return label
+        return "AUC"
+
     def version_info(self) -> Dict[str, Any]:
         """Return training metadata embedded in the artifact."""
         return dict(self._metadata)
@@ -104,17 +131,20 @@ class LearnedFusionScorer:
             # JSON written by Python may contain NaN/Infinity. ``_sigmoid`` clamps its input with
             # ``min(30, nan)``, which is 30, so one NaN coefficient made EVERY pair score 1.0.
             if not all(math.isfinite(v) and abs(v) <= 1e4 for v in [*values, bias]):
-                raise ValueError("artifact contains non-finite or implausibly large coefficients")
+                raise ValueError(
+                    "artifact contains non-finite or implausibly large coefficients"
+                )
             self._feature_names = names
             self._coefficients = values
             self._intercept = bias
             self._metadata = payload.get("metadata", {})
             self._available = True
             logger.info(
-                "Loaded learned fusion artifact from %s (%s features, AUC=%.4f)",
+                "Loaded learned fusion artifact from %s (%s features, %s=%.4f)",
                 self._artifact_path,
                 len(self._feature_names),
-                self._metadata.get("auc_roc", 0.0),
+                self._auc_label,
+                self._reported_auc,
             )
         except Exception as exc:
             logger.warning(
@@ -140,8 +170,12 @@ class LearnedFusionScorer:
             except (TypeError, ValueError):
                 number = 0.0
             if not math.isfinite(number):
-                number = 0.0  # a NaN feature must not become a NaN (then 1.0) probability
-            linear += coefficient * max(0.0, min(1.0, number))  # features are unit-scale scores
+                number = (
+                    0.0  # a NaN feature must not become a NaN (then 1.0) probability
+                )
+            linear += coefficient * max(
+                0.0, min(1.0, number)
+            )  # features are unit-scale scores
         return _sigmoid(linear)
 
     def try_score(self, features: Dict[str, float]) -> Optional[float]:

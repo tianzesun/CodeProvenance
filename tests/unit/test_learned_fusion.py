@@ -11,7 +11,9 @@ from src.backend.engines.scoring.learned_fusion import (
 )
 
 
-def _write_artifact(path: Path, coefficients, intercept=0.0, features=None):
+def _write_artifact(
+    path: Path, coefficients, intercept=0.0, features=None, metadata=None
+):
     """Write a minimal valid artifact JSON for scorer tests."""
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -28,7 +30,8 @@ def _write_artifact(path: Path, coefficients, intercept=0.0, features=None):
         ],
         "coefficients": coefficients,
         "intercept": intercept,
-        "metadata": {"trained_at": "2026-01-01T00:00:00", "datasets": ["irplag"]},
+        "metadata": metadata
+        or {"trained_at": "2026-01-01T00:00:00", "datasets": ["irplag"]},
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
@@ -142,3 +145,40 @@ class TestLearnedFusionScorer:
         score = scorer.score({"ast": 0.9, "fingerprint": 0.9, "coverage": 0.9})
         assert score < 0.5
         assert 0.0 <= score <= 1.0
+
+
+class TestReportedAuc:
+    """The load log must not report a valid model as AUC=0.0000.
+
+    The trainer renamed its headline metric over time, so the reader has to
+    accept every key it has ever written.
+    """
+
+    def test_reads_the_shipped_logo_key(self, tmp_path):
+        """The deployed artifact records ``logo_auc_roc``."""
+        path = _write_artifact(
+            tmp_path / "model.json",
+            coefficients=[1.0] * 7,
+            metadata={"logo_auc_roc": 0.865},
+        )
+        scorer = LearnedFusionScorer(artifact_path=path)
+        assert scorer._reported_auc == pytest.approx(0.865)
+        assert scorer._auc_label == "LOGO AUC"
+
+    def test_prefers_the_cross_validated_key(self, tmp_path):
+        """Newer artifacts record ``cv_auc_roc`` and win over the old key."""
+        path = _write_artifact(
+            tmp_path / "model.json",
+            coefficients=[1.0] * 7,
+            metadata={"cv_auc_roc": 0.8137, "logo_auc_roc": 0.1},
+        )
+        scorer = LearnedFusionScorer(artifact_path=path)
+        assert scorer._reported_auc == pytest.approx(0.8137)
+        assert scorer._auc_label == "CV AUC"
+
+    def test_absent_auc_is_reported_as_zero(self, tmp_path):
+        """Artifacts without any AUC key keep the old 0.0 placeholder."""
+        path = _write_artifact(tmp_path / "model.json", coefficients=[1.0] * 7)
+        scorer = LearnedFusionScorer(artifact_path=path)
+        assert scorer._reported_auc == pytest.approx(0.0)
+        assert scorer._auc_label == "AUC"

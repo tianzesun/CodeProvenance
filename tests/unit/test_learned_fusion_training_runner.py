@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from src.backend.benchmark.runners.engine_evaluation_runner import LabeledPair
 from src.backend.benchmark.runners.learned_fusion_training_runner import (
     LearnedFusionTrainingRunner,
     run_learned_fusion_training,
@@ -475,6 +476,92 @@ class TestCvNotes:
         runner = LearnedFusionTrainingRunner(output_dir=tmp_path)
         assert "negatives excluded" not in runner._cv_notes(
             "leave-one-group-out", ["IR-Plag-Dataset", "conplag"]
+        )
+
+
+class TestExtractionProgress:
+    """A long extraction must report progress while it is still running.
+
+    ``compare_pairs`` is a single blocking call, so the runner has to hand it
+    a callback. Without one the whole run is silent for its duration, and a
+    post-hoc loop is worse than silence: every line prints at the end with the
+    same elapsed time, which reads as "25 rows took 3 minutes".
+    """
+
+    def _stub_service(self, captured):
+        """A service stub that records and exercises the progress callback."""
+        import types
+
+        class _StubService:
+            def __init__(self):
+                self.learned_scorer = None
+
+            def compare_pairs(
+                self, submissions=None, pairs=None, progress_callback=None
+            ):
+                captured["callback"] = progress_callback
+                results = []
+                for completed, spec in enumerate(pairs or [], start=1):
+                    if progress_callback is not None:
+                        progress_callback(
+                            completed, len(pairs), spec["file_a"], spec["file_b"]
+                        )
+                    results.append(
+                        types.SimpleNamespace(
+                            file_a=spec["file_a"],
+                            file_b=spec["file_b"],
+                            features={"raw_score": 0.5},
+                        )
+                    )
+                return results
+
+        return _StubService
+
+    def test_runner_hands_the_service_a_progress_callback(self, tmp_path, monkeypatch):
+        """The callback reaches the service and the rows still come back."""
+        captured = {}
+        monkeypatch.setattr(
+            "src.backend.application.services.batch_detection_service"
+            ".BatchDetectionService",
+            self._stub_service(captured),
+        )
+        runner = LearnedFusionTrainingRunner(output_dir=tmp_path)
+        pairs = [
+            LabeledPair(
+                pair_id="p1", code_a="a = 1", code_b="a = 2", label=1, language="python"
+            )
+        ]
+
+        rows = runner._extract_feature_rows(pairs)
+
+        assert len(rows) == 1
+        assert rows[0]["raw_score"] == pytest.approx(0.5)
+        assert callable(captured["callback"])
+
+    def test_progress_callback_logs_while_running(self, tmp_path, monkeypatch, caplog):
+        """Invoking the callback emits a progress line, not silence."""
+        import logging
+
+        captured = {}
+        monkeypatch.setattr(
+            "src.backend.application.services.batch_detection_service"
+            ".BatchDetectionService",
+            self._stub_service(captured),
+        )
+        runner = LearnedFusionTrainingRunner(output_dir=tmp_path)
+        pairs = [
+            LabeledPair(
+                pair_id="p1", code_a="a = 1", code_b="a = 2", label=1, language="python"
+            )
+        ]
+        runner._extract_feature_rows(pairs)
+
+        with caplog.at_level(logging.INFO):
+            captured["callback"](1, 1, "pair_00000_a.py", "pair_00000_b.py")
+
+        assert any(
+            "Extracted 1/1 pair feature rows" in record.getMessage()
+            for record in caplog.records
         )
 
 

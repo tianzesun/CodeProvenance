@@ -314,6 +314,26 @@ $PYTHON_BIN -m src.backend.benchmark fusion-train-learned \
 `--max-pairs` is required in practice: it is the number of PoolC pairs whose
 features are extracted, and PoolC alone defaults to 20000 when omitted.
 
+### First measured attempt (same-problem corpora only)
+
+Run on 2026-10-18 on the T4 server over `IR-Plag-Dataset conplag
+kaggle_student_code` with `--cv-folds 5 --dataset-weighting proportional`
+(1664 pairs, 706 positive):
+
+| Dataset | Pairs | Rule AUC | Out-of-fold AUC |
+| --- | ---: | ---: | ---: |
+| IR-Plag-Dataset | 460 | 0.6324 | 0.6185 |
+| conplag | 911 | 0.6617 | 0.7809 |
+| kaggle_student_code | 293 | 0.8718 | 0.8269 |
+
+Pooled: rule 0.7437, out-of-fold 0.8137. The fit still loses to the rule
+baseline on IR-Plag and on kaggle_student_code, so this mix does **not** satisfy
+the decision rule and was not shipped. The mix is the likely cause: ~82% of the
+pairs are Java, and kaggle_student_code is a single Python classroom group, so
+its out-of-fold predictions always come from a model that never saw that corpus
+at all. The PoolC variant exists to add Python pairs, so check whether it
+repairs the kaggle row before drawing conclusions about the feature set.
+
 ### Decision rule
 
 Ship the new artifact only when all of the following hold:

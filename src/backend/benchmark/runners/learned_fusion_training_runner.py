@@ -735,7 +735,25 @@ class LearnedFusionTrainingRunner:
                 file_names[index] = (file_a, file_b)
 
             started = time.time()
-            results = service.compare_pairs(submissions=submissions, pairs=specs)
+            log_every = 25 if len(missing) <= 1000 else 100
+
+            def _report_progress(
+                completed: int, total: int, _file_a: str, _file_b: str
+            ) -> None:
+                """Emit real progress while the blocking extraction runs."""
+                if completed % log_every == 0 or completed == total:
+                    logger.info(
+                        "Extracted %s/%s pair feature rows in %.1fs",
+                        completed,
+                        total,
+                        time.time() - started,
+                    )
+
+            results = service.compare_pairs(
+                submissions=submissions,
+                pairs=specs,
+                progress_callback=_report_progress,
+            )
             result_by_key: Dict[Tuple[str, str], Dict[str, float]] = {}
             for result in results:
                 result_by_key[self._normalize_pair(result.file_a, result.file_b)] = (
@@ -743,7 +761,7 @@ class LearnedFusionTrainingRunner:
                 )
 
             extracted: List[Tuple[str, Dict[str, float]]] = []
-            for completed, index in enumerate(missing, start=1):
+            for index in missing:
                 feature_row = result_by_key.get(
                     self._normalize_pair(*file_names[index]), {}
                 )
@@ -754,13 +772,6 @@ class LearnedFusionTrainingRunner:
                 row["raw_score"] = float(feature_row.get("raw_score", 0.0) or 0.0)
                 rows[index] = row
                 extracted.append((self._cache_key(pairs[index]), row))
-                if completed % 25 == 0 or completed == len(missing):
-                    logger.info(
-                        "Extracted %s/%s pair feature rows in %.1fs",
-                        completed,
-                        len(missing),
-                        time.time() - started,
-                    )
             self._append_feature_cache(extracted)
 
         final_rows: List[Dict[str, float]] = []
