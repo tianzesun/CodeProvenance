@@ -37,15 +37,15 @@ DEFAULT_ML_BLEND: dict[str, float] = {
     "ml_full_lines": 60,
     "disagreement_gap": 0.35,
     "disagreement_cap": 0.65,
-    # Classifier-only conviction guard. When the classifier is far above a
-    # heuristic score that carries no evidence, the fused score is capped at
-    # ``classifier_only_cap`` instead of ``disagreement_cap``. Measured on 174
-    # Kaggle student submissions: the classifier lifted 20.1% of real human
-    # files over 0.40 versus 9.2% without it (no change at 0.70), so the rule
-    # keeps unevidenced classifier calls out of the review band. A
-    # ``classifier_only_cap`` of 0 disables the guard.
+    # Classifier-only conviction guard (enabled by default). When the
+    # classifier is far above a heuristic score that carries no evidence, the
+    # fused score is capped at ``classifier_only_cap`` instead of
+    # ``disagreement_cap``. Measured 2026-10-18 on 174 Kaggle student
+    # submissions: capped at 0.35 the medium band drops from 20.1% to 11.5%
+    # (high band unchanged at 2.9%) while AI-side recall on 400 AIGCodeSet
+    # files moves 6.25% -> 6.0%. A ``classifier_only_cap`` of 0 disables it.
     "corroboration_floor": 0.30,
-    "classifier_only_cap": 0.0,
+    "classifier_only_cap": 0.35,
 }
 
 

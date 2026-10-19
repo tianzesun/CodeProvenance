@@ -104,12 +104,14 @@ orchestrator:
   # direction is never capped — heuristic fingerprints carry their own
   # precision guards.
   disagreement_cap: 0.65
-  # Classifier-only conviction guard. A classifier score this far above a
-  # heuristic score that carries no evidence cannot reach the review band:
-  # the fused score is capped at ``classifier_only_cap`` instead.
-  # Measured on 174 Kaggle student submissions (2026-10-18): with the guard off
-  # the classifier lifted 20.1% of real human files over 0.40 versus 9.2%
-  # without it, while changing nothing at 0.70. Enable by setting
-  # ``classifier_only_cap`` to 0.35 (0 disables the guard).
+  # Classifier-only conviction guard (enabled). A classifier score this far
+  # above a heuristic score that carries no evidence cannot reach the review
+  # band: the fused score is capped at ``classifier_only_cap`` instead.
+  # Measured 2026-10-18 on 174 Kaggle student submissions with the AIGCodeSet
+  # classifier (7140 samples, grouped holdout, statistical perplexity):
+  #   guard off: flagged@0.40 20.1%  flagged@0.50 5.2%  flagged@0.70 2.9%
+  #   guard on : flagged@0.40 11.5%  flagged@0.50 4.6%  flagged@0.70 2.9%
+  # AI-side recall on 400 AIGCodeSet files moved 6.25% -> 6.0% at 0.40.
+  # Set ``classifier_only_cap`` to 0.0 to disable the guard.
   corroboration_floor: 0.30
-  classifier_only_cap: 0.0
+  classifier_only_cap: 0.35

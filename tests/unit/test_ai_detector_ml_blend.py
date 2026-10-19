@@ -17,10 +17,11 @@ class TestBlendMLHeuristic:
         assert score < 0.30  # dominated by the heuristic score
 
     def test_long_file_gives_classifier_full_weight(self) -> None:
-        # 60+ lines -> weight 0.50: an even blend of both scores.
-        score, capped = blend_ml_heuristic(0.90, 0.20, 80)
+        # 60+ lines -> weight 0.50: an even blend of both scores. The heuristic
+        # score is above the corroboration floor, so no cap interferes.
+        score, capped = blend_ml_heuristic(0.90, 0.60, 80)
         assert not capped
-        assert abs(score - 0.55) < 1e-9
+        assert abs(score - 0.75) < 1e-9
 
     def test_length_interpolation_is_monotonic(self) -> None:
         short = blend_ml_heuristic(0.9, 0.1, 26)[0]
@@ -38,9 +39,9 @@ class TestBlendMLHeuristic:
     def test_cap_only_binds_above_the_cap_value(self) -> None:
         # A strong disagreement whose blend already sits below the cap is
         # left untouched (the length gate has already contained it).
-        score, capped = blend_ml_heuristic(0.95, 0.20, 80)
+        score, capped = blend_ml_heuristic(0.95, 0.34, 80)
         assert not capped
-        assert score == 0.575
+        assert score == 0.645
 
     def test_reverse_disagreement_is_never_capped(self) -> None:
         # Heuristics say AI (fingerprints fired), classifier says human.
@@ -54,27 +55,23 @@ class TestBlendMLHeuristic:
         assert score == 0.20
 
     def test_classifier_only_conviction_is_held_out_of_the_review_band(self) -> None:
-        # Measured 2026-10-18 on 174 Kaggle student submissions: the classifier
-        # lifted 20.1% of real human files over 0.40 versus 9.2% without it
-        # (unchanged at 0.70). With the guard enabled, a confident classifier
-        # call that no explainable signal corroborates (heuristic 0.20) is held
-        # at 0.35 instead of the 0.575 the length gate alone allows.
-        conf = {"corroboration_floor": 0.30, "classifier_only_cap": 0.35}
-        score, capped = blend_ml_heuristic(0.95, 0.20, 80, conf)
+        # Shipped default. Measured 2026-10-18 on 174 Kaggle student
+        # submissions: bounding these files at 0.35 halves the medium-band
+        # false positives (20.1% -> 11.5%) at the cost of one AI detection out
+        # of 400 (6.25% -> 6.0%).
+        score, capped = blend_ml_heuristic(0.95, 0.20, 80)
         assert capped
         assert score == 0.35
 
     def test_corroborated_classifier_call_keeps_its_full_cap(self) -> None:
         # Heuristic 0.45 is above the corroboration floor (the explainable
         # signals carry evidence), so the guard must not fire.
-        conf = {"corroboration_floor": 0.30, "classifier_only_cap": 0.35}
-        score, capped = blend_ml_heuristic(0.80, 0.45, 80, conf)
+        score, capped = blend_ml_heuristic(0.80, 0.45, 80)
         assert not capped
         assert score == 0.625
 
-    def test_guard_is_disabled_by_default(self) -> None:
-        # Shipped default keeps the previous behaviour until an operator opts in.
-        score, capped = blend_ml_heuristic(0.95, 0.20, 80)
+    def test_guard_can_be_disabled_by_config(self) -> None:
+        score, capped = blend_ml_heuristic(0.95, 0.20, 80, {"classifier_only_cap": 0.0})
         assert not capped
         assert score == 0.575
 
@@ -195,11 +192,6 @@ class TestOrchestratorSafeBlendIntegration:
         )
         monkeypatch.setattr(
             AIDetectionOrchestrator, "_heuristic_fuse", lambda self, signals: 0.20
-        )
-        monkeypatch.setattr(
-            AIDetectionOrchestrator,
-            "_blend_config",
-            lambda self: {"corroboration_floor": 0.30, "classifier_only_cap": 0.35},
         )
         result = AIDetectionOrchestrator().analyze(long_code, language="python")
 
