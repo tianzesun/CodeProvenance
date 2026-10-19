@@ -187,5 +187,6 @@ Two conclusions this measurement forces:
    put the classifier's `avg_log_prob`/perplexity features on a real code LM
    scale instead of the statistical fallback — the same "retrain after
    changing the perplexity model" flow, and the only measured path left to
-   raise recall without touching the student false-positive rate.
+   raise recall without touching the student false-positive rate. Runbook:
+   [`docs/AI_DETECTOR_SERVER_RETRAIN.md`](AI_DETECTOR_SERVER_RETRAIN.md).
 
