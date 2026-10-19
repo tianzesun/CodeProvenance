@@ -135,3 +135,57 @@ heuristic-only detection of AIGCodeSet-style AI was always near-chance
 (mean fused score 0.277 post-fix, 0.277 raw-ML pre-fix), and recovering
 recall requires retraining the classifier on mixed novice-human corpora —
 the labelled institutional holdout remains the decisive measurement.
+
+## Re-measurement (2026-10-18): classifier live on student code
+
+Same 174-file Kaggle corpus, but on the **deployment host** (GPU server)
+with the shipped configuration, after the uncalibrated-Binoculars layer was
+made to abstain. One methodological point dominates everything below: **the
+two hosts do not measure the same detector**. The laptop has
+`microsoft/CodeGPT-small-py` in its HF cache (transformer perplexity);
+the server cannot reach HuggingFace, so it falls back to the statistical
+perplexity model. The classifier records the perplexity model it was trained
+with (`metadata.perplexity_model`), and the ensemble *ignores* a classifier
+trained under a different one — so only same-host comparisons are valid.
+
+Dataset was materialised cleanly from `raw/` (7140 samples: 2599 AI + 4541
+human, with `samples.jsonl`) and the classifier retrained with a **grouped**
+problem split. A previous run had stacked two materialisations in one output
+directory (14460 samples, no `samples.jsonl`, random split), which inflated
+its reported AUC to 0.7576 — the grouped number is the honest one.
+
+A/B on the same host, same features, 174 files (`--dump-scores`):
+
+| Student corpus (n=174) | classifier off | classifier on | + classifier-only guard |
+| --- | ---: | ---: | ---: |
+| mean | 0.2099 | 0.2956 | 0.2878 |
+| flagged @0.40 | 9.2% | **20.1%** | **11.5%** |
+| flagged @0.50 | 4.0% | 5.2% | 4.6% |
+| flagged @0.70 | 2.87% | 2.87% | 2.87% |
+
+172 of 174 files moved when the classifier was enabled (e.g. 0.191 → 0.453):
+the increase is entirely the classifier calling novice code AI-like while
+every explainable signal reads human. The classifier-only guard
+(`corroboration_floor` 0.30 / `classifier_only_cap` 0.35 in the
+`orchestrator:` config) contains exactly those files — 28 of them — and is
+now enabled by default.
+
+AI side, 400 AIGCodeSet files through the same pipeline: recall@0.40
+6.25% → 6.0% with the guard, AUC 0.6067, AI mean 0.199 / human mean 0.169.
+So the guard traded **one** AI detection for ~15 student false positives.
+The high band never moved: at 0.70 the detector is driven by explainable
+fingerprints, not by the classifier.
+
+Two conclusions this measurement forces:
+
+1. **The classifier's medium-band contribution on student code is mostly
+   noise.** With statistical perplexity on the server the fused AUC (0.6067)
+   is below the classifier's own grouped holdout AUC (~0.66) because the
+   heuristic side drags the ranking down.
+2. **The next lever is the perplexity model, not the blend.** Shipping
+   `microsoft/CodeGPT-small-py` to the deployment host and retraining would
+   put the classifier's `avg_log_prob`/perplexity features on a real code LM
+   scale instead of the statistical fallback — the same "retrain after
+   changing the perplexity model" flow, and the only measured path left to
+   raise recall without touching the student false-positive rate.
+
