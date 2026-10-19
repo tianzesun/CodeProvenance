@@ -348,11 +348,57 @@ def main() -> int:
         "--datasets",
         nargs="+",
         default=["IR-Plag-Dataset", "conplag"],
-        help="Labeled datasets to train on (supported: IR-Plag-Dataset, conplag)",
+        help=(
+            "Labeled datasets to train on (supported: IR-Plag-Dataset, "
+            "conplag, kaggle_student_code, poolc_600k_python)"
+        ),
     )
     learned_train_parser.add_argument(
         "--artifact",
         help="Optional output path for the trained JSON artifact",
+    )
+    learned_train_parser.add_argument(
+        "--max-pairs",
+        type=int,
+        default=None,
+        help=(
+            "Per-dataset cap on loaded pairs (balanced across classes). PoolC "
+            "alone holds ~600k pairs, so extraction is unbounded without it; "
+            "PoolC defaults to 20000 when this is omitted."
+        ),
+    )
+    learned_train_parser.add_argument(
+        "--cv-folds",
+        type=int,
+        default=0,
+        help=(
+            "Grouped k-fold cross-validation count. 0 keeps "
+            "leave-one-group-out, which is only affordable for few groups."
+        ),
+    )
+    learned_train_parser.add_argument(
+        "--poolc-negative-ratio",
+        type=float,
+        default=0.0,
+        help=(
+            "Admit at most ratio*positives PoolC cross-problem pairs. Those "
+            "negatives are different problems, not independent solutions of "
+            "the same assignment, so 0 (positives only) is the default."
+        ),
+    )
+    learned_train_parser.add_argument(
+        "--cache",
+        help="JSONL feature cache path; makes a long extraction resumable",
+    )
+    learned_train_parser.add_argument(
+        "--dataset-weighting",
+        choices=("proportional", "equal"),
+        default="proportional",
+        help=(
+            "How much each corpus contributes to the fit. 'equal' gives every "
+            "corpus the same total weight, which keeps the small "
+            "product-realistic corpora relevant next to a large sample"
+        ),
     )
     learned_train_parser.add_argument(
         "--threshold-step",
@@ -651,6 +697,11 @@ def main() -> int:
             threshold_step=args.threshold_step,
             seed=args.seed,
             enabled_datasets=args.datasets,
+            max_pairs_per_dataset=args.max_pairs,
+            cv_folds=args.cv_folds,
+            poolc_negative_ratio=args.poolc_negative_ratio,
+            cache_path=Path(args.cache) if args.cache else None,
+            dataset_weighting=args.dataset_weighting,
         )
         print("\nLearned Fusion Training Completed!\n")
         print(
@@ -658,7 +709,14 @@ def main() -> int:
             f"({report.positive_pairs} positive, {report.negative_pairs} negative)"
         )
         print(f"Production fused AUC: {report.production_fused_auc:.4f}")
-        print(f"Learned fusion LOGO AUC: {report.logo_auc:.4f}")
+        print(f"Learned fusion {report.cv_mode} AUC: {report.cv_auc:.4f}")
+        for dataset_name in sorted(report.per_dataset_auc):
+            rule = report.per_dataset_production_auc.get(dataset_name, 0.0)
+            print(
+                f"  {dataset_name}: rule {rule:.4f} -> "
+                f"learned {report.per_dataset_auc[dataset_name]:.4f} "
+                f"({report.pairs_per_dataset.get(dataset_name, 0)} pairs)"
+            )
         print(f"Model artifact: {report.artifact_path}")
         print(f"Markdown report: {args.output}/learned_fusion_report_*.md")
 
