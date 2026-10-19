@@ -7,6 +7,7 @@ import pytest
 
 from src.backend.benchmark.runners.learned_fusion_training_runner import (
     LearnedFusionTrainingRunner,
+    run_learned_fusion_training,
 )
 
 
@@ -475,3 +476,57 @@ class TestCvNotes:
         assert "negatives excluded" not in runner._cv_notes(
             "leave-one-group-out", ["IR-Plag-Dataset", "conplag"]
         )
+
+
+class TestWrapperForwardsDatasetRoots:
+    """The CLI wrapper must pass custom corpus roots through to the runner.
+
+    The corpora are gitignored, so a training run may read them from a
+    different checkout (or disk) than the one holding the code; a dropped
+    argument here would silently fall back to the repo-relative defaults.
+    """
+
+    def test_forwards_dataset_roots(self, monkeypatch, tmp_path):
+        """Explicit roots reach the runner unchanged."""
+        captured = {}
+
+        class _StubRunner:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            def run(self, **kwargs):
+                captured["run_kwargs"] = kwargs
+                return "report"
+
+        monkeypatch.setattr(
+            "src.backend.benchmark.runners.learned_fusion_training_runner"
+            ".LearnedFusionTrainingRunner",
+            _StubRunner,
+        )
+        roots = [tmp_path / "corpora", tmp_path / "more"]
+        result = run_learned_fusion_training(
+            output_dir=tmp_path / "out", dataset_roots=roots
+        )
+
+        assert result == "report"
+        assert captured["dataset_roots"] == roots
+
+    def test_defaults_to_none_without_roots(self, monkeypatch, tmp_path):
+        """No --dataset-roots leaves the runner on its own defaults."""
+        captured = {}
+
+        class _StubRunner:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            def run(self, **kwargs):
+                return "report"
+
+        monkeypatch.setattr(
+            "src.backend.benchmark.runners.learned_fusion_training_runner"
+            ".LearnedFusionTrainingRunner",
+            _StubRunner,
+        )
+        run_learned_fusion_training(output_dir=tmp_path / "out")
+
+        assert captured["dataset_roots"] is None

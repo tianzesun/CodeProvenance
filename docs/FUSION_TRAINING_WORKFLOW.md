@@ -84,6 +84,13 @@ Confirm these four things first:
 3. The datasets have been copied onto the server.
 4. You know where reports should be written.
 
+The checkout must also be current: `fusion-train-learned` gained `--cv-folds`,
+`--dataset-weighting`, `--cache`, `--max-pairs`, `--poolc-negative-ratio` and
+`--dataset-roots` in `9742e557`. A stale checkout fails immediately with
+`unrecognized arguments`. Note that the corpora are gitignored, so they live in
+whichever checkout downloaded them; if that is a different directory than the one
+running the code, pass `--dataset-roots` rather than copying 300 MB around.
+
 Recommended shell setup:
 
 ```bash
@@ -101,6 +108,10 @@ $PYTHON_BIN --version
 $PYTHON_BIN -c "import optuna, sklearn; print('optuna/sklearn ok')"
 test -d "$DATA_ROOT_1"
 test -d "$DATA_ROOT_2"
+# The running checkout must be new enough to know the current flags:
+$PYTHON_BIN -m src.backend.benchmark fusion-train-learned --help | grep -c -- --cv-folds
+# ...and the module that will run must be the checkout you think it is:
+$PYTHON_BIN -c "import src.backend.benchmark as m; print(m.__file__)"
 ```
 
 If the server uses different locations, change the four environment variables above and

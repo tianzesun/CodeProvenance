@@ -354,6 +354,17 @@ def main() -> int:
         ),
     )
     learned_train_parser.add_argument(
+        "--dataset-roots",
+        nargs="+",
+        default=None,
+        help=(
+            "Directories holding the corpora; defaults to <repo>/data/datasets "
+            "and <repo>/data/bigger_datasets. The corpora are gitignored, so "
+            "point this at whichever checkout actually has them (e.g. the main "
+            "checkout, while running the code from elsewhere)"
+        ),
+    )
+    learned_train_parser.add_argument(
         "--artifact",
         help="Optional output path for the trained JSON artifact",
     )
@@ -697,6 +708,11 @@ def main() -> int:
             threshold_step=args.threshold_step,
             seed=args.seed,
             enabled_datasets=args.datasets,
+            dataset_roots=(
+                [Path(root) for root in args.dataset_roots]
+                if args.dataset_roots
+                else None
+            ),
             max_pairs_per_dataset=args.max_pairs,
             cv_folds=args.cv_folds,
             poolc_negative_ratio=args.poolc_negative_ratio,

@@ -1161,6 +1161,7 @@ def run_learned_fusion_training(
     threshold_step: float = 0.02,
     seed: int = 42,
     enabled_datasets: Optional[List[str]] = None,
+    dataset_roots: Optional[List[Path]] = None,
     max_pairs_per_dataset: Optional[int] = None,
     cv_folds: int = 0,
     poolc_negative_ratio: float = 0.0,
@@ -1170,6 +1171,7 @@ def run_learned_fusion_training(
     """Convenience wrapper used by the CLI."""
     runner = LearnedFusionTrainingRunner(
         output_dir=output_dir,
+        dataset_roots=dataset_roots,
         threshold_step=threshold_step,
         seed=seed,
         max_pairs_per_dataset=max_pairs_per_dataset,
