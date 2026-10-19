@@ -178,7 +178,7 @@ def main() -> int:
                     "name": name,
                     "ai_probability": float(result.get("ai_probability", 0.0)),
                     "method": result.get("method"),
-                    "lines": code.count("\n") + 1,
+                    "lines": len(code.splitlines()),
                     "ml_score": fusion.get("ml_score"),
                     "heuristic_score": fusion.get("heuristic_score"),
                     "disagreement_capped": fusion.get("disagreement_capped"),

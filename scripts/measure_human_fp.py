@@ -191,7 +191,11 @@ def main() -> int:
             {
                 "corpus": corpus,
                 "name": name,
-                "lines": code.count("\n") + 1,
+                # Same count the orchestrator feeds into its blend length gate
+                # (``len(code.splitlines())``): using ``count("\n") + 1`` here
+                # disagreed by one line on files that end with a newline, which
+                # made offline blend replays disagree at the cap boundary.
+                "lines": len(code.splitlines()),
                 "chars": len(code),
                 "ai_probability": probability,
                 "method": result.get("method"),
