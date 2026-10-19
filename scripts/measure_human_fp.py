@@ -30,7 +30,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.backend.engines.ai.orchestrator import AIDetectionOrchestrator  # noqa: E402
+from src.backend.engines.ai.orchestrator import AIDetectionOrchestrator
 
 THRESHOLDS = (0.40, 0.50, 0.70)  # medium band, neutral cut, high band
 CORPORA = ("kaggle_student_code", "ir_plag_originals", "poolc_sample")
@@ -183,6 +183,9 @@ def main() -> int:
         language = "java" if name.endswith(".java") else "python"
         result = detector.analyze(code, language=language)
         probability = float(result["ai_probability"])
+        # Keep the fusion internals so blend rules can be compared offline
+        # without re-scoring the corpus (the expensive part is inference).
+        fusion = (result.get("layers") or {}).get("fusion") or {}
         by_corpus.setdefault(corpus, []).append(probability)
         per_file.append(
             {
@@ -191,6 +194,10 @@ def main() -> int:
                 "lines": code.count("\n") + 1,
                 "chars": len(code),
                 "ai_probability": probability,
+                "method": result.get("method"),
+                "ml_score": fusion.get("ml_score"),
+                "heuristic_score": fusion.get("heuristic_score"),
+                "disagreement_capped": fusion.get("disagreement_capped"),
             }
         )
         if index % 20 == 0 or index == len(items):

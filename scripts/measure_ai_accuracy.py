@@ -23,6 +23,7 @@ import random
 import statistics
 import sys
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -122,7 +123,12 @@ def main() -> int:
         default=0,
         help="Max Kaggle student files to score (0 = all, 174 by default).",
     )
-    parser.add_argument("--dump-scores", default=None)
+    parser.add_argument(
+        "--dump-scores",
+        default=None,
+        help="Write per-file scores plus the fusion internals (method, ml_score, "
+        "heuristic_score, lines) to this JSON path.",
+    )
     parser.add_argument(
         "--dump-signals",
         default=None,
@@ -158,14 +164,26 @@ def main() -> int:
 
     detector = AIDetectionOrchestrator()
 
-    def score_all(samples: list[tuple[str, str]]) -> list[float]:
-        out: list[float] = []
-        for _name, code in samples:
+    def score_all(samples: list[tuple[str, str]]) -> list[dict[str, Any]]:
+        """Score every sample, keeping the fusion internals for offline tuning."""
+        out: list[dict[str, Any]] = []
+        for name, code in samples:
             try:
                 result = detector.analyze(code, language="python")
-                out.append(float(result.get("ai_probability", 0.0)))
             except Exception:  # pragma: no cover - defensive
-                out.append(0.0)
+                result = {}
+            fusion = (result.get("layers") or {}).get("fusion") or {}
+            out.append(
+                {
+                    "name": name,
+                    "ai_probability": float(result.get("ai_probability", 0.0)),
+                    "method": result.get("method"),
+                    "lines": code.count("\n") + 1,
+                    "ml_score": fusion.get("ml_score"),
+                    "heuristic_score": fusion.get("heuristic_score"),
+                    "disagreement_capped": fusion.get("disagreement_capped"),
+                }
+            )
         return out
 
     if args.dump_signals:
@@ -198,9 +216,12 @@ def main() -> int:
         print(f"wrote signals to {args.dump_signals}")
         return 0
 
-    ai_scores = score_all(ai)
-    human_scores = score_all(human)
-    student_scores = score_all(students) if students else []
+    ai_rows = score_all(ai)
+    human_rows = score_all(human)
+    student_rows = score_all(students) if students else []
+    ai_scores = [row["ai_probability"] for row in ai_rows]
+    human_scores = [row["ai_probability"] for row in human_rows]
+    student_scores = [row["ai_probability"] for row in student_rows]
 
     auc = _roc_auc(ai_scores, human_scores)
     report = {
@@ -221,11 +242,11 @@ def main() -> int:
         Path(args.dump_scores).write_text(
             json.dumps(
                 {
-                    "ai": dict(ai),
-                    "human": dict(human),
-                    "students": dict(students) if students else {},
+                    "ai": ai_rows,
+                    "human": human_rows,
+                    "students": student_rows,
                 },
-                indent=2,
+                indent=1,
             ),
             encoding="utf-8",
         )
