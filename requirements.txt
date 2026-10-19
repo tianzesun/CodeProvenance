@@ -54,6 +54,11 @@ numpy==1.26.3
 scikit-learn==1.4.0
 scipy==1.12.0
 joblib==1.5.3
+# Reads the PoolC parquet shards (benchmark dataset loading and fusion training).
+# Keep it below 26: pyarrow 26 requires numpy>=2, while numpy is pinned to
+# 1.26.3 above for the CUDA torch/transformers builds. Verified against numpy
+# 1.26.3: 22.0.0-25.0.0 import, 26.0.0 does not.
+pyarrow==25.0.0
 
 # AI Detection - Multi-layer ensemble (Binoculars + existing signals)
 # Binoculars (ICML 2024) - zero-shot SOTA detector, very low false positive rate

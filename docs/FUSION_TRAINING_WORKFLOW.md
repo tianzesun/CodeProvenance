@@ -38,7 +38,8 @@ The supervised training workflow currently knows how to load:
 `fusion-train-learned` has its own list, because a corpus is only usable there
 if its labels describe pairs of *correctly labelled* submissions:
 
-- `IR-Plag-Dataset` (Java, 483 pairs) — each case contributes
+- `IR-Plag-Dataset` (Java, 460 loadable pairs: 355 plagiarized / 105
+  non-plagiarized across 7 cases) — each case contributes
   original-vs-plagiarized and original-vs-non-plagiarized pairs. The negatives
   are two independent solutions of the same assignment.
 - `conplag` (Java, 911 pairs) — contest pairs with a plagiarized / not
@@ -281,10 +282,9 @@ Two rules make the evaluation honest enough to act on:
   dominates: ~1.9 s/pair on a CPU laptop). `--cache` makes a long run resumable
   and makes alternative training mixes cost only a logistic fit.
 
-These three corpora are CSV/py files. Adding `poolc_600k_python` is the one step
-that needs an extra package: its `.parquet` shards are read with `pyarrow`, which
-is not in `requirements.txt`, so a fresh server venv fails unless it is
-installed — and it must be **younger than 26**:
+These three corpora are CSV/py files. Reading `poolc_600k_python` is the one step
+that needs an extra package: its `.parquet` shards need `pyarrow`, which
+`requirements.txt` pins **below 26**:
 
 ```bash
 $PYTHON_BIN -m pip install 'pyarrow<26'
@@ -300,8 +300,11 @@ is built against the numpy 1.x ABI.
 
 ### Warning: what PoolC labels actually mean
 
-`poolc_600k_python` is the largest corpus in the repo (598736 pairs in the
-single downloaded shard), but its labels are *not* plagiarism labels:
+**Do not train on `poolc_600k_python`.** This section is kept as the record of
+why, because the corpus is otherwise the most attractive one in the repo (598736
+pairs in the single downloaded shard).
+
+Its labels are not plagiarism labels:
 
 - every pair of accepted solutions to the **same** competitive-programming
   problem is labelled `similar` (299963 pairs), including pairs whose token
@@ -310,32 +313,27 @@ single downloaded shard), but its labels are *not* plagiarism labels:
 - every **cross-problem** pair is labelled `different` (298773 pairs), i.e. the
   negatives are trivially easy and are *not* the case the product scores.
 
-Training on its negatives teaches "different problems look different", which
-the rule scorer already knows, and training on its easy positives moves the
-decision boundary down for pairs that a human would not call plagiarized. So the
-loader admits its positives and, by default, **no** negatives
-(`--poolc-negative-ratio 0`). Use it to add Python and short-file diversity
-only, and always check the per-dataset rows for IR-Plag, conplag and
-kaggle_student_code before shipping:
+The loader admits its positives and, by default, **no** negatives
+(`--poolc-negative-ratio 0`), which is the least harmful way to read it — but it
+is still harmful. See the measured attempts below: 10000 PoolC positives scored
+*below a coin flip* (rule AUC 0.4594) on a pooled set where they were 86% of the
+pairs, because the label "same problem" is anti-correlated with the similarity
+features the product scores on. Two independent solutions to one assignment are
+the product's false-positive case, not its positive case.
 
-```bash
-$PYTHON_BIN -m src.backend.benchmark fusion-train-learned \
-  --datasets IR-Plag-Dataset conplag kaggle_student_code poolc_600k_python \
-  --max-pairs 20000 \
-  --cv-folds 5 \
-  --poolc-negative-ratio 0.0 \
-  --cache "$REPORT_ROOT/learned_fusion/features.jsonl" \
-  --output "$REPORT_ROOT/learned_fusion"
-```
+Keep the corpus only for non-training uses, e.g. reading code pairs to smoke-test
+the parquet loader — `--max-pairs N` caps how many pairs are read (PoolC alone
+defaults to 20000 when omitted) and `--poolc-negative-ratio 0` keeps the
+cross-problem negatives out. And always judge a run on the per-dataset rows for
+IR-Plag, conplag and kaggle_student_code rather than on the pooled AUC.
 
-`--max-pairs` is required in practice: it is the number of PoolC pairs whose
-features are extracted, and PoolC alone defaults to 20000 when omitted.
+### Measured attempts (2026-10-18)
 
-### First measured attempt (same-problem corpora only)
+Both candidate mixes were run on the T4 server. **Neither was shipped**, and the
+second one answers the PoolC question definitively.
 
-Run on 2026-10-18 on the T4 server over `IR-Plag-Dataset conplag
-kaggle_student_code` with `--cv-folds 5 --dataset-weighting proportional`
-(1664 pairs, 706 positive):
+**A — same-problem corpora only** (`IR-Plag-Dataset conplag kaggle_student_code`,
+`--cv-folds 5 --dataset-weighting proportional`; 1664 pairs, 706 positive):
 
 | Dataset | Pairs | Rule AUC | Out-of-fold AUC |
 | --- | ---: | ---: | ---: |
@@ -343,13 +341,45 @@ kaggle_student_code` with `--cv-folds 5 --dataset-weighting proportional`
 | conplag | 911 | 0.6617 | 0.7809 |
 | kaggle_student_code | 293 | 0.8718 | 0.8269 |
 
-Pooled: rule 0.7437, out-of-fold 0.8137. The fit still loses to the rule
-baseline on IR-Plag and on kaggle_student_code, so this mix does **not** satisfy
-the decision rule and was not shipped. The mix is the likely cause: ~82% of the
-pairs are Java, and kaggle_student_code is a single Python classroom group, so
-its out-of-fold predictions always come from a model that never saw that corpus
-at all. The PoolC variant exists to add Python pairs, so check whether it
-repairs the kaggle row before drawing conclusions about the feature set.
+Pooled: rule 0.7437, out-of-fold 0.8137. Fails the decision rule on IR-Plag and
+on kaggle_student_code. The likely cause is the mix: ~82% of the pairs are Java,
+and kaggle_student_code is a single Python classroom group, so its out-of-fold
+predictions always come from a model that never saw that corpus.
+
+**B — the same mix plus the PoolC positives** (`--max-pairs 20000
+--poolc-negative-ratio 0.0 --dataset-weighting equal`; 11664 pairs, 10706
+positive — 86% of them PoolC):
+
+| Dataset | Pairs | Rule AUC | Out-of-fold AUC |
+| --- | ---: | ---: | ---: |
+| IR-Plag-Dataset | 460 | 0.6324 | 0.6741 |
+| conplag | 911 | 0.6617 | **0.4343** |
+| kaggle_student_code | 293 | 0.8718 | 0.7088 |
+
+Pooled: rule **0.4594**, out-of-fold 0.7376.
+
+B loses to A exactly where it matters and lands *below a coin flip* on conplag.
+The decisive number is the rule column on the pooled set: 0.4594. The rule
+scorer's ordering is **anti-correlated** with the PoolC `similar` label, because
+that label means "same problem", not "copied code" — two independent accepted
+solutions share meaning but not text, so the similarity features score them low.
+Fitting 10000 such pairs as positives rotates the decision boundary the wrong
+way, and the two corpora with real cheating labels pay for it.
+
+Two conclusions worth keeping:
+
+- **Do not train the learned fusion model on the PoolC positives.** The MOSS /
+  IR-Plag / conplag / kaggle style labels are the only ones that match what the
+  product scores. Drop `poolc_600k_python` from `--datasets` for training
+  purposes.
+- **Do not read the pooled AUC.** It looked healthy in B (0.7376) while every
+  dataset that matters regressed, because 86% of the pooled pairs are the
+  corpus whose label semantics disagree with the product.
+
+The shipped artifact therefore stands. The exits from here are more *labelled
+same-assignment* data (see `docs/AI_HOLDOUT_COLLECTION.md` for the collection
+pattern used on the AI side) or a per-language scoring decision, not another mix
+of the corpora already in `data/datasets`.
 
 ### Decision rule
 
