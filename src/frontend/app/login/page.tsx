@@ -13,7 +13,6 @@ import {
   Loader2,
   ArrowLeft,
   Rocket,
-  KeyRound,
   UserPlus,
 } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
@@ -91,31 +90,6 @@ function sanitizeNextPath(value: string | null): string {
     return `${url.pathname}${url.search}`;
   } catch {
     return '/';
-  }
-}
-
-const SSO_START_URL = process.env.NEXT_PUBLIC_SSO_START_URL ?? '';
-
-/**
- * Where "Sign in with UTORid" sends the browser (the backend's OIDC start
- * endpoint). Returns null until NEXT_PUBLIC_SSO_START_URL is configured. Only
- * same-origin or HTTPS targets are accepted so a bad value can't send users
- * to a plain-HTTP or odd-scheme address.
- */
-function resolveSsoStartUrl(nextPath: string | null): string | null {
-  if (!SSO_START_URL) {
-    return null;
-  }
-
-  try {
-    const url = new URL(SSO_START_URL, window.location.origin);
-    if (url.origin !== window.location.origin && url.protocol !== 'https:') {
-      return null;
-    }
-    url.searchParams.set('next', nextPath ?? '/');
-    return url.toString();
-  } catch {
-    return null;
   }
 }
 
@@ -472,7 +446,7 @@ const NOTICES: Record<string, string> = {
 };
 
 type LoginMethod = 'password' | 'register';
-type View = 'start' | 'signin' | 'bootstrap' | 'forgot' | 'forgot-sent' | 'register' | 'register-sent';
+type View = 'signin' | 'bootstrap' | 'forgot' | 'forgot-sent' | 'register' | 'register-sent';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -503,14 +477,10 @@ export default function LoginPage() {
 
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState(false);
-  // "password" is the sign-in landing (UTORid first, or the email form when
-  // showEmailForm is on). "register" opens the self-signup form, which ends in a
-  // "check your inbox" card rather than a session — the account stays locked
-  // until the emailed link is redeemed.
+  // "password" is the email sign-in form. "register" opens the self-signup
+  // form, which ends in a "check your inbox" card rather than a session —
+  // the account stays locked until the emailed link is redeemed.
   const [loginMethod, setLoginMethod] = useState<LoginMethod>('password');
-  const [showEmailForm, setShowEmailForm] = useState(false);
-  const [redirecting, setRedirecting] = useState(false);
-  const [ssoNotice, setSsoNotice] = useState('');
   const [registerEmailSent, setRegisterEmailSent] = useState(false);
   const [resendNotice, setResendNotice] = useState('');
 
@@ -527,12 +497,10 @@ export default function LoginPage() {
         ? 'register-sent'
         : 'register'
       : showLogin
-        ? showEmailForm
-          ? 'signin'
-          : 'start'
+        ? 'signin'
         : 'bootstrap';
 
-  const busy = loading || submitting || guestSubmitting || redirecting || cooldown > 0;
+  const busy = loading || submitting || guestSubmitting || cooldown > 0;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -540,11 +508,6 @@ export default function LoginPage() {
 
     const reason = params.get('reason');
     setNotice(reason && Object.prototype.hasOwnProperty.call(NOTICES, reason) ? NOTICES[reason] : '');
-
-    // ?method=email opens the email form directly (used after a password reset).
-    if (params.get('method') === 'email') {
-      setShowEmailForm(true);
-    }
   }, []);
 
   useEffect(() => {
@@ -565,18 +528,6 @@ export default function LoginPage() {
     return () => clearTimeout(timer);
   }, [cooldown]);
 
-  // Coming back with the browser's Back button can restore this page with the
-  // redirect spinner still on; reset it.
-  useEffect(() => {
-    const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) {
-        setRedirecting(false);
-      }
-    };
-    window.addEventListener('pageshow', handlePageShow);
-    return () => window.removeEventListener('pageshow', handlePageShow);
-  }, []);
-
   /* ----------------------------- state helpers ---------------------------- */
 
   const clearFeedback = () => {
@@ -584,7 +535,6 @@ export default function LoginPage() {
     setEmailError('');
     setPasswordError('');
     setConfirmPasswordError('');
-    setSsoNotice('');
     setResendNotice('');
     setNotice('');
   };
@@ -597,33 +547,18 @@ export default function LoginPage() {
   };
 
   /** Switch view and reset everything transient so nothing stale carries over. */
-  const openView = (method: LoginMethod, options: { emailForm?: boolean } = {}) => {
+  const openView = (method: LoginMethod) => {
     clearFeedback();
     clearSecrets();
     setShowForgotPassword(false);
     setResetEmailSent(false);
     setRegisterEmailSent(false);
-    setShowEmailForm(options.emailForm ?? false);
     setLoginMethod(method);
   };
 
   const handleBackToPassword = () => openView('password');
-  // From the reset flow, "back" returns to the email form the user came from.
-  const handleBackToLogin = () => openView('password', { emailForm: true });
+  const handleBackToLogin = () => openView('password');
   const handleChooseRegister = () => openView('register');
-
-  const handleUseEmail = () => {
-    // Keep any ?reason= notice (e.g. "session expired") visible on the email form.
-    setFormError('');
-    setSsoNotice('');
-    setShowEmailForm(true);
-  };
-
-  const handleBackToUtorid = () => {
-    clearFeedback();
-    clearSecrets();
-    setShowEmailForm(false);
-  };
 
   const handleShowForgotPassword = () => {
     // Without this, a failed sign-in's error banner followed the user into
@@ -814,30 +749,6 @@ export default function LoginPage() {
   };
 
   /**
-   * Start UTORid sign-in (Entra ID).
-   *
-   * A full-page redirect to the backend's sign-in endpoint, which owns the
-   * OIDC exchange and the session; this page never handles a password or token
-   * for it. ``next`` is passed along, but the backend must validate it again
-   * before redirecting after sign-in. Until NEXT_PUBLIC_SSO_START_URL is set,
-   * say so plainly instead of pretending the hand-off happened.
-   */
-  const handleUtorid = () => {
-    if (loading || submitting || guestSubmitting || redirecting) return;
-
-    clearFeedback();
-
-    const target = resolveSsoStartUrl(nextPath);
-    if (!target) {
-      setSsoNotice('UTORid sign-in isn’t connected for this workspace yet. Use your email to sign in for now.');
-      return;
-    }
-
-    setRedirecting(true);
-    window.location.assign(target);
-  };
-
-  /**
    * Submit a self-signup.
    *
    * Success never signs the user in: the server creates an inactive
@@ -921,7 +832,6 @@ export default function LoginPage() {
   /* --------------------------------- render ------------------------------- */
 
   const headings: Record<View, string> = {
-    start: 'Sign-In',
     signin: 'Sign-In',
     bootstrap: 'Create Administrator Account',
     forgot: 'Reset password',
@@ -931,7 +841,6 @@ export default function LoginPage() {
   };
 
   const subtitles: Partial<Record<View, string>> = {
-    start: 'Use your UTORid to sign in, or continue with email.',
     forgot: 'Enter your email address and we will send reset instructions.',
     'forgot-sent': 'If the account exists, password reset instructions have been sent.',
     bootstrap: 'Set up the first administrator account for this workspace.',
@@ -1012,7 +921,7 @@ export default function LoginPage() {
               {subtitle && <p className="mt-2 text-sm leading-6 text-slate-600">{subtitle}</p>}
             </div>
 
-            {(view === 'start' || view === 'signin') && notice && <NoticeBanner message={notice} />}
+            {view === 'signin' && notice && <NoticeBanner message={notice} />}
 
             {view === 'forgot-sent' && (
               <div className="space-y-6">
@@ -1057,72 +966,6 @@ export default function LoginPage() {
                   Back to sign in
                 </button>
               </form>
-            )}
-
-            {view === 'start' && (
-              <div className="space-y-5">
-                {ssoNotice && (
-                  <div
-                    role="status"
-                    className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-                  >
-                    <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" aria-hidden="true" />
-                    <span>{ssoNotice}</span>
-                  </div>
-                )}
-
-                <ErrorBanner message={formError} />
-
-                <button
-                  type="button"
-                  onClick={handleUtorid}
-                  disabled={loading || submitting || guestSubmitting || redirecting}
-                  className={PRIMARY_BUTTON}
-                >
-                  {redirecting ? (
-                    <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-                  ) : (
-                    <KeyRound size={16} aria-hidden="true" />
-                  )}
-                  {redirecting ? 'Redirecting…' : 'Sign in with UTORid'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleUseEmail}
-                  disabled={redirecting}
-                  className="block w-full text-center text-sm font-medium text-slate-600 transition hover:text-slate-900 disabled:opacity-60"
-                >
-                  Use email instead
-                </button>
-
-                <div className="relative py-1" aria-hidden="true">
-                  <span className="block w-full border-t border-slate-200" />
-                  <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white px-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    or
-                  </span>
-                </div>
-
-                <button type="button" onClick={handleGuestLogin} disabled={busy} className={SECONDARY_BUTTON}>
-                  {guestSubmitting ? (
-                    <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Rocket size={16} aria-hidden="true" />
-                  )}
-                  {guestSubmitting ? 'Starting demo…' : 'Continue as guest'}
-                </button>
-
-                <p className="text-center text-sm text-slate-500">
-                  Don’t have an account?{' '}
-                  <button
-                    type="button"
-                    onClick={handleChooseRegister}
-                    className="font-semibold text-slate-900 underline-offset-4 transition hover:underline"
-                  >
-                    Create one
-                  </button>
-                </p>
-              </div>
             )}
 
             {view === 'register-sent' && (
@@ -1305,13 +1148,6 @@ export default function LoginPage() {
                     or
                   </span>
                 </div>
-
-                {view === 'signin' && (
-                  <button type="button" onClick={handleBackToUtorid} className={SECONDARY_BUTTON}>
-                    <ArrowLeft size={16} aria-hidden="true" />
-                    Back to UTORid sign-in
-                  </button>
-                )}
 
                 <button type="button" onClick={handleGuestLogin} disabled={busy} className={SECONDARY_BUTTON}>
                   {guestSubmitting ? (
