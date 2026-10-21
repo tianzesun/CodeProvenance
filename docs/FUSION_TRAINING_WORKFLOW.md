@@ -390,6 +390,12 @@ Ship the new artifact only when all of the following hold:
 2. the learned out-of-fold AUC beats the rule baseline on those same corpora;
 3. `reports/engine_evaluation` run against IR-Plag does not lose AUC.
 
+For the accuracy side of this question — how the production score compares with
+real JPlag / Dolos on the same pairs, per corpus — use `engine-eval --dataset`
+described in [EXTERNAL_TOOL_COMPARISON.md](EXTERNAL_TOOL_COMPARISON.md). That
+harness reports a `fused_rule` baseline next to the production `fused` score,
+so a corpus where the learned layer adds nothing is visible directly.
+
 Otherwise keep the existing artifact: it is a tracked file, so the rollback is
 `git checkout -- src/backend/engines/similarity/models/learned_fusion_model.json`.
 
