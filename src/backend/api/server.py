@@ -4677,10 +4677,105 @@ def _load_persisted_job(job_id: str) -> dict[str, Any] | None:
     return _recover_job_from_report(job_id)
 
 
+#: Lifecycle order of job statuses. The poll-time refresh in ``_get_job``
+#: adopts a re-read copy only when it has moved further along than the cached
+#: one (unknown statuses count as earliest).
+_JOB_STATUS_RANK: dict[str, int] = {
+    "queued": 0,
+    "processing": 1,
+    "analyzing": 1,
+    "completed": 2,
+    "failed": 2,
+    "cancelled": 2,
+}
+
+
+def _job_status_rank(status: Any) -> int:
+    """Return the lifecycle position of a job status (unknown = earliest)."""
+    return _JOB_STATUS_RANK.get(str(status or "").strip().lower(), 0)
+
+
+def _progress_updated_at(job: dict[str, Any]) -> str:
+    """Return the progress timestamp that breaks same-rank refresh ties."""
+    progress = job.get("progress")
+    return str(progress.get("updated_at") or "") if isinstance(progress, dict) else ""
+
+
+def _read_job_status_from_db(job_id: str) -> str | None:
+    """Read only a job's status column — the cheap poll-time probe.
+
+    Guest jobs deliberately skip the job.json metadata write, so the
+    database row is their only cross-process channel. Probing the single
+    column keeps a once-per-second poll from paying for a full job
+    reconstruction while nothing has changed.
+
+    Args:
+        job_id: Job identifier whose status should be read.
+
+    Returns:
+        The stored status, or None when the row is unreadable.
+    """
+    try:
+        with SessionLocal() as db:
+            return db.query(Job.status).filter(Job.id == job_id).scalar()
+    except Exception:
+        logger.warning("Could not read status for job %s", job_id, exc_info=True)
+        return None
+
+
 def _get_job(job_id: str) -> dict[str, Any] | None:
+    """Return a job's dict, refreshing the in-memory copy from disk/DB.
+
+    The analysis usually belongs to a Celery worker — another process that
+    advances job.json (non-guest jobs) and the jobs row but can never mutate
+    this process's ``_jobs`` cache. A poll against a cached job that is
+    still open therefore has to re-read, or ``GET /api/jobs/{id}`` reports
+    "queued" forever and the upload page never leaves "Queued for
+    analysis" after the worker has finished. Equal-rank progress is adopted
+    only when it is newer: an inline run in this process owns the fresher
+    dict and must not be clobbered by an older on-disk snapshot.
+
+    Args:
+        job_id: Job identifier to look up.
+
+    Returns:
+        The job dict, or None when no copy of the job exists anywhere.
+    """
     if job_id in _jobs:
-        _jobs[job_id] = _normalize_job(_jobs[job_id])
-        return _jobs[job_id]
+        cached = _normalize_job(_jobs[job_id])
+        if _job_status_rank(cached.get("status")) < _JOB_STATUS_RANK["completed"]:
+            refreshed = _load_persisted_job(job_id)
+            if refreshed is None and _job_status_rank(
+                _read_job_status_from_db(job_id)
+            ) > _job_status_rank(cached.get("status")):
+                # No job.json (guest jobs skip it by design): only pay for
+                # the full database reconstruction once the row advanced.
+                refreshed = _load_job_from_db(job_id)
+            if refreshed is not None and (
+                _job_status_rank(refreshed.get("status"))
+                > _job_status_rank(cached.get("status"))
+                or (
+                    _job_status_rank(refreshed.get("status"))
+                    == _job_status_rank(cached.get("status"))
+                    and _progress_updated_at(refreshed) > _progress_updated_at(cached)
+                )
+            ):
+                # Merge, not replace: the re-read copy is a status/results
+                # refresh, not an identity. The guest flag and owner id live
+                # only in memory — no database column holds them — and
+                # _normalize_job stamps an explicit None onto re-read copies,
+                # so an empty owner must never erase the one the cache holds
+                # or _job_is_accessible denies the polling session and its
+                # completion poll turns into a 404.
+                merged = {**cached, **refreshed}
+                if not merged.get("owner_user_id"):
+                    merged["owner_user_id"] = cached.get("owner_user_id")
+                cached = merged
+            # Either way the assignment below refreshes the cache: adopt the
+            # re-read copy, or put the live dict back after _load_persisted_job
+            # rewrote it as a side effect.
+        _jobs[job_id] = cached
+        return cached
     loaded = _load_persisted_job(job_id)
     if loaded:
         return loaded
