@@ -402,6 +402,15 @@ class LearnedFusionTrainingRunner:
             + ", ".join(str(root) for root in self.dataset_roots)
         )
 
+    def load_pairs(self, dataset_names: List[str]) -> List[LabeledPair]:
+        """Load labeled pairs from every requested corpus.
+
+        Public entry point shared with the engine-evaluation harness so that a
+        comparison run scores exactly the pairs (and labels) a training run
+        would use, instead of maintaining a second, drifting pair builder.
+        """
+        return self._load_pairs(dataset_names)
+
     def _load_pairs(self, dataset_names: List[str]) -> List[LabeledPair]:
         """Load labeled pairs from every requested dataset."""
         all_pairs: List[LabeledPair] = []

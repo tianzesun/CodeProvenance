@@ -300,8 +300,31 @@ def main() -> int:
     engine_eval_parser = subparsers.add_parser(
         "engine-eval",
         help=(
-            "Score all IntegrityDesk engines plus real MOSS/JPlag/Dolos against "
-            "the IR-Plag labeled dataset"
+            "Score all IntegrityDesk engines plus real MOSS/JPlag/Dolos on the "
+            "same labeled pairs (IR-Plag, conplag or kaggle_student_code)"
+        ),
+    )
+    engine_eval_parser.add_argument(
+        "--dataset",
+        choices=["IR-Plag-Dataset", "conplag", "kaggle_student_code"],
+        default="IR-Plag-Dataset",
+        help=(
+            "Corpus to evaluate (default: IR-Plag-Dataset). Pairs and labels "
+            "come from the same loaders as fusion-train-learned."
+        ),
+    )
+    engine_eval_parser.add_argument(
+        "--dataset-roots",
+        nargs="+",
+        help="Directories searched for the corpus folders (default: data/datasets)",
+    )
+    engine_eval_parser.add_argument(
+        "--external-batch-size",
+        type=int,
+        default=80,
+        help=(
+            "Pairs per external-tool invocation (default: 80). JPlag/Dolos are "
+            "quadratic in submissions, so large sets are scored in batches."
         ),
     )
     engine_eval_parser.add_argument(
@@ -674,8 +697,16 @@ def main() -> int:
             moss_user_id=args.moss_user_id or "",
             enabled_tools=args.tools,
             pair_limit=args.pair_limit,
+            dataset_name=args.dataset,
+            dataset_roots=(
+                [Path(root) for root in args.dataset_roots]
+                if args.dataset_roots
+                else None
+            ),
+            external_batch_size=args.external_batch_size,
         )
         print("\nEngine Evaluation Completed!\n")
+        print(f"Dataset: {report.dataset_name} ({report.language})")
         print(
             f"Pairs: {report.pair_count} "
             f"({report.positive_pairs} positive, {report.negative_pairs} negative)"
