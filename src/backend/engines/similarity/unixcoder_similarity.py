@@ -14,6 +14,7 @@ Usage:
 
 import logging
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -263,6 +264,32 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
     # ─────────────────────────────────────────
     #  Public API (matches BaseSimilarityAlgorithm)
     # ─────────────────────────────────────────
+
+    def warm_embeddings(self, texts: Sequence[str]) -> int:
+        """Encode every text that is not on disk yet, in large batches.
+
+        Per-pair scoring hands the model two texts at a time, so a GPU forward
+        pass carries a batch of two and idles for most of its capacity. Warming
+        up front pays each distinct text once at ``batch_size`` per pass and
+        leaves the vectors in the disk cache that ``compare`` already reads.
+        Both paths end at the same ``.npy`` file, so a warmed run scores exactly
+        like an unwarmed one; only the wall clock changes.
+
+        Args:
+            texts: Raw submission texts. Duplicates and blanks are ignored.
+
+        Returns:
+            How many distinct texts were not already on disk (they are the ones
+            that had to be computed).
+        """
+        unique = list(
+            dict.fromkeys(text.strip() for text in texts if text and text.strip())
+        )
+        cached = sum(1 for text in unique if self._load_from_cache(text) is not None)
+        if len(unique) > cached:
+            self._load_model()
+            self._embed_texts(unique)
+        return len(unique) - cached
 
     def compare(self, parsed_a: dict[str, Any], parsed_b: dict[str, Any]) -> Finding:
         """

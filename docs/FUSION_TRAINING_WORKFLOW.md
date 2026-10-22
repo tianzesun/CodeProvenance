@@ -5,6 +5,12 @@ This workflow prepares the plagiarism fusion model before large-scale training o
 This document is written as an operations runbook. Another engineer should be able to
 follow it on a separate machine without needing to read the code first.
 
+**Run training and `engine-eval` on the GPU host, not on the app laptop.** The
+short procedure is [GPU_TRAINING_RUNBOOK.md](GPU_TRAINING_RUNBOOK.md):
+`bash scripts/gpu/setup.sh`, then `train_equal.sh` or `eval_real_tools.sh`, then
+the `fusion-gate` verdict. The rest of this page explains the corpora, the
+commands behind those scripts, and every measured attempt so far.
+
 ## What It Does
 
 The workflow now supports three separate commands:
@@ -396,6 +402,16 @@ the rule score on IR-Plag and kaggle, which is what proportional weighting
 shipped column in the table above: 0.6184 / 0.8134 / 0.8833. Do not ship a
 candidate that only trades one corpus for another.
 
+Run it through the script rather than by hand, because the script also refuses to
+write the shipped artifact and applies the gate:
+
+```bash
+bash scripts/gpu/train_equal.sh
+```
+
+See [GPU_TRAINING_RUNBOOK.md](GPU_TRAINING_RUNBOOK.md) for the flags it passes and
+the gate's exact semantics.
+
 ### Decision rule
 
 Ship the new artifact only when all of the following hold:
@@ -517,4 +533,9 @@ The commands themselves do not need to change after that.
 - Feature extraction is cached, so repeated runs on the same pair set get faster.
 - Progress logging is emitted during feature extraction and model training.
 - The best model is selected by evaluation F1 score.
-- The current workflow is CPU-friendly for feature building and model training; moving it to a GPU server mainly helps when you scale the data volume and want faster end-to-end experiment cycles.
+- Benchmark runs encode each distinct submission once before pairwise scoring
+  (embedding prewarm). Pairwise calls hand the model two sequences at a time, so
+  on a GPU this is the difference between using the device and leaving it idle;
+  `--no-prewarm-embeddings` exists only to reproduce an old timing.
+- The corpora sizes here (1664 pairs) do not need a GPU to fit the logistic
+  model; the GPU is for the embedding features during extraction.

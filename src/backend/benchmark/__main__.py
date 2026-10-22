@@ -358,6 +358,15 @@ def main() -> int:
         default="reports/engine_evaluation",
         help="Output directory",
     )
+    engine_eval_parser.add_argument(
+        "--no-prewarm-embeddings",
+        action="store_true",
+        help=(
+            "Skip the one-pass encode of distinct submissions before pairwise "
+            "scoring. Only useful to reproduce an old timing; on a GPU the "
+            "prewarm is what keeps the device busy"
+        ),
+    )
 
     learned_train_parser = subparsers.add_parser(
         "fusion-train-learned",
@@ -447,6 +456,58 @@ def main() -> int:
         "--output",
         default="reports/learned_fusion",
         help="Output directory for training reports",
+    )
+    learned_train_parser.add_argument(
+        "--no-prewarm-embeddings",
+        action="store_true",
+        help=(
+            "Skip the one-pass encode of distinct submissions before pairwise "
+            "scoring. Pairwise calls hand the model two texts at a time, so "
+            "this is what leaves a GPU idle; only use it to reproduce old timings"
+        ),
+    )
+
+    gate_parser = subparsers.add_parser(
+        "fusion-gate",
+        help=(
+            "Compare a retrain or engine-eval report against the shipped "
+            "artifact per corpus; exits non-zero when any corpus regresses"
+        ),
+    )
+    gate_parser.add_argument(
+        "--report",
+        nargs="+",
+        required=True,
+        help=(
+            "Report file(s) or directory(ies). Training reports carry every "
+            "corpus; engine-eval writes one file per corpus and the newest wins"
+        ),
+    )
+    gate_parser.add_argument(
+        "--scorer",
+        default="fused",
+        help="Scorer to read from engine-eval reports (default: fused)",
+    )
+    gate_parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=0.0,
+        help="Allowed AUC shortfall per corpus (default: 0.0, no regression)",
+    )
+    gate_parser.add_argument(
+        "--baseline",
+        nargs="+",
+        metavar="DATASET=AUC",
+        help=(
+            "Override the shipped-artifact bar, e.g. "
+            "--baseline IR-Plag-Dataset=0.6184 conplag=0.8134 "
+            "kaggle_student_code=0.8833"
+        ),
+    )
+    gate_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the verdict as JSON instead of a table",
     )
 
     args = parser.parse_args()
@@ -704,6 +765,7 @@ def main() -> int:
                 else None
             ),
             external_batch_size=args.external_batch_size,
+            prewarm_embeddings=not args.no_prewarm_embeddings,
         )
         print("\nEngine Evaluation Completed!\n")
         print(f"Dataset: {report.dataset_name} ({report.language})")
@@ -750,6 +812,7 @@ def main() -> int:
             poolc_negative_ratio=args.poolc_negative_ratio,
             cache_path=Path(args.cache) if args.cache else None,
             dataset_weighting=args.dataset_weighting,
+            prewarm_embeddings=not args.no_prewarm_embeddings,
         )
         print("\nLearned Fusion Training Completed!\n")
         print(
@@ -767,6 +830,35 @@ def main() -> int:
             )
         print(f"Model artifact: {report.artifact_path}")
         print(f"Markdown report: {args.output}/learned_fusion_report_*.md")
+
+    elif args.command == "fusion-gate":
+        import json
+        from pathlib import Path
+
+        from src.backend.benchmark.gate import collect_scores, evaluate_gate
+
+        baselines = None
+        if args.baseline:
+            baselines = {}
+            for item in args.baseline:
+                name, _, value = item.partition("=")
+                if not name.strip() or not value.strip():
+                    parser.error(f"--baseline expects DATASET=AUC, got {item!r}")
+                baselines[name.strip()] = float(value)
+
+        scores, used_files = collect_scores(
+            [Path(path) for path in args.report], scorer=args.scorer
+        )
+        result = evaluate_gate(scores, baselines=baselines, tolerance=args.tolerance)
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2))
+        else:
+            for path in used_files:
+                print(f"read {path}")
+            if used_files:
+                print()
+            print(result.format_table())
+        return 0 if result.passed else 1
 
     return 0
 

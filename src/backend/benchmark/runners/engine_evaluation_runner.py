@@ -241,6 +241,7 @@ class EngineEvaluationRunner:
         dataset_name: str = "IR-Plag-Dataset",
         dataset_roots: Optional[Iterable[Path]] = None,
         external_batch_size: int = 80,
+        prewarm_embeddings: bool = True,
     ) -> None:
         """Initialize the evaluation runner.
 
@@ -257,6 +258,11 @@ class EngineEvaluationRunner:
             external_batch_size: Pairs handed to one external-tool invocation.
                 JPlag/Dolos compare every submission against every other, so an
                 unchunked run over thousands of independent pairs is quadratic.
+            prewarm_embeddings: Encode each distinct submission once before
+                pairwise scoring. Pairwise calls hand the model two texts at a
+                time; on a GPU that leaves most of the device idle. The cached
+                vectors are the same ones the per-pair path reads, so scores do
+                not change.
         """
         if dataset_name not in self.DATASETS:
             raise ValueError(
@@ -275,6 +281,7 @@ class EngineEvaluationRunner:
         self.dataset_name = dataset_name
         self.dataset_roots = [Path(root) for root in (dataset_roots or [])]
         self.external_batch_size = external_batch_size
+        self.prewarm_embeddings = prewarm_embeddings
 
     def run(self) -> EngineEvaluationReport:
         """Execute the harness and write report artifacts."""
@@ -420,6 +427,27 @@ class EngineEvaluationRunner:
             ]
 
         pair_specs = self._pair_specs(pairs)
+        if self.prewarm_embeddings:
+            from src.backend.engines.features.feature_extractor import (
+                prewarm_local_embeddings,
+            )
+
+            summary = prewarm_local_embeddings(submissions.values())
+            if summary["error"]:
+                logger.warning("Embedding prewarm skipped: %s", summary["error"])
+            elif summary["enabled"]:
+                logger.info(
+                    "Embedding prewarm on %s: %s distinct texts, %s computed in %.1fs",
+                    summary["device"],
+                    summary["requested"],
+                    summary["computed"],
+                    summary["seconds"],
+                )
+            else:
+                logger.info(
+                    "Embedding prewarm skipped (runtime=%s)", summary["runtime"]
+                )
+
         results = service.compare_pairs(
             submissions=submissions,
             pairs=pair_specs,
@@ -780,6 +808,7 @@ def run_engine_evaluation(
     dataset_name: str = "IR-Plag-Dataset",
     dataset_roots: Optional[Iterable[Path]] = None,
     external_batch_size: int = 80,
+    prewarm_embeddings: bool = True,
 ) -> EngineEvaluationReport:
     """Convenience wrapper used by the CLI."""
     runner = EngineEvaluationRunner(
@@ -792,5 +821,6 @@ def run_engine_evaluation(
         dataset_name=dataset_name,
         dataset_roots=dataset_roots,
         external_batch_size=external_batch_size,
+        prewarm_embeddings=prewarm_embeddings,
     )
     return runner.run()

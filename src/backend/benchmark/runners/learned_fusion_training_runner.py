@@ -212,6 +212,7 @@ class LearnedFusionTrainingRunner:
         poolc_negative_ratio: float = 0.0,
         cache_path: Optional[Path] = None,
         dataset_weighting: str = "proportional",
+        prewarm_embeddings: bool = True,
     ) -> None:
         """Initialize the training runner.
 
@@ -241,6 +242,11 @@ class LearnedFusionTrainingRunner:
                 a large corpus dominates the fit. ``"equal"`` gives each corpus
                 the same total weight, which keeps the small, product-realistic
                 corpora relevant when PoolC is in the mix.
+            prewarm_embeddings: Encode each distinct submission once before
+                pairwise scoring. Pairwise calls hand the model two texts at a
+                time, so a GPU pass runs at two sequences; warming up front at
+                ``EMBEDDING_BATCH_SIZE`` fills it. The cached vectors are the
+                same files the per-pair path reads, so scores are unchanged.
         """
         if dataset_weighting not in {"proportional", "equal"}:
             raise ValueError(
@@ -257,6 +263,7 @@ class LearnedFusionTrainingRunner:
         self.poolc_negative_ratio = poolc_negative_ratio
         self.cache_path = Path(cache_path) if cache_path else None
         self.dataset_weighting = dataset_weighting
+        self.prewarm_embeddings = prewarm_embeddings
         self.feature_names: List[str] = list(DEFAULT_FEATURE_NAMES)
 
     def run(
@@ -764,6 +771,34 @@ class LearnedFusionTrainingRunner:
             started = time.time()
             log_every = 25 if len(missing) <= 1000 else 100
 
+            if self.prewarm_embeddings:
+                from src.backend.engines.features.feature_extractor import (
+                    prewarm_local_embeddings,
+                )
+
+                summary = prewarm_local_embeddings(
+                    [
+                        text
+                        for index in missing
+                        for text in (pairs[index].code_a, pairs[index].code_b)
+                    ]
+                )
+                if summary["error"]:
+                    logger.warning("Embedding prewarm skipped: %s", summary["error"])
+                elif summary["enabled"]:
+                    logger.info(
+                        "Embedding prewarm on %s: %s distinct texts, %s computed "
+                        "in %.1fs",
+                        summary["device"],
+                        summary["requested"],
+                        summary["computed"],
+                        summary["seconds"],
+                    )
+                else:
+                    logger.info(
+                        "Embedding prewarm skipped (runtime=%s)", summary["runtime"]
+                    )
+
             def _report_progress(
                 completed: int, total: int, _file_a: str, _file_b: str
             ) -> None:
@@ -1205,6 +1240,7 @@ def run_learned_fusion_training(
     poolc_negative_ratio: float = 0.0,
     cache_path: Optional[Path] = None,
     dataset_weighting: str = "proportional",
+    prewarm_embeddings: bool = True,
 ) -> LearnedFusionReport:
     """Convenience wrapper used by the CLI."""
     runner = LearnedFusionTrainingRunner(
@@ -1217,5 +1253,6 @@ def run_learned_fusion_training(
         poolc_negative_ratio=poolc_negative_ratio,
         cache_path=cache_path,
         dataset_weighting=dataset_weighting,
+        prewarm_embeddings=prewarm_embeddings,
     )
     return runner.run(enabled_datasets=enabled_datasets, artifact_path=artifact_path)

@@ -6,8 +6,9 @@ import logging
 import math
 import os
 import re
+import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, ClassVar
@@ -29,6 +30,76 @@ MAX_COVERAGE_LINES = 5000
 #: sent the code to the embedding API instead.
 _EMBEDDING_DISABLED = frozenset({"none", "off", "disabled", "false", "0"})
 _LOCAL_EMBEDDING_RUNTIMES = frozenset({"local", "local_unixcoder", "unixcoder"})
+
+
+def _embedding_runtime_name() -> str:
+    """Resolve the embedding runtime the way scoring and prewarming both need.
+
+    The environment is read first: the benchmark runner switches embeddings off
+    by setting ``EMBEDDING_RUNTIME`` in the process environment, while
+    ``settings`` was read once at start-up and never saw the change.
+    """
+    value = (
+        os.environ.get("EMBEDDING_RUNTIME")
+        or settings.EMBEDDING_RUNTIME
+        or "local_unixcoder"
+    )
+    return value.strip().lower()
+
+
+def prewarm_local_embeddings(texts: Iterable[str]) -> dict[str, Any]:
+    """Encode uncached submission texts before pairwise scoring starts.
+
+    Pairwise scoring calls the embedding model with two texts at a time, so a
+    GPU forward pass runs at two sequences and finishes far below its capacity.
+    Encoding every distinct submission once, at ``EMBEDDING_BATCH_SIZE`` per
+    pass, fills the device and stores the vectors in the disk cache that
+    ``compare`` already consults. The per-pair path then reads the same file it
+    would have written, so scores are unchanged; only the wall clock is.
+
+    Texts shorter than five tokens are skipped because ``UniXcoderSimilarity``
+    sends them to its token fallback instead of the model.
+
+    Args:
+        texts: Raw submission sources; duplicates are collapsed.
+
+    Returns:
+        A summary for logging: runtime, whether it ran, device, how many texts
+        were requested/computed, elapsed seconds and any error.
+    """
+    runtime = _embedding_runtime_name()
+    unique = sorted({text.strip() for text in texts if text and len(text.split()) >= 5})
+    summary: dict[str, Any] = {
+        "runtime": runtime,
+        "enabled": runtime in _LOCAL_EMBEDDING_RUNTIMES,
+        "device": None,
+        "requested": len(unique),
+        "computed": 0,
+        "seconds": 0.0,
+        "error": None,
+    }
+    if not summary["enabled"] or not unique:
+        return summary
+
+    started = time.monotonic()
+    try:
+        from src.backend.engines.similarity.unixcoder_similarity import (
+            UniXcoderSimilarity,
+        )
+
+        engine = UniXcoderSimilarity(
+            model_name=settings.EMBEDDING_MODEL,
+            device=settings.EMBEDDING_DEVICE,
+            batch_size=settings.EMBEDDING_BATCH_SIZE,
+        )
+        summary["device"] = engine.device
+        summary["computed"] = engine.warm_embeddings(unique)
+    except Exception as exc:  # a warm-up must never fail the run
+        summary["error"] = f"{type(exc).__name__}: {exc}"
+        logger.warning("Embedding prewarm failed (scores unchanged): %s", exc)
+    summary["seconds"] = round(time.monotonic() - started, 2)
+    return summary
+
 
 _KEYWORDS = frozenset(
     {
@@ -241,17 +312,8 @@ class FeatureExtractor:
         return settings.OPENAI_BASE_URL or None
 
     def _embedding_runtime(self) -> str:
-        """Configured embedding runtime.
-
-        The environment is read first: the benchmark runner switches embeddings
-        off by setting ``EMBEDDING_RUNTIME`` in the process environment, but
-        ``settings`` is read once at start-up and never saw that change.
-        """
-        return (
-            os.environ.get("EMBEDDING_RUNTIME")
-            or settings.EMBEDDING_RUNTIME
-            or "local_unixcoder"
-        ).strip().lower()
+        """Configured embedding runtime (see ``_embedding_runtime_name``)."""
+        return _embedding_runtime_name()
 
     # ── Public API ──────────────────────────────────────────────
 

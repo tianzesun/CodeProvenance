@@ -41,6 +41,20 @@ for ds in IR-Plag-Dataset conplag kaggle_student_code; do
 done
 ```
 
+Or run the wrapper, which does the loop and then gates the production `fused`
+AUC per corpus against the shipped-artifact bar:
+
+```bash
+bash scripts/gpu/eval_real_tools.sh
+python -m src.backend.benchmark fusion-gate --report reports/engine_evaluation
+```
+
+Each distinct submission is encoded once before pairwise scoring (embedding
+prewarm). Pairwise calls hand the model two sequences at a time, so on a GPU the
+prewarm is what keeps the device busy; the vectors it writes are the ones the
+per-pair path reads, so AUC does not depend on it. `--no-prewarm-embeddings`
+reproduces an old timing only.
+
 Add `--moss-user-id <id>` to include MOSS, and `--pair-limit 40` for a quick
 plumbing check. Reports land in `reports/engine_evaluation/ENGINE_EVAL_<dataset>_<timestamp>.{json,md}`.
 
