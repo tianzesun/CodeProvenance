@@ -4,7 +4,7 @@ Everything that trains a model or measures external tools runs on the GPU host.
 The laptop checkout is for editing and reviewing code; a training or an
 `engine-eval` run there costs hours and produces the same numbers.
 
-This page is the whole procedure: three scripts, one gate, one explicit
+This page is the whole procedure: four scripts, one gate, one explicit
 promotion step.
 
 ## Why the GPU host is much faster (and what was fixed to make it so)
@@ -75,6 +75,13 @@ Read the output before going further:
 - The corpus table must show non-zero pairs for all three corpora. An `UNUSABLE`
   row means the copy is incomplete or at an unexpected path; point
   `DATA_ROOTS` at the real location.
+- `fingerprint=` per corpus identifies the pairs, labels and code bodies. Two
+  hosts with different fingerprints do not share a corpus copy; see
+  [the bar section](#the-bar-is-measured-on-the-host-that-runs-the-gate).
+- The external-tools block runs JPlag and Dolos once on two toy files. `BROKEN`
+  there means a full `engine-eval` would report the tool unavailable, so fix it
+  now (the most common cause is a Node ABI mismatch, described under
+  [measure against the real external tools](#4-measure-against-the-real-external-tools)).
 - A dirty working tree warning means the result is not reproducible from a
   commit. Commit or stash before measuring.
 
@@ -143,41 +150,72 @@ this gate:
 
 ### The bar is measured on the host that runs the gate
 
-The three constants were measured on the development machine on 2026-10-22. They
-only transfer to a host that holds the *same corpus files*. Check that before
-comparing: `bash scripts/gpu/setup.sh` prints a `fingerprint=` per corpus, and two
-hosts with different fingerprints will not agree on AUC even for the shipped
-artifact.
+The three built-in constants were measured on the development machine on
+2026-10-22. They only transfer to a host that holds the *same corpus files*.
+`bash scripts/gpu/setup.sh` prints a `fingerprint=` per corpus, and two hosts with
+different fingerprints will not agree on AUC even for the shipped artifact.
 
 This is not hypothetical. On the T4 host the shipped artifact measured
 `0.6184 / 0.8134 / 0.8898` — IR-Plag and conplag identical, kaggle 0.0065 higher,
 with the dependency-free `rule` scorer moving on kaggle too (0.8718 → 0.8773) and
-nowhere else. `kaggle_student_code` is assembled locally from the Kaggle CSV
-instead of being downloaded, so its copy drifts between machines.
+nowhere else, and JPlag independently landing 0.005 higher on kaggle only.
+`kaggle_student_code` is assembled locally from the Kaggle CSV instead of being
+downloaded, so its copy drifts between machines.
 
-When the corpus copy differs, measure the bar here and pass it in:
+**The standing procedure is a host baseline, not the constants.** Once per host,
+and again after promoting an artifact or changing a corpus:
 
 ```bash
-# one-off, with the shipped artifact still in place
+# 1) with the shipped artifact in place, measure it on this host's corpora
 bash scripts/gpu/eval_real_tools.sh
-mkdir -p reports/engine_evaluation_shipped
-cp reports/engine_evaluation/*.json reports/engine_evaluation_shipped/   # before promoting anything
 
-BASELINE_REPORT=reports/engine_evaluation_shipped bash scripts/gpu/eval_real_tools.sh
-BASELINE_REPORT=reports/engine_evaluation_shipped bash scripts/gpu/train_equal.sh
+# 2) freeze those numbers as the bar, with a manifest
+bash scripts/gpu/baseline.sh
 ```
+
+`baseline.sh` keeps the newest report per corpus and writes
+`reports/engine_evaluation_shipped/BASELINE.json`:
+
+```json
+{
+  "created_at": "2026-10-22T16:49:02+00:00",
+  "commit": "89e5c754",
+  "artifact_sha256": "b4718fcb…",
+  "scores": {"IR-Plag-Dataset": 0.618404, "conplag": 0.813377,
+             "kaggle_student_code": 0.883342},
+  "reports": ["ENGINE_EVAL_conplag_20261022_100901.json", "…"],
+  "corpus_fingerprints": {"IR-Plag-Dataset": "10f45afb…", "…": "…"}
+}
+```
+
+After that, `train_equal.sh` and `eval_real_tools.sh` pick it up **by default**
+(`_common.sh` uses `reports/engine_evaluation_shipped` whenever it holds a
+`BASELINE.json`); neither needs an environment variable. Set `BASELINE_REPORT` to
+point somewhere else, or delete the directory to fall back to the constants — the
+scripts print which bar is in force:
+
+```
+bar:      host-measured shipped artifact from …/reports/engine_evaluation_shipped
+```
+
+The gate checks the manifest before judging:
+
+- **Artifact hash.** If the shipped artifact changed since the baseline was
+  measured, the bar no longer describes it and the gate stops with
+  `Re-measure it with scripts/gpu/baseline.sh`. `--allow-stale-baseline` judges
+  against the old bar anyway and says so.
+- **Corpus fingerprints** are recorded, not enforced: they need the dataset roots
+  and would make the gate load every corpus. Compare them by eye against
+  `setup.sh` after moving data between hosts.
+- **Full precision is rounded to 4 decimals** before comparing, because the bar
+  comes from a report (`0.618404`) and the candidate is quoted as `0.6184`.
+- A corpus missing from the baseline falls back to its constant with a
+  `warning:`; the verdict never shrinks to the corpora the baseline covers.
 
 The scripts refuse a `BASELINE_REPORT` that points at the directory the run is
 about to overwrite (`OUT`): you would be judging a run against itself, and the
-old measurement is gone by the time the gate reads it. Copy the reports aside
-first, as above. Copying is safe even though `cp` rewrites mtimes: the gate picks
-the newest run per corpus by the timestamp in the report filename.
-
-The gate then reads `fused` from those reports instead of the constants, prints a
-`note:` for every corpus where the host value differs from the constant by more
-than 0.002, and keeps every corpus in the verdict — a host baseline covering one
-corpus does not shrink the gate to one row; the others fall back to the constants
-with a `warning:`.
+old measurement is gone by the time the gate reads it. They also refuse a
+baseline report that is also the candidate report.
 
 Useful on a partial run:
 

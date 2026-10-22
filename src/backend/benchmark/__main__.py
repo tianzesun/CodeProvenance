@@ -11,6 +11,19 @@ import time
 logger = logging.getLogger(__name__)
 
 
+def _artifact_sha256() -> str | None:
+    """Return the shipped learned-fusion artifact hash, or None when absent."""
+    import hashlib
+
+    from src.backend.engines.scoring.learned_fusion import ARTIFACT_NAME, MODELS_DIR
+
+    path = MODELS_DIR / ARTIFACT_NAME
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -515,6 +528,15 @@ def main() -> int:
         ),
     )
     gate_parser.add_argument(
+        "--allow-stale-baseline",
+        action="store_true",
+        help=(
+            "judge against a host baseline that was measured with a different "
+            "shipped artifact instead of stopping; the numbers then belong to the "
+            "old artifact"
+        ),
+    )
+    gate_parser.add_argument(
         "--json",
         action="store_true",
         help="Print the verdict as JSON instead of a table",
@@ -845,7 +867,11 @@ def main() -> int:
         import json
         from pathlib import Path
 
-        from src.backend.benchmark.gate import collect_scores, evaluate_gate
+        from src.backend.benchmark.gate import (
+            collect_scores,
+            evaluate_gate,
+            load_baseline_metadata,
+        )
 
         baselines = None
         if args.baseline:
@@ -884,6 +910,33 @@ def main() -> int:
                         f"({host_value - reference:+.4f}); using the host value"
                     )
             baselines = {**SHIPPED_BASELINE, **host_baseline, **(baselines or {})}
+
+            metadata = load_baseline_metadata(
+                [Path(path) for path in args.baseline_report]
+            )
+            if metadata:
+                print(
+                    "baseline measured "
+                    f"{metadata.get('created_at') or 'at an unknown time'}"
+                    + (
+                        f" at commit {metadata['commit']}"
+                        if metadata.get("commit")
+                        else ""
+                    )
+                )
+                recorded = metadata.get("artifact_sha256")
+                current = _artifact_sha256()
+                if recorded and current and recorded != current:
+                    message = (
+                        "the baseline was measured with a different shipped artifact "
+                        f"(baseline sha256={recorded[:12]}, now {current[:12]}). "
+                        "Re-measure it with scripts/gpu/baseline.sh, or pass "
+                        "--allow-stale-baseline to judge against the old bar anyway"
+                    )
+                    if args.allow_stale_baseline:
+                        print(f"warning: {message}")
+                    else:
+                        parser.error(message)
 
         scores, used_files = collect_scores(
             [Path(path) for path in args.report], scorer=args.scorer

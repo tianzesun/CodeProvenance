@@ -30,6 +30,16 @@ REPORT_ROOT="${REPORT_ROOT:-$REPO_ROOT/reports}"
 read -r -a DATA_ROOT_ARRAY <<< "$DATA_ROOTS"
 export PYTHON_BIN DATA_ROOTS REPORT_ROOT
 
+# A host-measured bar, when one exists. Two hosts can hold different copies of a
+# corpus (kaggle_student_code is assembled locally), so the shipped-artifact
+# constants do not transfer; scripts/gpu/baseline.sh freezes this host's numbers
+# next to the reports they came from.
+if [[ -z "${BASELINE_REPORT:-}" \
+    && -f "$REPORT_ROOT/engine_evaluation_shipped/BASELINE.json" ]]; then
+  BASELINE_REPORT="$REPORT_ROOT/engine_evaluation_shipped"
+fi
+export BASELINE_REPORT="${BASELINE_REPORT:-}"
+
 # The corpora are gitignored, so a fresh clone has code but no data. Fail with
 # the path a human can fix instead of a stack trace from deep in a loader.
 require_datasets() {

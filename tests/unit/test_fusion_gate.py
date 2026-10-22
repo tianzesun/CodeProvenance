@@ -163,6 +163,21 @@ def test_collect_scores_keeps_the_newest_run_per_corpus(tmp_path) -> None:
     assert new in used
 
 
+def test_a_host_baseline_with_full_precision_is_not_a_failure(tmp_path) -> None:
+    """A bar of 0.618404 must accept a candidate at 0.6184.
+
+    Host baselines come from the reports, so they carry more than four decimals;
+    comparing the rounded candidate against the unrounded bar fails a run that
+    reproduces the shipped artifact exactly.
+    """
+    result = evaluate_gate(
+        {"IR-Plag-Dataset": 0.6184, "kaggle_student_code": 0.8833},
+        baselines={"IR-Plag-Dataset": 0.618404, "kaggle_student_code": 0.883342},
+    )
+    assert result.passed
+    assert [row.delta for row in result.rows] == [0.0, 0.0]
+
+
 def test_collect_scores_breaks_mtime_ties_by_timestamp_in_the_name(tmp_path) -> None:
     """Copying a report directory rewrites mtimes; the run name still orders it."""
     old = tmp_path / "ENGINE_EVAL_conplag_20261022_093000.json"
@@ -343,6 +358,78 @@ def test_gate_cli_refuses_to_judge_a_run_against_itself(tmp_path) -> None:
                 str(report),
             ],
         )
+
+
+def test_load_baseline_metadata_is_found_next_to_the_reports(tmp_path) -> None:
+    """The manifest sits beside the reports it describes."""
+    from src.backend.benchmark.gate import load_baseline_metadata
+
+    report = tmp_path / "ENGINE_EVAL_conplag_1.json"
+    report.write_text("{}", encoding="utf-8")
+    (tmp_path / "BASELINE.json").write_text(
+        json.dumps({"created_at": "2026-10-22T12:00:00+00:00"}), encoding="utf-8"
+    )
+
+    assert load_baseline_metadata([tmp_path])["created_at"].startswith("2026-10-22")
+    assert load_baseline_metadata([report])["created_at"].startswith("2026-10-22")
+    assert load_baseline_metadata([tmp_path / "nope"]) is None
+
+
+def test_gate_cli_refuses_a_baseline_from_a_different_artifact(
+    tmp_path, capsys
+) -> None:
+    """A bar measured with another artifact is not this candidate's bar."""
+    from src.backend.benchmark import __main__ as cli
+
+    baseline = tmp_path / "shipped"
+    baseline.mkdir()
+    (baseline / "ENGINE_EVAL_conplag_20261022_120000.json").write_text(
+        json.dumps(
+            {
+                "dataset_name": "conplag",
+                "scorers": [{"name": "fused", "available": True, "auc_roc": 0.8134}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (baseline / "BASELINE.json").write_text(
+        json.dumps({"artifact_sha256": "0" * 64, "created_at": "2026-10-22"}),
+        encoding="utf-8",
+    )
+
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(
+        json.dumps({"per_dataset_auc": dict(SHIPPED_BASELINE)}), encoding="utf-8"
+    )
+
+    with pytest.raises(SystemExit):
+        _run_cli(
+            cli,
+            [
+                "fusion-gate",
+                "--report",
+                str(candidate),
+                "--baseline-report",
+                str(baseline),
+            ],
+        )
+    assert "Re-measure it" in capsys.readouterr().err
+
+    assert (
+        _run_cli(
+            cli,
+            [
+                "fusion-gate",
+                "--report",
+                str(candidate),
+                "--baseline-report",
+                str(baseline),
+                "--allow-stale-baseline",
+            ],
+        )
+        == 0
+    )
+    assert "different shipped artifact" in capsys.readouterr().out
 
 
 def _run_cli(cli, argv: list[str]) -> int:

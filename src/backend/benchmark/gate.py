@@ -34,6 +34,9 @@ SHIPPED_BASELINE: dict[str, float] = {
 #: Keys a training report may use for its per-dataset out-of-fold AUC.
 _TRAINING_KEYS = ("per_dataset_auc", "logo_per_dataset")
 
+#: Manifest written next to a host-measured baseline by scripts/gpu/baseline.sh.
+BASELINE_METADATA_NAME = "BASELINE.json"
+
 
 @dataclass(frozen=True)
 class GateRow:
@@ -172,7 +175,10 @@ def evaluate_gate(
         rows.append(
             GateRow(
                 dataset=name,
-                baseline=float(bar),
+                # A host-measured bar carries full precision (0.618404); the
+                # comparison happens at the quoted 4 decimals, so round it here
+                # or a candidate that reproduces the bar exactly reads as below.
+                baseline=round(float(bar), 4),
                 candidate=None if value is None else float(value),
             )
         )
@@ -218,6 +224,34 @@ def load_report_scores(path: Path, scorer: str = "fused") -> dict[str, float]:
             if isinstance(auc, (int, float)):
                 return {dataset_name: float(auc)}
     return {}
+
+
+def load_baseline_metadata(paths: Iterable[Path]) -> dict[str, Any] | None:
+    """Return the manifest written by ``scripts/gpu/baseline.sh``, if present.
+
+    Args:
+        paths: Baseline report files or directories, as given to the gate.
+
+    Returns:
+        The parsed manifest, or ``None`` when the baseline has no manifest (for
+        example a directory copied by hand).
+    """
+    for path in paths:
+        path = Path(path)
+        if not path.exists():
+            continue
+        candidate = (
+            path / BASELINE_METADATA_NAME
+            if path.is_dir()
+            else path.parent / BASELINE_METADATA_NAME
+        )
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
 
 
 def collect_scores(
