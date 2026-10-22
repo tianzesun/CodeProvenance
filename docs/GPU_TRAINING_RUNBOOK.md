@@ -232,14 +232,23 @@ requires NODE_MODULE_VERSION 127.
 ```
 
 `node -p process.versions.modules` prints the ABI a machine has; it has to match
-the one the CLI was built against. Three ways out, in order of preference:
+the one the CLI was built against. A mismatch can point either way: a copied
+`node_modules` (built on another machine) under the host Node, or a pinned
+runtime under parsers that were rebuilt on this host. The adapter now names the
+Node it actually loaded at the start of the error, and `setup.sh` prints the
+error itself, so run it rather than reasoning from versions.
+
+Three ways out, in order of preference:
 
 1. **Pin the runtime next to the CLI.** Put a matching Node in
    `tools/external/dolos-cli/node/bin/` and rsync `tools/external/` as a whole.
    The adapter puts that directory ahead of `PATH` (and still honours the older
-   `node20/bin` location).
-2. **Rebuild the parsers for the host's Node**: `cd tools/external/dolos-cli &&
-   npm rebuild`. Needs a compiler and network access for headers or prebuilds.
+   `node20/bin` location). If the parsers were already rebuilt on this host, pin
+   the runtime *and* rebuild for it:
+   `cd tools/external/dolos-cli && PATH="$PWD/node/bin:$PATH" npm rebuild`.
+2. **Use the host's Node instead**: move the pinned runtime aside
+   (`mv node node.unused`) when the parsers were rebuilt here. Fast, but the
+   pairing is then host-specific and does not survive a fresh rsync.
 3. **Use the standalone Dolos binary** under `tools/external/dolos/`, which has
    no Node dependency at all.
 

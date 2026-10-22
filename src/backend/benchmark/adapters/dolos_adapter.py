@@ -124,14 +124,7 @@ class DolosBenchmarkEngine(BaseAdapter):
                 message = f"Dolos exited with code {proc.returncode} ({launched})."
                 message += f"\n{output}" if output else " It printed no output."
                 if "NODE_MODULE_VERSION" in output:
-                    message += (
-                        "\nThe native Dolos parsers were built for a different Node "
-                        "runtime than the one on PATH. Either rebuild them with the "
-                        "Node that runs Dolos:\n"
-                        "  cd tools/external/dolos-cli && npm rebuild\n"
-                        "or drop a matching Node into tools/external/dolos-cli/node/bin, "
-                        "which the adapter prefers over PATH."
-                    )
+                    message += self._node_abi_advice(env)
                 raise RuntimeError(message)
 
             pairs_path = report_dir / "pairs.csv"
@@ -227,6 +220,42 @@ class DolosBenchmarkEngine(BaseAdapter):
             if (candidate / "node").exists():
                 return candidate
         return None
+
+    def _node_abi_advice(self, env: Dict[str, str]) -> str:
+        """Explain a native-parser ABI mismatch, naming the runtime in use.
+
+        A copied ``node_modules`` and a pinned runtime can be rebuilt in either
+        direction, so the confusing part is never the error but which Node is
+        speaking. Resolve it here instead of asking the operator to guess.
+        """
+        runtime = ""
+        try:
+            probe = subprocess.run(
+                [
+                    "node",
+                    "-p",
+                    "process.version + ' abi=' + process.versions.modules",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=env,
+            )
+            if probe.returncode == 0 and probe.stdout.strip():
+                node_path = shutil.which("node", path=env.get("PATH")) or "node"
+                runtime = f"\nNode in use: {probe.stdout.strip()} ({node_path})."
+        except (OSError, subprocess.SubprocessError):  # pragma: no cover - env specific
+            runtime = ""
+        return (
+            runtime
+            + "\nThe native Dolos parsers were built against a different Node ABI "
+            "than the runtime that just loaded them. Pick one and make the other "
+            "match:\n"
+            "  cd tools/external/dolos-cli\n"
+            '  PATH="$PWD/node/bin:$PATH" npm rebuild   # parsers for the pinned runtime\n'
+            "  mv node node.unused                      # or use the host Node instead\n"
+            "The adapter prefers tools/external/dolos-cli/node/bin over PATH."
+        )
 
     def _write_submissions(
         self, target_dir: Path, submissions: Dict[str, str]

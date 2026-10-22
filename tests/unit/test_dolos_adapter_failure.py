@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -65,13 +66,22 @@ def test_a_missing_cli_is_not_an_error(tmp_path) -> None:
     assert engine.run_batch({"a.py": "x = 1"}, [("a.py", "a.py")]) == {"pairs": []}
 
 
-def test_abi_mismatch_gets_a_remediation_hint(tmp_path) -> None:
+def test_abi_mismatch_gets_a_remediation_hint(tmp_path, monkeypatch) -> None:
     """The native-parser ABI error is the one a fresh host actually hits."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_node = bin_dir / "node"
+    fake_node.write_text(
+        '#!/usr/bin/env bash\necho "v22.14.0 abi=127"\n', encoding="utf-8"
+    )
+    fake_node.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+
     tool_dir = _fake_cli(
         tmp_path / "dolos-cli",
         'if [[ "${1:-}" == "--help" ]]; then echo "plagiarism --output-format"; exit 0; fi\n'
         'echo "[error] was compiled against a different Node.js version using"\n'
-        'echo "NODE_MODULE_VERSION 141. This version of Node.js requires NODE_MODULE_VERSION 127."\n'
+        'echo "NODE_MODULE_VERSION 127. This version of Node.js requires NODE_MODULE_VERSION 141."\n'
         "exit 1\n",
     )
 
@@ -80,6 +90,7 @@ def test_abi_mismatch_gets_a_remediation_hint(tmp_path) -> None:
 
     message = str(excinfo.value)
     assert "NODE_MODULE_VERSION 127" in message
+    assert "Node in use: v22.14.0 abi=127" in message
     assert "npm rebuild" in message
     assert "tools/external/dolos-cli/node/bin" in message
 
