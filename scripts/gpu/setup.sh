@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Verify the GPU host before spending time on a run.
 #
-# This is read-only: it loads dataset labels (no model, no scoring) and prints
-# what the training scripts will use. Run it first on a fresh machine.
+# This is read-only against the repo: it loads dataset labels (no model, no
+# scoring) and runs each external tool once on two toy files, so a broken tool
+# fails in seconds here instead of after an hour of evaluation. Run it first on a
+# fresh machine.
 set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
@@ -91,13 +93,64 @@ PY
 
 echo
 echo "== external tools (gitignored, copy them from a host that has them) =="
-for tool in tools/external/JPlag/jplag.jar tools/external/dolos-cli; do
-  if [[ -e "$tool" ]]; then
-    echo "present: $tool"
-  else
-    echo "MISSING: $tool - eval_real_tools.sh will report the tool as unavailable"
-  fi
-done
+"$PYTHON_BIN" - <<'PY'
+"""Smoke-test each external tool on two toy files.
+
+Presence is not availability: the Dolos CLI is a Node script whose native
+parsers are compiled against one Node ABI, so a copied checkout starts fine
+(``--help`` works) and then dies on the first real run with a
+NODE_MODULE_VERSION mismatch. Only running it proves anything.
+"""
+
+import signal
+
+JAVA_A = "public class A { int f(int x) { return x + 1; } }\n"
+JAVA_B = "public class B { int f(int y) { return y + 1; } }\n"
+PY_A = "def f(x):\n    return x + 1\n"
+PY_B = "def f(y):\n    return y + 1\n"
+
+
+def probe(tool_id: str, engine, submissions: dict, pair: tuple) -> None:
+    """Run one tool on a trivial pair and print a verdict."""
+    try:
+        available = engine.is_available()
+    except Exception as exc:  # noqa: BLE001 - a broken tool must not abort setup
+        print(f"  {tool_id:8} BROKEN while checking availability: {exc}")
+        return
+    if not available:
+        print(f"  {tool_id:8} MISSING binary; this corpus will report it unavailable")
+        return
+
+    def _timeout(signum, frame):  # pragma: no cover - environment specific
+        raise TimeoutError
+
+    previous = signal.signal(signal.SIGALRM, _timeout)
+    signal.alarm(300)
+    try:
+        payload = engine.run_batch(dict(submissions), [pair])
+        scores = [item.get("score") for item in payload.get("pairs", [])]
+        if not scores:
+            print(f"  {tool_id:8} BROKEN: ran but returned no pair scores")
+        else:
+            print(f"  {tool_id:8} OK: scored a toy pair {scores[0]:.3f}")
+    except Exception as exc:  # noqa: BLE001 - print the tool's own words
+        detail = "\n".join(f"    {line}" for line in str(exc).splitlines()[:8])
+        print(f"  {tool_id:8} BROKEN: {detail}")
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+print("running each tool once on two toy files (this is the real check):")
+try:
+    from src.backend.benchmark.adapters.dolos_adapter import DolosBenchmarkEngine
+    from src.backend.benchmark.adapters.jplag_adapter import JPlagAdapter
+except Exception as exc:  # noqa: BLE001
+    raise SystemExit(f"  cannot import the adapters: {exc}")
+
+probe("jplag", JPlagAdapter(), {"A.java": JAVA_A, "B.java": JAVA_B}, ("A.java", "B.java"))
+probe("dolos", DolosBenchmarkEngine(), {"a.py": PY_A, "b.py": PY_B}, ("a.py", "b.py"))
+PY
 
 echo
 echo "== next =="

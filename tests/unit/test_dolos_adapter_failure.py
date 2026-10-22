@@ -65,8 +65,47 @@ def test_a_missing_cli_is_not_an_error(tmp_path) -> None:
     assert engine.run_batch({"a.py": "x = 1"}, [("a.py", "a.py")]) == {"pairs": []}
 
 
-def test_bundled_node_is_prepended_to_path(tmp_path) -> None:
-    """The CLI is a Node script; the bundled runtime has to reach it."""
+def test_abi_mismatch_gets_a_remediation_hint(tmp_path) -> None:
+    """The native-parser ABI error is the one a fresh host actually hits."""
+    tool_dir = _fake_cli(
+        tmp_path / "dolos-cli",
+        'if [[ "${1:-}" == "--help" ]]; then echo "plagiarism --output-format"; exit 0; fi\n'
+        'echo "[error] was compiled against a different Node.js version using"\n'
+        'echo "NODE_MODULE_VERSION 141. This version of Node.js requires NODE_MODULE_VERSION 127."\n'
+        "exit 1\n",
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _engine(tool_dir).run_batch({"a.py": "x = 1"}, [("a.py", "a.py")])
+
+    message = str(excinfo.value)
+    assert "NODE_MODULE_VERSION 127" in message
+    assert "npm rebuild" in message
+    assert "tools/external/dolos-cli/node/bin" in message
+
+
+def test_a_node_bin_directory_is_preferred(tmp_path) -> None:
+    """A pinned runtime next to the CLI wins over whatever PATH has."""
+    tool_dir = _fake_cli(
+        tmp_path / "dolos-cli" / "node_modules" / ".bin",
+        'if [[ "${1:-}" == "--help" ]]; then echo "plagiarism --output-format"; exit 0; fi\n'
+        'echo "node: $(command -v node)"\n'
+        "exit 1\n",
+    )
+    node_bin = tmp_path / "dolos-cli" / "node" / "bin"
+    node_bin.mkdir(parents=True)
+    node = node_bin / "node"
+    node.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    node.chmod(0o755)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _engine(tool_dir).run_batch({"a.py": "x = 1"}, [("a.py", "a.py")])
+
+    assert f"node: {node}" in str(excinfo.value)
+
+
+def test_the_legacy_node20_directory_still_works(tmp_path) -> None:
+    """Earlier checkouts put the runtime in ``node20/bin``; keep honouring it."""
     tool_dir = _fake_cli(
         tmp_path / "dolos-cli" / "node_modules" / ".bin",
         'if [[ "${1:-}" == "--help" ]]; then echo "plagiarism --output-format"; exit 0; fi\n'

@@ -75,8 +75,8 @@ class DolosBenchmarkEngine(BaseAdapter):
             written_paths = self._write_submissions(source_root, submissions)
 
             env = os.environ.copy()
-            node_bin_dir = cli_path.parents[2] / "node20" / "bin"
-            if node_bin_dir.exists():
+            node_bin_dir = self._node_bin_dir(cli_path)
+            if node_bin_dir is not None:
                 env["PATH"] = f"{node_bin_dir}:{env.get('PATH', '')}"
 
             command_prefix = (
@@ -121,10 +121,18 @@ class DolosBenchmarkEngine(BaseAdapter):
                 if cli_path.suffix == ".js":
                     launched = f"{launched} {cli_path}"
                 output = "\n".join(line for line in tail if line).strip()
-                raise RuntimeError(
-                    f"Dolos exited with code {proc.returncode} ({launched})."
-                    + (f"\n{output}" if output else " It printed no output.")
-                )
+                message = f"Dolos exited with code {proc.returncode} ({launched})."
+                message += f"\n{output}" if output else " It printed no output."
+                if "NODE_MODULE_VERSION" in output:
+                    message += (
+                        "\nThe native Dolos parsers were built for a different Node "
+                        "runtime than the one on PATH. Either rebuild them with the "
+                        "Node that runs Dolos:\n"
+                        "  cd tools/external/dolos-cli && npm rebuild\n"
+                        "or drop a matching Node into tools/external/dolos-cli/node/bin, "
+                        "which the adapter prefers over PATH."
+                    )
+                raise RuntimeError(message)
 
             pairs_path = report_dir / "pairs.csv"
             if pairs_path.exists():
@@ -205,6 +213,20 @@ class DolosBenchmarkEngine(BaseAdapter):
             or "plagiarism" in help_text
             or "--output-format" in help_text
         )
+
+    def _node_bin_dir(self, cli_path: Path) -> Optional[Path]:
+        """Return a bundled Node runtime to put ahead of PATH, if there is one.
+
+        Dolos is a Node script whose parsers are native modules compiled against
+        one Node ABI, so the runtime has to be pinned next to the CLI rather than
+        inherited from whatever the host has installed.
+        """
+        tool_dir = cli_path.parents[2]
+        for name in ("node", "node20"):
+            candidate = tool_dir / name / "bin"
+            if (candidate / "node").exists():
+                return candidate
+        return None
 
     def _write_submissions(
         self, target_dir: Path, submissions: Dict[str, str]

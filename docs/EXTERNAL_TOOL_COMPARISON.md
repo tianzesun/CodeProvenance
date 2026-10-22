@@ -104,15 +104,16 @@ Kaggle CSV, while the two Java corpora are downloaded. Check
 `bash scripts/gpu/setup.sh`'s `fingerprint=` lines before comparing across hosts.
 
 That run could not measure Dolos at all: `dolos-cli` exited 1 on the first batch
-of every corpus. The failure surfaced as `Dolos exited with code 1. See logs for
-details`, with no logs kept. Two things were wrong on our side: the adapter
-computed a `node20/bin` PATH prefix and then never passed the environment to the
-subprocess — which may be the cause, since `dolos-cli` is a Node script and the
-host's `node` is whatever `PATH` resolves — and the exception discarded the CLI's
-own output, so the actual reason was lost. Both are fixed: the subprocess gets the
-environment, and the error now carries the last 20 lines the tool printed. **No
-Dolos number from the T4 host may be quoted** until a re-run produces one; the
-Dolos column above remains the laptop measurement.
+of every corpus. The cause is a Node ABI mismatch, not a missing install — the
+native parsers in this checkout were built with Node 25 (`NODE_MODULE_VERSION`
+141), the host runs Node 22 (127), so the CLI starts and `--help` works but the
+first real parse dies. The adapter discarded the tool's output, so the earlier
+message said only `Dolos exited with code 1. See logs for details`; it now passes
+its environment through and puts the last 20 output lines, plus the `npm rebuild`
+remedy, into the error. `scripts/gpu/setup.sh` runs each tool on two toy files
+before a full evaluation. **No Dolos number from the T4 host may be quoted**
+until a re-run produces one; the Dolos column above remains the laptop
+measurement, taken with the Node the parsers were built for.
 
 ### Absolute scores are not calibrated on two of three corpora
 

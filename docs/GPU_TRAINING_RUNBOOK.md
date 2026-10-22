@@ -218,6 +218,36 @@ per corpus, so re-running a single corpus updates only that row.
   printing a green gate. `ALLOW_MISSING_TOOLS=1` downgrades that to a warning
   when the question really is IntegrityDesk alone.
 
+### Dolos needs a pinned Node, not the host's
+
+`dolos-cli` is a Node script, and its parsers are native modules compiled against
+one Node ABI (`NODE_MODULE_VERSION`). The copy in this checkout was built with
+Node 25 (ABI 141). A host on Node 22 (ABI 127) starts the CLI, answers `--help`,
+passes any presence check, and then dies on the first real run:
+
+```
+[error] The module '.../tree_sitter_elm_binding.node' was compiled against a
+different Node.js version using NODE_MODULE_VERSION 141. This version of Node.js
+requires NODE_MODULE_VERSION 127.
+```
+
+`node -p process.versions.modules` prints the ABI a machine has; it has to match
+the one the CLI was built against. Three ways out, in order of preference:
+
+1. **Pin the runtime next to the CLI.** Put a matching Node in
+   `tools/external/dolos-cli/node/bin/` and rsync `tools/external/` as a whole.
+   The adapter puts that directory ahead of `PATH` (and still honours the older
+   `node20/bin` location).
+2. **Rebuild the parsers for the host's Node**: `cd tools/external/dolos-cli &&
+   npm rebuild`. Needs a compiler and network access for headers or prebuilds.
+3. **Use the standalone Dolos binary** under `tools/external/dolos/`, which has
+   no Node dependency at all.
+
+`bash scripts/gpu/setup.sh` runs both tools once on two toy files and prints
+`OK`/`BROKEN` with the tool's own output, so this is caught before a full run.
+A failed batch still marks the whole tool unavailable rather than scoring from
+partial output.
+
 ## 5. Promote a passing candidate (explicit, one commit)
 
 ```bash
