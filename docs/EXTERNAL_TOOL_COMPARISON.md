@@ -95,25 +95,40 @@ Reading:
 - MOSS is **not** in this table. It needs a registered account
   (`--moss-user-id`); until then no MOSS comparison exists.
 
-A second run of the same shipped artifact on the T4 host reproduced `fused` on
-IR-Plag and conplag to four decimals but scored kaggle **0.890**. JPlag says the
-same thing independently — 0.5734 on IR-Plag and 0.8206 on conplag, both exactly
-as above, but 0.8525 on kaggle instead of 0.847 — so the host holds a slightly
-different `kaggle_student_code` copy. That corpus is assembled locally from the
-Kaggle CSV, while the two Java corpora are downloaded. Check
-`bash scripts/gpu/setup.sh`'s `fingerprint=` lines before comparing across hosts.
+A second run of the same shipped artifact on the T4 host (after Dolos was fixed)
+is a **replication**, not a new result. Six of the nine cells reproduce to four
+decimals:
 
-That run could not measure Dolos at all: `dolos-cli` exited 1 on the first batch
-of every corpus. The cause is a Node ABI mismatch, not a missing install — the
-native parsers in this checkout were built with Node 25 (`NODE_MODULE_VERSION`
-141), the host runs Node 22 (127), so the CLI starts and `--help` works but the
-first real parse dies. The adapter discarded the tool's output, so the earlier
-message said only `Dolos exited with code 1. See logs for details`; it now passes
-its environment through and puts the last 20 output lines, plus the `npm rebuild`
-remedy, into the error. `scripts/gpu/setup.sh` runs each tool on two toy files
-before a full evaluation. **No Dolos number from the T4 host may be quoted**
-until a re-run produces one; the Dolos column above remains the laptop
-measurement, taken with the Node the parsers were built for.
+| Corpus | Host | `fused` | JPlag | Dolos |
+| --- | --- | ---: | ---: | ---: |
+| IR-Plag-Dataset | dev laptop | 0.6184 | 0.5734 | 0.6702 |
+| IR-Plag-Dataset | T4 | 0.6184 | 0.5734 | 0.6702 |
+| conplag | dev laptop | 0.8134 | 0.8206 | 0.8378 |
+| conplag | T4 | 0.8134 | 0.8206 | 0.8378 |
+| kaggle_student_code | dev laptop | 0.8833 | 0.8474 | 0.8587 |
+| kaggle_student_code | T4 | 0.8898 | 0.8525 | 0.8638 |
+
+Every kaggle cell moves by +0.005–0.007 and nothing else moves at all, for
+IntegrityDesk and for both external tools. That is a corpus difference, not a
+device difference: the T4 host holds a different `kaggle_student_code` copy
+(fingerprint `779ae1e6` vs `d711ce8e`, 167 distinct texts vs 166), because that
+corpus is assembled locally from the Kaggle CSV while the two Java corpora are
+downloaded. Compare `bash scripts/gpu/setup.sh`'s `fingerprint=` lines before
+quoting a number across hosts, and use
+[the host baseline](GPU_TRAINING_RUNBOOK.md#the-bar-is-measured-on-the-host-that-runs-the-gate)
+as the bar rather than these constants.
+
+The first T4 attempt could not measure Dolos at all: `dolos-cli` exited 1 on the
+first batch of every corpus. The cause was a Node ABI mismatch, not a missing
+install — the native parsers in this checkout were built with Node 25
+(`NODE_MODULE_VERSION` 141) and the host ran Node 22 (127), so the CLI started
+and `--help` worked but the first real parse died. The adapter discarded the
+tool's output, so the message said only `Dolos exited with code 1. See logs for
+details`; it now passes its environment through, names the Node it loaded, and
+puts the last 20 output lines plus the remedy into the error. `setup.sh` runs
+each tool on two toy files before a full evaluation. The T4 figures above are
+from after that fix, with the runtime pinned in
+`tools/external/dolos-cli/node/bin`.
 
 ### Absolute scores are not calibrated on two of three corpora
 
