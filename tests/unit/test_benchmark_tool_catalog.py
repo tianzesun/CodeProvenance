@@ -87,9 +87,11 @@ def test_prepare_moss_script_uses_settings_and_writable_log(tmp_path):
     from src.backend.benchmark.adapters.moss_adapter import MossAdapter
 
     script_path = tmp_path / "moss.pl"
+    # Placeholder id only: a real MOSS user id authenticates an account, so
+    # fixtures must never carry one.
     script_path.write_text(
         "my $logfile = '/var/log/moss/' . ${prof}.${now};\n"
-        "$userid=394450069;\n"
+        "$userid=123456789;\n"
         'system("bash", "save_moss_report.sh","$logfile");',
         encoding="utf-8",
     )
