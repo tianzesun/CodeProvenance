@@ -335,26 +335,33 @@ second one answers the PoolC question definitively.
 **A — same-problem corpora only** (`IR-Plag-Dataset conplag kaggle_student_code`,
 `--cv-folds 5 --dataset-weighting proportional`; 1664 pairs, 706 positive):
 
-| Dataset | Pairs | Rule AUC | Out-of-fold AUC |
-| --- | ---: | ---: | ---: |
-| IR-Plag-Dataset | 460 | 0.6324 | 0.6185 |
-| conplag | 911 | 0.6617 | 0.7809 |
-| kaggle_student_code | 293 | 0.8718 | 0.8269 |
+| Dataset | Pairs | Rule AUC | Out-of-fold AUC | Shipped artifact |
+| --- | ---: | ---: | ---: | ---: |
+| IR-Plag-Dataset | 460 | 0.6324 | 0.6185 | **0.6184** |
+| conplag | 911 | 0.6617 | 0.7809 | **0.8134** |
+| kaggle_student_code | 293 | 0.8718 | 0.8269 | **0.8833** |
 
 Pooled: rule 0.7437, out-of-fold 0.8137. Fails the decision rule on IR-Plag and
 on kaggle_student_code. The likely cause is the mix: ~82% of the pairs are Java,
 and kaggle_student_code is a single Python classroom group, so its out-of-fold
 predictions always come from a model that never saw that corpus.
 
+The right-hand column is the shipped artifact measured on the same pairs by
+`engine-eval --dataset <corpus> --tools jplag dolos` (2026-10-22, see
+`EXTERNAL_TOOL_COMPARISON.md`). Compare candidates against **that** column, not
+only against `Rule AUC`: A is level with the shipped artifact on IR-Plag
+(0.6185 vs 0.6184) but loses ~0.03 on conplag and ~0.06 on kaggle, which is the
+real reason it was not shipped.
+
 **B — the same mix plus the PoolC positives** (`--max-pairs 20000
 --poolc-negative-ratio 0.0 --dataset-weighting equal`; 11664 pairs, 10706
 positive — 86% of them PoolC):
 
-| Dataset | Pairs | Rule AUC | Out-of-fold AUC |
-| --- | ---: | ---: | ---: |
-| IR-Plag-Dataset | 460 | 0.6324 | 0.6741 |
-| conplag | 911 | 0.6617 | **0.4343** |
-| kaggle_student_code | 293 | 0.8718 | 0.7088 |
+| Dataset | Pairs | Rule AUC | Out-of-fold AUC | Shipped artifact |
+| --- | ---: | ---: | ---: | ---: |
+| IR-Plag-Dataset | 460 | 0.6324 | 0.6741 | 0.6184 |
+| conplag | 911 | 0.6617 | **0.4343** | 0.8134 |
+| kaggle_student_code | 293 | 0.8718 | 0.7088 | 0.8833 |
 
 Pooled: rule **0.4594**, out-of-fold 0.7376.
 
@@ -380,6 +387,14 @@ The shipped artifact therefore stands. The exits from here are more *labelled
 same-assignment* data (see `docs/AI_HOLDOUT_COLLECTION.md` for the collection
 pattern used on the AI side) or a per-language scoring decision, not another mix
 of the corpora already in `data/datasets`.
+
+One experiment is still worth running on the existing three corpora (no PoolC):
+`--dataset-weighting equal` with the A mix. The measured shipped artifact gains
+from the learned layer only on conplag (+0.15 AUC) and is indistinguishable from
+the rule score on IR-Plag and kaggle, which is what proportional weighting
+(911 conplag pairs vs 460 IR-Plag, 293 kaggle) predicts. The bar to beat is the
+shipped column in the table above: 0.6184 / 0.8134 / 0.8833. Do not ship a
+candidate that only trades one corpus for another.
 
 ### Decision rule
 

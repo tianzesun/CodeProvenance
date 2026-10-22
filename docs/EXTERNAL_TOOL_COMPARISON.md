@@ -50,6 +50,58 @@ invocation is quadratic. Each batch is a separate tool run, and if a batch fails
 the tool is reported unavailable rather than scored from partial output (a
 partial fill would make its AUC depend on which batches happened to succeed).
 
+## Measured results (2026-10-22)
+
+Full corpora, real tools, one run per corpus (`--tools jplag dolos`,
+`--external-batch-size 80`, local CPU). ROC-AUC:
+
+| Corpus | Pairs (+/−) | `fused` (prod.) | `fused_rule` | JPlag | Dolos |
+| --- | --- | ---: | ---: | ---: | ---: |
+| IR-Plag-Dataset | 460 (355/105) | 0.618 | 0.632 | 0.573 | **0.670** |
+| conplag | 911 (251/660) | 0.813 | 0.662 | 0.821 | **0.838** |
+| kaggle_student_code | 293 (100/193) | **0.883** | 0.872 | 0.847 | 0.859 |
+
+Paired bootstrap (4,000 resamples) of `fused` minus the other scorer, 95% CI:
+
+| Corpus | vs `fused_rule` | vs JPlag | vs Dolos |
+| --- | --- | --- | --- |
+| IR-Plag | −0.014 [−0.064, +0.036] | +0.045 [−0.011, +0.103] | **−0.052 [−0.086, −0.018]** |
+| conplag | **+0.152 [+0.120, +0.183]** | −0.007 [−0.028, +0.013] | **−0.024 [−0.041, −0.009]** |
+| kaggle | +0.012 [−0.011, +0.036] | **+0.036 [+0.007, +0.066]** | **+0.025 [+0.002, +0.050]** |
+
+Reading:
+
+- The learned layer earns its place on conplag (+0.15, unambiguous) and is
+  indistinguishable from the rule score on the other two corpora. It was
+  trained on IR-Plag + conplag, so the gain being concentrated in the larger
+  corpus is what `dataset_weighting: proportional` predicts.
+- Against the external tools the picture is mixed, not a defeat: parity with
+  JPlag on conplag, ahead of both on the Python classroom corpus, behind Dolos
+  on IR-Plag (the only clearly significant loss).
+- MOSS is **not** in this table. It needs a registered account
+  (`--moss-user-id`); until then no MOSS comparison exists.
+
+### Absolute scores are not calibrated on two of three corpora
+
+Median score, and share of *negative* pairs scored ≥ 0.5:
+
+| Corpus | `fused` positives | `fused` negatives | negatives ≥ 0.5 | `fused_rule` negatives |
+| --- | ---: | ---: | ---: | ---: |
+| IR-Plag | 0.938 | 0.878 | 99% | 0.661 |
+| conplag | 0.569 | 0.195 | 8% | 0.000 |
+| kaggle | 1.000 | 0.775 | 68% | 0.844 |
+
+On IR-Plag the production score ranks no better than the rule score but pushes
+almost every independent solution to ~0.88: a fixed 0.5 cutoff would flag the
+whole class. Kaggle is similar near the top of the scale. Only conplag behaves
+like a probability. This is why the table above is AUC (ranking), and why
+`F1@0.5` is not comparable across corpora — on IR-Plag the best swept threshold
+is 0.00 (77% of pairs are positive, so "flag everything" maximises F1).
+
+Consequence for the product: a score shown to a user needs its own
+per-language calibration before it can be read as "how similar", not just a
+rank.
+
 ## How to read the result
 
 - Compare scorers **per corpus**, never pooled. A corpus that mixes
