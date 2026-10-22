@@ -189,6 +189,120 @@ def test_gate_cli_exit_codes(tmp_path, capsys) -> None:
     assert _run_cli(cli, ["fusion-gate", "--report", str(bad)]) == 1
 
 
+def test_gate_cli_uses_a_host_measured_baseline(tmp_path, capsys) -> None:
+    """A bar measured on this host replaces the constant from another machine."""
+    from src.backend.benchmark import __main__ as cli
+
+    host = tmp_path / "host"
+    host.mkdir()
+    for dataset, auc in (
+        ("IR-Plag-Dataset", 0.6184),
+        ("conplag", 0.8134),
+        # The dev machine measured 0.8833 for the same artifact.
+        ("kaggle_student_code", 0.8898),
+    ):
+        (host / f"ENGINE_EVAL_{dataset}.json").write_text(
+            json.dumps(
+                {
+                    "dataset_name": dataset,
+                    "scorers": [{"name": "fused", "available": True, "auc_roc": auc}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(
+        json.dumps(
+            {
+                "per_dataset_auc": {
+                    "IR-Plag-Dataset": 0.62,
+                    "conplag": 0.82,
+                    "kaggle_student_code": 0.885,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # 0.885 clears the constant bar (0.8833) but not this host's measurement
+    # (0.8898), so the verdict must follow the baseline it was given.
+    assert _run_cli(cli, ["fusion-gate", "--report", str(candidate)]) == 0
+    assert (
+        _run_cli(
+            cli,
+            [
+                "fusion-gate",
+                "--report",
+                str(candidate),
+                "--baseline-report",
+                str(host),
+            ],
+        )
+        == 1
+    )
+    assert "using the host value" in capsys.readouterr().out
+
+
+def test_gate_cli_host_baseline_does_not_shrink_the_gate(tmp_path, capsys) -> None:
+    """A host baseline for one corpus must not hide the other two."""
+    from src.backend.benchmark import __main__ as cli
+
+    host = tmp_path / "host"
+    host.mkdir()
+    (host / "ENGINE_EVAL_conplag.json").write_text(
+        json.dumps(
+            {
+                "dataset_name": "conplag",
+                "scorers": [{"name": "fused", "available": True, "auc_roc": 0.8134}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(
+        json.dumps({"per_dataset_auc": {"conplag": 0.8134}}), encoding="utf-8"
+    )
+
+    assert (
+        _run_cli(
+            cli,
+            [
+                "fusion-gate",
+                "--report",
+                str(candidate),
+                "--baseline-report",
+                str(host),
+            ],
+        )
+        == 1
+    )
+    output = capsys.readouterr().out
+    assert "no measurement for kaggle_student_code" in output
+
+
+def test_gate_cli_rejects_an_empty_host_baseline(tmp_path) -> None:
+    """An unreadable baseline must fail loudly, not fall back silently."""
+    from src.backend.benchmark import __main__ as cli
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps({"per_dataset_auc": dict(SHIPPED_BASELINE)}))
+
+    with pytest.raises(SystemExit):
+        _run_cli(
+            cli,
+            [
+                "fusion-gate",
+                "--report",
+                str(candidate),
+                "--baseline-report",
+                str(empty),
+            ],
+        )
+
+
 def _run_cli(cli, argv: list[str]) -> int:
     """Run the benchmark CLI in-process with ``argv``."""
     import sys

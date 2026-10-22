@@ -47,6 +47,65 @@ if [[ -n "${DRY_RUN:-}" ]]; then
   exit 0
 fi
 
+# An IntegrityDesk-only run is not the comparison this script exists for.
+# tools/external is gitignored, so a fresh GPU host has the corpora but no
+# JPlag/Dolos until they are copied over; without this check the script would
+# print a green gate and look like a successful external comparison.
+if [[ -z "${ALLOW_MISSING_TOOLS:-}" ]]; then
+  "$PYTHON_BIN" - "$OUT" "${TOOL_ARRAY[@]}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+out = Path(sys.argv[1])
+tools = sys.argv[2:]
+newest: dict[str, Path] = {}
+for path in out.rglob("ENGINE_EVAL_*.json"):
+    try:
+        dataset = json.loads(path.read_text(encoding="utf-8")).get("dataset_name")
+    except (OSError, json.JSONDecodeError):
+        continue
+    if not dataset:
+        continue
+    previous = newest.get(dataset)
+    if previous is None or path.stat().st_mtime > previous.stat().st_mtime:
+        newest[dataset] = path
+if not newest:
+    sys.exit(f"ERROR: no ENGINE_EVAL_*.json under {out}")
+
+missing: dict[str, list[str]] = {tool: [] for tool in tools}
+for dataset, path in sorted(newest.items()):
+    available = {
+        entry.get("name")
+        for entry in json.loads(path.read_text(encoding="utf-8")).get("scorers", [])
+        if entry.get("available")
+    }
+    for tool in tools:
+        if tool not in available:
+            missing[tool].append(dataset)
+
+if all(len(datasets) == len(newest) for datasets in missing.values()):
+    print(
+        "ERROR: none of the requested external tools produced any score:",
+        ", ".join(tools),
+        file=sys.stderr,
+    )
+    print(
+        "tools/external/ is gitignored, so this host has no JPlag/Dolos yet.\n"
+        "Copy them and re-run:\n"
+        "  rsync -av --info=progress2 other-host:CodeProvenance/tools/external/ tools/external/\n"
+        "  java -jar tools/external/JPlag/jplag.jar --help   # JPlag needs a JDK\n"
+        "Set ALLOW_MISSING_TOOLS=1 to gate IntegrityDesk alone.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
+for tool, datasets in missing.items():
+    if datasets:
+        print(f"warning: {tool} produced no scores for {', '.join(datasets)}")
+PY
+fi
+
 echo "== gate (production fused score, per corpus) =="
 set +e
 "${GATE_CMD[@]}"

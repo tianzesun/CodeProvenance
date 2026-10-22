@@ -95,6 +95,16 @@ Reading:
 - MOSS is **not** in this table. It needs a registered account
   (`--moss-user-id`); until then no MOSS comparison exists.
 
+A second run of the same shipped artifact on the T4 host reproduced `fused` on
+IR-Plag and conplag to four decimals but scored kaggle **0.890**. The `rule`
+scorer moved on kaggle too (0.872 → 0.877) and nowhere else, so the host holds a
+slightly different `kaggle_student_code` copy — that corpus is assembled locally
+from the Kaggle CSV, while the two Java corpora are downloaded. That run also had
+no `tools/external/` binaries (`gitignored`), so its JPlag/Dolos rows read
+`UNAVAILABLE: tool did not produce pair scores`. **It is not an external
+comparison and must not be quoted as one.** Check `bash scripts/gpu/setup.sh`'s
+`fingerprint=` lines before comparing across hosts.
+
 ### Absolute scores are not calibrated on two of three corpora
 
 Median score, share of *negative* pairs scored ≥ 0.5, and calibration error

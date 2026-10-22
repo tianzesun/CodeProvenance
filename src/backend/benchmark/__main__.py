@@ -505,6 +505,16 @@ def main() -> int:
         ),
     )
     gate_parser.add_argument(
+        "--baseline-report",
+        nargs="+",
+        metavar="PATH",
+        help=(
+            "engine-eval report(s) or directory(ies) that measured the SHIPPED "
+            "artifact on this host. Their fused AUC replaces the built-in bar, "
+            "which was measured on another machine and corpus copy"
+        ),
+    )
+    gate_parser.add_argument(
         "--json",
         action="store_true",
         help="Print the verdict as JSON instead of a table",
@@ -846,16 +856,58 @@ def main() -> int:
                     parser.error(f"--baseline expects DATASET=AUC, got {item!r}")
                 baselines[name.strip()] = float(value)
 
+        baseline_files = []
+        if args.baseline_report:
+            from src.backend.benchmark.gate import SHIPPED_BASELINE
+
+            host_baseline, baseline_files = collect_scores(
+                [Path(path) for path in args.baseline_report], scorer=args.scorer
+            )
+            if not host_baseline:
+                parser.error(
+                    "no usable baseline report under: "
+                    + ", ".join(args.baseline_report)
+                )
+            # Keep every corpus in the verdict: a host baseline that covers one
+            # corpus must not silently shrink the gate to one corpus.
+            for missing in sorted(set(SHIPPED_BASELINE) - set(host_baseline)):
+                print(
+                    f"warning: host baseline has no measurement for {missing}; "
+                    "falling back to the built-in constant"
+                )
+            for dataset, host_value in sorted(host_baseline.items()):
+                reference = SHIPPED_BASELINE.get(dataset)
+                if reference is not None and abs(host_value - reference) > 0.002:
+                    print(
+                        f"note: host baseline {dataset} is {host_value:.4f} vs "
+                        f"constant {reference:.4f} "
+                        f"({host_value - reference:+.4f}); using the host value"
+                    )
+            baselines = {**SHIPPED_BASELINE, **host_baseline, **(baselines or {})}
+
         scores, used_files = collect_scores(
             [Path(path) for path in args.report], scorer=args.scorer
         )
         result = evaluate_gate(scores, baselines=baselines, tolerance=args.tolerance)
         if args.json:
-            print(json.dumps(result.to_dict(), indent=2))
+            print(
+                json.dumps(
+                    {
+                        **result.to_dict(),
+                        "baseline_files": [str(path) for path in baseline_files],
+                    },
+                    indent=2,
+                )
+            )
         else:
+            if baseline_files:
+                for path in baseline_files:
+                    print(f"baseline {path}")
+            else:
+                print("baseline: built-in shipped-artifact constants (2026-10-22)")
             for path in used_files:
                 print(f"read {path}")
-            if used_files:
+            if used_files or baseline_files:
                 print()
             print(result.format_table())
         return 0 if result.passed else 1

@@ -31,12 +31,20 @@ TRAIN_CMD=(
   --artifact "$OUT/model_equal.json"
 )
 GATE_CMD=("$PYTHON_BIN" -m src.backend.benchmark fusion-gate --report "$OUT")
+if [[ -n "${BASELINE_REPORT:-}" ]]; then
+  GATE_CMD+=(--baseline-report "$BASELINE_REPORT")
+fi
 
 echo "== learned fusion training (equal dataset weighting) =="
 echo "output:   $OUT"
 echo "cache:    $CACHE"
 echo "datasets: $DATASETS"
 echo "folds:    $FOLDS"
+if [[ -n "${BASELINE_REPORT:-}" ]]; then
+  echo "bar:      host-measured shipped artifact from $BASELINE_REPORT"
+else
+  echo "bar:      built-in shipped-artifact constants (2026-10-22)"
+fi
 echo
 
 if [[ -n "${DRY_RUN:-}" ]]; then

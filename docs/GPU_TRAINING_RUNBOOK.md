@@ -141,6 +141,37 @@ this gate:
 - `--tolerance 0.004` exists for a trade-off someone explicitly accepted; it is
   not a default.
 
+### The bar is measured on the host that runs the gate
+
+The three constants were measured on the development machine on 2026-10-22. They
+only transfer to a host that holds the *same corpus files*. Check that before
+comparing: `bash scripts/gpu/setup.sh` prints a `fingerprint=` per corpus, and two
+hosts with different fingerprints will not agree on AUC even for the shipped
+artifact.
+
+This is not hypothetical. On the T4 host the shipped artifact measured
+`0.6184 / 0.8134 / 0.8898` — IR-Plag and conplag identical, kaggle 0.0065 higher,
+with the dependency-free `rule` scorer moving on kaggle too (0.8718 → 0.8773) and
+nowhere else. `kaggle_student_code` is assembled locally from the Kaggle CSV
+instead of being downloaded, so its copy drifts between machines.
+
+When the corpus copy differs, measure the bar here and pass it in:
+
+```bash
+# one-off, with the shipped artifact still in place
+bash scripts/gpu/eval_real_tools.sh
+mkdir -p reports/engine_evaluation_shipped
+cp reports/engine_evaluation/*.json reports/engine_evaluation_shipped/   # before promoting anything
+
+BASELINE_REPORT=reports/engine_evaluation_shipped bash scripts/gpu/train_equal.sh
+```
+
+The gate then reads `fused` from those reports instead of the constants, prints a
+`note:` for every corpus where the host value differs from the constant by more
+than 0.002, and keeps every corpus in the verdict — a host baseline covering one
+corpus does not shrink the gate to one row; the others fall back to the constants
+with a `warning:`.
+
 Useful on a partial run:
 
 ```bash
@@ -166,6 +197,20 @@ per corpus, so re-running a single corpus updates only that row.
 - `BATCH_SIZE=80` matches the measured runs. JPlag/Dolos are quadratic in
   submissions, which is why pairs are scored in batches; a batch that fails
   marks that tool unavailable rather than silently scoring zero.
+- **The binaries live in `tools/external/`, which is gitignored.** A fresh
+  `git clone` on the GPU host has the corpora (once copied) but no
+  `JPlag/jplag.jar` or `dolos-cli`, so every report says
+  `UNAVAILABLE: tool did not produce pair scores` and the run measures
+  IntegrityDesk only. Copy them over and re-run:
+
+  ```bash
+  rsync -av --info=progress2 other-host:CodeProvenance/tools/external/ tools/external/
+  ```
+
+  The script refuses to finish in that state: if none of the requested tools
+  produced a score for any corpus it exits 2 with the command above instead of
+  printing a green gate. `ALLOW_MISSING_TOOLS=1` downgrades that to a warning
+  when the question really is IntegrityDesk alone.
 
 ## 5. Promote a passing candidate (explicit, one commit)
 

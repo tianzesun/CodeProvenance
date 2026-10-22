@@ -394,23 +394,33 @@ same-assignment* data (see `docs/AI_HOLDOUT_COLLECTION.md` for the collection
 pattern used on the AI side) or a per-language scoring decision, not another mix
 of the corpora already in `data/datasets`.
 
-One experiment is still worth running on the existing three corpora (no PoolC):
-`--dataset-weighting equal` with the A mix. The measured shipped artifact gains
-from the learned layer only on conplag (+0.15 AUC) and is indistinguishable from
-the rule score on IR-Plag and kaggle, which is what proportional weighting
-(911 conplag pairs vs 460 IR-Plag, 293 kaggle) predicts. The bar to beat is the
-shipped column in the table above: 0.6184 / 0.8134 / 0.8833. Do not ship a
-candidate that only trades one corpus for another.
+**C — equal dataset weighting on the same three corpora** (2026-10-22, T4 host;
+`--cv-folds 5 --dataset-weighting equal`, 1664 pairs, 706 positive):
 
-Run it through the script rather than by hand, because the script also refuses to
-write the shipped artifact and applies the gate:
+| Dataset | Pairs | Rule AUC | Out-of-fold AUC | Shipped artifact |
+| --- | ---: | ---: | ---: | ---: |
+| IR-Plag-Dataset | 460 | 0.6324 | **0.6762** | 0.6184 |
+| conplag | 911 | 0.6617 | 0.7325 | **0.8134** |
+| kaggle_student_code | 293 | 0.8773 | 0.8483 | **0.8898** |
 
-```bash
-bash scripts/gpu/train_equal.sh
-```
+Pooled: rule 0.7429, out-of-fold 0.8038. Gate verdict: **FAIL** — 2 of 3 corpora
+below the shipped artifact.
 
-See [GPU_TRAINING_RUNBOOK.md](GPU_TRAINING_RUNBOOK.md) for the flags it passes and
-the gate's exact semantics.
+Equal weighting does exactly what the label mix predicts: it buys +0.058 on
+IR-Plag, whose 355 positives are 77% of its pairs, and pays for it with −0.081 on
+conplag (251 positives in 911 pairs) and −0.042 on kaggle. The learned layer's
+only real gain over the rule score — conplag +0.15 under proportional weighting —
+is the first thing equal weighting destroys. It is not a trade worth making, and
+the shipped artifact stays.
+
+The kaggle bar in that table is **0.8898, not 0.8833**: the same shipped artifact
+measured on the T4 host scores 0.8898, and the rule column moves too (0.8718 →
+0.8773), while IR-Plag and conplag reproduce to four decimals. Two hosts therefore
+do not hold byte-identical copies of `kaggle_student_code` (it is assembled
+locally from the Kaggle CSV, unlike the downloaded Java corpora). Compare
+`bash scripts/gpu/setup.sh`'s `fingerprint=` line before trusting a bar measured on
+another machine, and see [GPU_TRAINING_RUNBOOK.md](GPU_TRAINING_RUNBOOK.md#the-bar-is-measured-on-the-host-that-runs-the-gate)
+for `BASELINE_REPORT`.
 
 ### Decision rule
 
