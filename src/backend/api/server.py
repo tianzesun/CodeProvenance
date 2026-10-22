@@ -13338,6 +13338,30 @@ def _resolve_report_path(job_id: str, job_key: str, fallback_filename: str) -> P
     return REPORTS_DIR / job_id / fallback_filename
 
 
+def _ensure_similarity_context(report_payload: dict[str, Any]) -> None:
+    """Derive a cohort context for reports written before it existed.
+
+    Old report JSONs carry their pairs but no ``similarity_context``. Without
+    this, regenerating their HTML leaves the score with no statement of what it
+    ranks against. An existing context is never replaced: it was computed from
+    the full cohort at analysis time.
+
+    Args:
+        report_payload: Stored report payload, mutated in place.
+    """
+    if isinstance(report_payload.get("similarity_context"), dict):
+        return
+    pair_scores = [
+        float(pair["similarity_score"])
+        for pair in report_payload.get("pairs") or []
+        if isinstance(pair, dict)
+        and isinstance(pair.get("similarity_score"), (int, float))
+    ]
+    report_payload["similarity_context"] = CohortContext.from_scores(
+        pair_scores
+    ).to_dict()
+
+
 def _refresh_html_report_from_json(job_id: str) -> None:
     """Regenerate the browsable HTML report from the stored JSON payload."""
     report_json_path = _resolve_report_path(job_id, "report_json_path", "report.json")
@@ -13362,6 +13386,9 @@ def _refresh_html_report_from_json(job_id: str) -> None:
         or report_payload.get("course_name")
         or "Course"
     )
+    # Reports written before the cohort context existed still have their pairs,
+    # so derive it here instead of leaving old reports with a bare score.
+    _ensure_similarity_context(report_payload)
     report_html_path.parent.mkdir(parents=True, exist_ok=True)
     report_html_path.write_text(
         ReportGenerator(

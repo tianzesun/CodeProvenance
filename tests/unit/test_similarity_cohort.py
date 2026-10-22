@@ -125,6 +125,29 @@ def test_report_omits_cohort_context_without_a_cohort() -> None:
     assert generator._cohort_note({}) == ""
 
 
+def test_ensure_similarity_context_backfills_an_old_report() -> None:
+    """Reports written before the cohort context existed still get one."""
+    payload = {
+        "pairs": [
+            {"similarity_score": 0.1},
+            {"similarity_score": 0.2},
+            {"similarity_score": 0.6},
+        ]
+    }
+    server._ensure_similarity_context(payload)
+    assert payload["similarity_context"]["size"] == 3
+    assert payload["similarity_context"]["median"] == pytest.approx(0.2)
+    assert payload["similarity_context"]["disclosure"] == COHORT_DISCLOSURE
+
+
+def test_ensure_similarity_context_never_replaces_a_measured_cohort() -> None:
+    """A context computed from the full cohort must survive regeneration."""
+    context = {"size": 900, "median": 0.2, "p25": 0.1, "p75": 0.4}
+    payload = {"similarity_context": context, "pairs": [{"similarity_score": 0.9}]}
+    server._ensure_similarity_context(payload)
+    assert payload["similarity_context"] == context
+
+
 def test_json_report_carries_the_cohort_context() -> None:
     """Machine consumers get the same context as the HTML decision panel."""
     generator = ReportGenerator(institution_name="Test University")
