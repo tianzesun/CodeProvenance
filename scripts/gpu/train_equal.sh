@@ -75,8 +75,10 @@ if [[ "$GATE_STATUS" -eq 0 ]]; then
   echo "Candidate passed. Promote it only with an explicit commit:"
   echo "  cp $OUT/model_equal.json src/backend/engines/similarity/models/learned_fusion_model.json"
   echo "  git add src/backend/engines/similarity/models/learned_fusion_model.json && git commit"
+  echo "Then re-measure and refresh the bar, because it describes the old artifact:"
+  echo "  bash scripts/gpu/eval_real_tools.sh && bash scripts/gpu/baseline.sh"
 else
-  echo "Candidate did not pass. Keep the shipped artifact:"
-  echo "  git checkout -- src/backend/engines/similarity/models/learned_fusion_model.json"
+  echo "Candidate did not pass, so nothing was promoted:"
+  echo "  $OUT/model_equal.json stays in reports/ and the shipped artifact is untouched."
 fi
 exit "$GATE_STATUS"
