@@ -85,6 +85,10 @@ os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
 if settings.MOSS_USER_ID:
     os.environ.setdefault("MOSS_USER_ID", settings.MOSS_USER_ID)
 from src.backend.application.services import academic_access
+from src.backend.application.services.similarity_cohort import (
+    CohortContext,
+    annotate_results,
+)
 from src.backend.config.database import SessionLocal
 from src.backend.infrastructure.professional_report_generator import ReportGenerator
 from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
@@ -3850,6 +3854,7 @@ def _normalize_result(result: dict[str, Any]) -> dict[str, Any]:
         "file_b": result.get("file_b", ""),
         "score": round(_coerce_float(result.get("score")), 3),
         "risk_level": result.get("risk_level") or result.get("risk") or "",
+        "cohort_percentile": result.get("cohort_percentile"),
         "features": features,
         "contributions": contributions,
         "fusion_debug": result.get("fusion_debug") or {},
@@ -4061,6 +4066,14 @@ def _normalize_job(job: dict[str, Any], from_disk: bool = False) -> dict[str, An
 
     normalized["threshold"] = threshold
     normalized["results"] = results
+    # A similarity score is a ranking signal, not a probability of plagiarism
+    # (see application/services/similarity_cohort). Attach the distribution the
+    # pairs were ranked in so a reader can tell "0.88 in a class whose median is
+    # 0.86" from "0.88 in a class whose median is 0.20". Scores are never
+    # rescaled here. Rows loaded from the database already carry a context
+    # computed against the full cohort, which a truncated page must not replace.
+    if results and not isinstance(normalized.get("similarity_context"), dict):
+        normalized["similarity_context"] = annotate_results(results)
     normalized["summary"] = (
         normalized.get("summary") if isinstance(normalized.get("summary"), dict) else {}
     )
@@ -4949,6 +4962,21 @@ def _load_job_from_db(job_id: str) -> dict[str, Any] | None:
                     else {}
                 ),
             }
+
+            # Percentiles must be computed against the whole cohort: the results
+            # above are capped at 200 rows, so ranking a pair inside that page
+            # would compare it with the top slice only.
+            cohort_scores = [
+                float(row[0])
+                for row in db.query(SimilarityResult.similarity_score)
+                .filter(SimilarityResult.job_id == job_id)
+                .all()
+                if row[0] is not None
+            ]
+            if cohort_scores:
+                job_dict["similarity_context"] = annotate_results(
+                    job_dict["results"], scores=cohort_scores
+                )
 
             # Compute actual review counts from DB
             if sim_results:
@@ -9081,6 +9109,12 @@ async def _run_analysis(
         report_payload = {
             "report_id": job_id,
             "summary": report_summary,
+            # The report is the artefact an integrity committee reads, so it
+            # carries the same cohort context as the job payload: a similarity
+            # score ranks a pair, it is not a plagiarism probability.
+            "similarity_context": CohortContext.from_scores(
+                r.score for r in results
+            ).to_dict(),
             "pairs": report_pairs,
             "selected_tools": _jobs[job_id].get("selected_tools", []),
             "external_tool_results": external_tool_results,

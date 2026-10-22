@@ -633,6 +633,16 @@ export default function ResultsPage() {
     (r) => (Number(r.score) || 0) >= 0.75 && statusOf(r) !== 'dismissed',
   ).length;
 
+  // The backend attaches the distribution the pair scores were ranked in.
+  // A score ranks a pair; it is not a plagiarism probability, so the workspace
+  // states the cohort median next to the flag counts instead of implying that
+  // every pair above 50% is a finding.
+  const cohort = job?.similarity_context;
+  const cohortSize = Number(cohort?.size) || 0;
+  const cohortNote = cohortSize > 0
+    ? `Similarity ranks pairs against ${cohortSize} compared pairs (median ${formatPercent(cohort.median)}%, p25 ${formatPercent(cohort.p25)}%, p75 ${formatPercent(cohort.p75)}%). ${cohort.disclosure || ''}`.trim()
+    : null;
+
   // Keyboard navigation: J/K or ArrowLeft/ArrowRight when drawer is open
   useEffect(() => {
     if (!drawerOpen) return;
@@ -760,6 +770,14 @@ export default function ResultsPage() {
               </div>
             </div>
           </div>
+          {/* Row 3: what the scores mean. Similarity is a ranking signal, not
+              a probability; without this line the flag counts read as a
+              plagiarism rate. */}
+          {cohortNote && (
+            <div className="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              {cohortNote}
+            </div>
+          )}
         </Card>
 
         {reviewError && (
@@ -1009,6 +1027,23 @@ export default function ResultsPage() {
                         />
                       </div>
                     </div>
+                    {/* Where this pair sits in the job's distribution. The raw
+                        score is not comparable across assignments; the
+                        percentile is. Midrank ties make exact-1.0 blocks read
+                        as a band rather than as the top pair. */}
+                    {typeof activeResult?.cohort_percentile === 'number' && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500">
+                          Cohort rank
+                        </span>
+                        <span
+                          className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200"
+                          title="Percentile among all pairs in this analysis"
+                        >
+                          P{Math.round(activeResult.cohort_percentile * 100)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 

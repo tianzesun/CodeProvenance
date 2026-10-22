@@ -150,6 +150,37 @@ and without saying which one the user is looking at.
   than an order of magnitude on them, so do not assume a score of 0.8 means
   80% anywhere.
 
+## How the product presents the score
+
+The measurements above are why a job no longer shows a bare score. Every
+completed analysis now carries `similarity_context` — the distribution its pairs
+were ranked in:
+
+| Field | Meaning |
+| --- | --- |
+| `size` | Pairs the percentile was computed against |
+| `median` / `p25` / `p75` | Cohort quartiles of the pairwise score |
+| `disclosure` | One sentence: similarity ranks pairs, it is not a probability |
+
+Each pair also carries `cohort_percentile` (midrank: ties at 1.0 share a band
+instead of all ranking first). It appears in:
+
+- `GET /api/jobs/{job_id}` (the results page reads it from there),
+- the results workspace header (cohort line) and the pair inspector
+  ("Cohort rank P75"),
+- the HTML report's Executive Decision Summary and the JSON report.
+
+**The score itself is never rescaled.** Dividing by the cohort median was
+measured above and rejected as an automatic transform: it removes the
+false-positive wall on a normal class and hides plagiarism on a scaffolded one
+(positively-flagged IR-Plag pairs drop from 99% to 41%). The product instead
+states the distribution and leaves the judgement with the reviewer, which is the
+only reading that stays honest on both kinds of assignment.
+
+Job payloads reconstructed from the database compute the context from a
+column-only query over *all* of the job's pairs, not from the 200-row results
+page, so a capped page cannot inflate the percentiles.
+
 ## Paths that must not be quoted as measurements
 
 These exist in the repository and produce numbers that look like comparisons

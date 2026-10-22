@@ -327,6 +327,7 @@ class ReportGenerator:
                 "report_id": results.get("report_id", "N/A"),
             },
             "summary": results.get("summary", {}),
+            "similarity_context": results.get("similarity_context", {}),
             "pairs": results.get("pairs", []),
             "selected_tools": results.get("selected_tools", []),
             "external_tool_results": results.get("external_tool_results", {}),
@@ -406,6 +407,7 @@ class ReportGenerator:
         recommendation_rows = "".join(
             f"<li>{escape(str(item))}</li>" for item in recommendations
         )
+        cohort_note = self._cohort_note(results.get("similarity_context") or {})
 
         return f"""
         <section class="section">
@@ -418,6 +420,7 @@ class ReportGenerator:
                     <div class="label">Recommended Institutional Action</div>
                     <div class="decision-title">{escape(decision)}</div>
                     <p class="note">{self._case_decision_text(top_pair, support)}</p>
+                    {cohort_note}
                 </div>
                 <div class="audit-grid" style="grid-template-columns:1fr;">
                     <div class="audit-item">
@@ -436,6 +439,25 @@ class ReportGenerator:
             </div>
         </section>
         """
+
+    @staticmethod
+    def _cohort_note(context: dict[str, Any]) -> str:
+        """Render the cohort distribution and the score-semantics disclosure."""
+        try:
+            size = int(context.get("size") or 0)
+            median = float(context["median"])
+            p25 = float(context["p25"])
+            p75 = float(context["p75"])
+        except (KeyError, TypeError, ValueError):
+            return ""
+        if size <= 0:
+            return ""
+        disclosure = escape(str(context.get("disclosure") or ""))
+        return (
+            '<p class="note">Cohort context: '
+            f"{size} pairs, median similarity {median:.2f} "
+            f"(p25 {p25:.2f}, p75 {p75:.2f}). {disclosure}</p>"
+        )
 
     def _generate_chain_of_custody(
         self, results: dict[str, Any], timestamp: str, report_id: str = ""
