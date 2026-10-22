@@ -480,6 +480,50 @@ def main() -> int:
         ),
     )
 
+    cache_parser = subparsers.add_parser(
+        "feature-cache-check",
+        help=(
+            "Re-extract a sample of cached feature rows and compare them with "
+            "the cache; exits non-zero when the cache is stale"
+        ),
+    )
+    cache_parser.add_argument(
+        "--cache",
+        required=True,
+        help="JSONL feature cache written by fusion-train-learned --cache",
+    )
+    cache_parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=["IR-Plag-Dataset", "conplag"],
+        help="Datasets whose cached rows should be sampled",
+    )
+    cache_parser.add_argument(
+        "--dataset-roots",
+        nargs="+",
+        default=None,
+        help="Directories holding the corpora (default: data/datasets and data/bigger_datasets)",
+    )
+    cache_parser.add_argument(
+        "--sample",
+        type=int,
+        default=5,
+        help="How many cached rows to re-extract (default: 5)",
+    )
+    cache_parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=1e-6,
+        help="Largest per-value difference still considered equal (default: 1e-6)",
+    )
+    cache_parser.add_argument(
+        "--seed", type=int, default=0, help="Sampling seed (default: 0)"
+    )
+    cache_parser.add_argument(
+        "--output",
+        help="Optional path for a JSON copy of the check report",
+    )
+
     gate_parser = subparsers.add_parser(
         "fusion-gate",
         help=(
@@ -862,6 +906,69 @@ def main() -> int:
             )
         print(f"Model artifact: {report.artifact_path}")
         print(f"Markdown report: {args.output}/learned_fusion_report_*.md")
+
+    elif args.command == "feature-cache-check":
+        import json
+        from pathlib import Path
+
+        from src.backend.benchmark.runners.learned_fusion_training_runner import (
+            LearnedFusionTrainingRunner,
+        )
+
+        runner = LearnedFusionTrainingRunner(
+            output_dir=Path("reports/feature_cache_check"),
+            dataset_roots=(
+                [Path(root) for root in args.dataset_roots]
+                if args.dataset_roots
+                else None
+            ),
+            cache_path=Path(args.cache),
+        )
+        try:
+            report = runner.verify_feature_cache(
+                dataset_names=args.datasets,
+                sample=args.sample,
+                seed=args.seed,
+                tolerance=args.tolerance,
+            )
+        except (ValueError, FileNotFoundError) as exc:
+            parser.error(str(exc))
+
+        print(f"cache:    {report.cache_path}")
+        print(f"recipe:   {report.recipe}")
+        print(f"entries:  {report.cached_entries}")
+        print(
+            f"sampled:  {report.sampled_pairs} pairs "
+            f"({report.compared_values} feature values)"
+        )
+        print(f"max diff: {report.max_abs_diff:.6g} (tolerance {report.tolerance:g})")
+        for name in sorted(report.per_feature_max):
+            print(f"  {name:12} {report.per_feature_max[name]:.6g}")
+        if report.mismatched_pairs:
+            print("mismatched pairs:")
+            for pair_id in report.mismatched_pairs:
+                print(f"  {pair_id}")
+        if args.output:
+            path = Path(args.output)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(report.to_json_dict(), indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            print(f"report:   {path}")
+        if report.sampled_pairs == 0:
+            print("the cache has no rows for these datasets; nothing to compare")
+            return 1
+        if report.stale:
+            print(
+                "\nSTALE: the cache disagrees with live extraction. Re-extract it "
+                "(delete the file) before trusting any retrain. If the difference "
+                "is legitimate, the cache recipe should have changed: check "
+                "FEATURE_CACHE_VERSION, the embedding model and the feature list."
+            )
+            return 1
+        print("\nOK: the cache matches live extraction.")
+        return 0
 
     elif args.command == "fusion-gate":
         import json

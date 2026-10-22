@@ -76,6 +76,39 @@ LANGUAGE_EXTENSIONS: Dict[str, str] = {
 
 
 @dataclass
+class FeatureCacheCheckReport:
+    """Result of re-extracting a sample of cached rows and comparing them.
+
+    A feature cache is only valid while the code that produced it produces the
+    same numbers. The cache key covers the code and ``FEATURE_CACHE_VERSION``
+    but not the embedding model, so a cache built before a model swap can keep
+    serving old rows. This report makes that visible without discarding the
+    cache: it re-extracts a handful of pairs and reports the disagreement.
+    """
+
+    cache_path: str
+    recipe: str
+    cached_entries: int
+    sampled_pairs: int
+    compared_values: int
+    max_abs_diff: float
+    per_feature_max: Dict[str, float] = field(default_factory=dict)
+    mismatched_pairs: List[str] = field(default_factory=list)
+    tolerance: float = 1e-6
+
+    @property
+    def stale(self) -> bool:
+        """True when any compared value exceeded the tolerance."""
+        return self.max_abs_diff > self.tolerance
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """Convert to a JSON-safe dictionary."""
+        payload = asdict(self)
+        payload["stale"] = self.stale
+        return payload
+
+
+@dataclass
 class LearnedFusionReport:
     """Serializable report for the learned fusion training workflow."""
 
@@ -721,7 +754,12 @@ class LearnedFusionTrainingRunner:
     # Feature extraction and training
     # ------------------------------------------------------------------
 
-    def _extract_feature_rows(self, pairs: List[LabeledPair]) -> List[Dict[str, float]]:
+    def _extract_feature_rows(
+        self,
+        pairs: List[LabeledPair],
+        force_indices: Optional[set] = None,
+        write_cache: bool = True,
+    ) -> List[Dict[str, float]]:
         """Score every pair through the production path and collect features.
 
         The currently deployed learned artifact is neutralized so features and
@@ -730,17 +768,27 @@ class LearnedFusionTrainingRunner:
         ``cache_path`` is set: extraction is the expensive step, so a cache
         lets a long run resume and lets alternative training mixes be measured
         for the price of a logistic fit.
+
+        Args:
+            pairs: Pairs to score.
+            force_indices: Pair indices to re-extract even when cached; used by
+                :meth:`verify_feature_cache` to compare a cache against live
+                extraction.
+            write_cache: Append newly extracted rows to the cache. Verification
+                passes ``False`` so a stale cache stays visible instead of
+                being overwritten by the check that found it.
         """
         from src.backend.application.services.batch_detection_service import (
             BatchDetectionService,
         )
 
         cached = self._load_feature_cache()
+        forced = set(force_indices or ())
         rows: List[Optional[Dict[str, float]]] = [None] * len(pairs)
         missing: List[int] = []
         for index, pair in enumerate(pairs):
             cache_key = self._cache_key(pair)
-            if cache_key in cached:
+            if index not in forced and cache_key in cached:
                 rows[index] = cached[cache_key]
             else:
                 missing.append(index)
@@ -834,7 +882,8 @@ class LearnedFusionTrainingRunner:
                 row["raw_score"] = float(feature_row.get("raw_score", 0.0) or 0.0)
                 rows[index] = row
                 extracted.append((self._cache_key(pairs[index]), row))
-            self._append_feature_cache(extracted)
+            if write_cache:
+                self._append_feature_cache(extracted)
 
         final_rows: List[Dict[str, float]] = []
         for index, row in enumerate(rows):
@@ -845,11 +894,116 @@ class LearnedFusionTrainingRunner:
             final_rows.append(row)
         return final_rows
 
+    def _cache_recipe(self) -> str:
+        """Identity of the code that produced a cached feature row.
+
+        The cache key hashes the pair's source code, so editing a corpus file
+        invalidates that row. This recipe covers the other half: a change to
+        ``FEATURE_CACHE_VERSION``, to the embedding model or to the feature
+        list changes the meaning of every stored number. Rows written under a
+        different recipe are dropped instead of silently reused.
+        """
+        from src.backend.config.settings import settings
+
+        server = (
+            settings.EMBEDDING_SERVER_URL or settings.EMBEDDING_SERVER_HOST or "local"
+        )
+        features = ",".join(sorted(self.feature_names))
+        return (
+            f"v{FEATURE_CACHE_VERSION}|{settings.EMBEDDING_MODEL}|{server}|{features}"
+        )
+
+    def verify_feature_cache(
+        self,
+        dataset_names: Sequence[str],
+        sample: int = 5,
+        seed: int = 0,
+        tolerance: float = 1e-6,
+    ) -> FeatureCacheCheckReport:
+        """Re-extract a sample of cached rows and compare them to the cache.
+
+        Extraction is deterministic for a given code path, so any difference
+        means the cache was produced by something else: an older extractor, a
+        different embedding model, or a changed feature definition. A stale
+        cache silently changes what a retrain learns, which is the kind of
+        difference that shows up as "the same recipe scores differently on
+        another machine".
+
+        Args:
+            dataset_names: Datasets whose cached rows should be sampled.
+            sample: How many cached rows to re-extract.
+            seed: Sampling seed, so a check is reproducible.
+            tolerance: Largest per-value difference still considered equal.
+
+        Returns:
+            The comparison report; ``stale`` is True when any value differs.
+        """
+        if not self.cache_path:
+            raise ValueError("verify_feature_cache needs a cache_path")
+        pairs = self._load_pairs(list(dataset_names))
+        cached = self._load_feature_cache()
+        cached_indices = [
+            index for index, pair in enumerate(pairs) if self._cache_key(pair) in cached
+        ]
+        report = FeatureCacheCheckReport(
+            cache_path=str(self.cache_path),
+            recipe=self._cache_recipe(),
+            cached_entries=len(cached),
+            sampled_pairs=0,
+            compared_values=0,
+            max_abs_diff=0.0,
+            tolerance=tolerance,
+        )
+        if not cached_indices:
+            return report
+
+        chosen = random.Random(seed).sample(
+            cached_indices, min(sample, len(cached_indices))
+        )
+        sampled_pairs = [pairs[index] for index in chosen]
+        logger.info(
+            "Re-extracting %s sampled pairs to compare against the cache",
+            len(sampled_pairs),
+        )
+        fresh_rows = self._extract_feature_rows(
+            sampled_pairs,
+            force_indices=set(range(len(sampled_pairs))),
+            write_cache=False,
+        )
+
+        for index, fresh_row in zip(chosen, fresh_rows):
+            pair = pairs[index]
+            cached_row = cached[self._cache_key(pair)]
+            report.sampled_pairs += 1
+            row_diff = 0.0
+            for name in self.feature_names:
+                old_value = float(cached_row.get(name, 0.0))
+                new_value = float(fresh_row.get(name, 0.0))
+                diff = abs(old_value - new_value)
+                report.compared_values += 1
+                report.per_feature_max[name] = max(
+                    report.per_feature_max.get(name, 0.0), diff
+                )
+                row_diff = max(row_diff, diff)
+            report.max_abs_diff = max(report.max_abs_diff, row_diff)
+            if row_diff > tolerance:
+                report.mismatched_pairs.append(pair.pair_id)
+        return report
+
     def _load_feature_cache(self) -> Dict[str, Dict[str, float]]:
-        """Read the JSONL feature cache, if one is configured."""
+        """Read the JSONL feature cache, if one is configured.
+
+        Entries written by a different recipe are ignored (and counted in the
+        log) so a stale cache cannot silently feed the fit. Entries without a
+        recipe predate it; they are accepted because the only way to learn
+        whether they are stale is :meth:`verify_feature_cache`.
+        """
         if not self.cache_path or not self.cache_path.exists():
             return {}
+        recipe = self._cache_recipe()
         cache: Dict[str, Dict[str, float]] = {}
+        legacy = 0
+        skipped = 0
         with self.cache_path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 line = line.strip()
@@ -862,10 +1016,28 @@ class LearnedFusionTrainingRunner:
                     continue
                 key = entry.get("key")
                 row = entry.get("row")
+                entry_recipe = entry.get("recipe")
+                if entry_recipe is None:
+                    legacy += 1
+                elif entry_recipe != recipe:
+                    skipped += 1
+                    continue
                 if key and isinstance(row, dict):
                     cache[str(key)] = {
                         str(name): float(value) for name, value in row.items()
                     }
+        if legacy:
+            logger.info(
+                "Feature cache has %s rows written before recipes were recorded; "
+                "run the cache check before trusting them",
+                legacy,
+            )
+        if skipped:
+            logger.warning(
+                "Ignored %s cached rows written by a different feature recipe " "(%s)",
+                skipped,
+                recipe,
+            )
         return cache
 
     def _append_feature_cache(
@@ -874,11 +1046,16 @@ class LearnedFusionTrainingRunner:
         """Append freshly extracted rows to the JSONL feature cache."""
         if not self.cache_path or not entries:
             return
+        recipe = self._cache_recipe()
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         with self.cache_path.open("a", encoding="utf-8") as handle:
             for key, row in entries:
                 handle.write(
-                    json.dumps({"key": key, "row": row}, ensure_ascii=False) + "\n"
+                    json.dumps(
+                        {"key": key, "row": row, "recipe": recipe},
+                        ensure_ascii=False,
+                    )
+                    + "\n"
                 )
 
     @staticmethod

@@ -118,6 +118,34 @@ DRY_RUN=1 bash scripts/gpu/train_equal.sh
 DRY_RUN=1 bash scripts/gpu/eval_real_tools.sh
 ```
 
+### Check the feature cache before believing a retrain
+
+The cache is keyed by the pair's source code, so editing a corpus file
+invalidates that row. It is **not** invalidated by a changed embedding model or
+extractor: a cache written on another machine, or before a model swap, keeps
+feeding the fit the old numbers. That shows up as "the same recipe scores
+differently here", which is indistinguishable from a real regression.
+
+```bash
+bash scripts/gpu/check_cache.sh          # re-extracts 5 rows and compares all 7 features
+CACHE=/path/to/features.jsonl SAMPLE=10 bash scripts/gpu/check_cache.sh
+```
+
+The check re-extracts only the sampled pairs (about a second each) and prints
+the per-feature maximum difference; it exits non-zero on anything above
+`1e-6`, because extraction is deterministic for a given code path. On a timeout
+it tells you to delete the cache:
+
+```bash
+rm reports/fusion_training/.cache/features.jsonl
+```
+
+New cache rows record a recipe (`FEATURE_CACHE_VERSION`, embedding model,
+embedding endpoint, feature list). Rows written by a different recipe are
+ignored automatically, so a model swap cannot silently poison a fit; rows
+written before the recipe existed are still accepted, which is exactly why the
+check exists.
+
 Then the same script runs the gate:
 
 ```bash

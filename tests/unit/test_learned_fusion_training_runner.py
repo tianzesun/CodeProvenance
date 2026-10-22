@@ -445,6 +445,116 @@ class TestFeatureCache:
         runner._append_feature_cache([("key", {"ast": 1.0})])
         assert list(tmp_path.glob("*.jsonl")) == []
 
+    def test_rows_record_the_recipe_that_produced_them(self, tmp_path):
+        """Every written row carries the extractor identity."""
+        cache = tmp_path / "cache.jsonl"
+        runner = LearnedFusionTrainingRunner(output_dir=tmp_path, cache_path=cache)
+        runner._append_feature_cache([("key", {"ast": 1.0})])
+        entry = json.loads(cache.read_text(encoding="utf-8").strip())
+        assert entry["recipe"] == runner._cache_recipe()
+
+    def test_rows_from_another_recipe_are_ignored(self, tmp_path):
+        """A cache written by a different extractor cannot feed the fit."""
+        cache = tmp_path / "cache.jsonl"
+        runner = LearnedFusionTrainingRunner(output_dir=tmp_path, cache_path=cache)
+        current = runner._cache_recipe()
+        lines = [
+            json.dumps(
+                {"key": "stale", "row": {"ast": 1.0}, "recipe": "v0|other|local|ast"}
+            ),
+            json.dumps({"key": "fresh", "row": {"ast": 2.0}, "recipe": current}),
+            json.dumps({"key": "legacy", "row": {"ast": 3.0}}),
+        ]
+        cache.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        assert runner._load_feature_cache() == {
+            "fresh": {"ast": 2.0},
+            "legacy": {"ast": 3.0},
+        }
+
+    def test_recipe_changes_with_the_feature_set(self, tmp_path):
+        """Adding a feature changes the recipe, so old rows are not reused."""
+        runner = LearnedFusionTrainingRunner(output_dir=tmp_path)
+        before = runner._cache_recipe()
+        runner.feature_names = runner.feature_names + ["extra"]
+        assert runner._cache_recipe() != before
+
+    def test_verify_flags_a_stale_row(self, tmp_path, monkeypatch):
+        """Live extraction disagreeing with the cache marks it stale."""
+        runner = LearnedFusionTrainingRunner(
+            output_dir=tmp_path, cache_path=tmp_path / "cache.jsonl"
+        )
+        pairs = [self._pair(pair_id=f"p{index}") for index in range(3)]
+        runner._append_feature_cache(
+            [
+                (
+                    runner._cache_key(pair),
+                    {name: 0.1 for name in runner.feature_names},
+                )
+                for pair in pairs
+            ]
+        )
+        monkeypatch.setattr(runner, "_load_pairs", lambda names: pairs)
+        monkeypatch.setattr(
+            runner,
+            "_extract_feature_rows",
+            lambda pairs, force_indices=None, write_cache=True: [
+                {name: 0.5 for name in runner.feature_names} for _ in pairs
+            ],
+        )
+
+        report = runner.verify_feature_cache(["conplag"], sample=2, seed=1)
+
+        assert report.sampled_pairs == 2
+        assert report.stale is True
+        assert report.max_abs_diff == pytest.approx(0.4)
+        assert len(report.mismatched_pairs) == 2
+        assert report.per_feature_max["logic_flow"] == pytest.approx(0.4)
+
+    def test_verify_accepts_a_matching_cache_and_does_not_rewrite_it(
+        self, tmp_path, monkeypatch
+    ):
+        """A healthy cache is reported clean and left untouched."""
+        cache = tmp_path / "cache.jsonl"
+        runner = LearnedFusionTrainingRunner(output_dir=tmp_path, cache_path=cache)
+        pairs = [self._pair(pair_id=f"p{index}") for index in range(2)]
+        rows = [{name: 0.25 for name in runner.feature_names} for _ in pairs]
+        runner._append_feature_cache(
+            [(runner._cache_key(pair), row) for pair, row in zip(pairs, rows)]
+        )
+        written_before = cache.read_text(encoding="utf-8")
+        monkeypatch.setattr(runner, "_load_pairs", lambda names: pairs)
+        monkeypatch.setattr(
+            runner,
+            "_extract_feature_rows",
+            lambda pairs, force_indices=None, write_cache=True: rows,
+        )
+
+        report = runner.verify_feature_cache(["conplag"], sample=2)
+
+        assert report.stale is False
+        assert report.max_abs_diff == pytest.approx(0.0)
+        assert report.mismatched_pairs == []
+        assert cache.read_text(encoding="utf-8") == written_before
+
+    def test_verify_requires_a_cache_path(self, tmp_path):
+        """Without a cache there is nothing to verify."""
+        runner = LearnedFusionTrainingRunner(output_dir=tmp_path)
+        with pytest.raises(ValueError, match="cache_path"):
+            runner.verify_feature_cache(["conplag"])
+
+    def test_verify_reports_an_empty_cache(self, tmp_path, monkeypatch):
+        """A cache with no rows for the datasets is reported, not guessed at."""
+        cache = tmp_path / "cache.jsonl"
+        cache.write_text("", encoding="utf-8")
+        runner = LearnedFusionTrainingRunner(output_dir=tmp_path, cache_path=cache)
+        monkeypatch.setattr(runner, "_load_pairs", lambda names: [self._pair()])
+
+        report = runner.verify_feature_cache(["conplag"], sample=1)
+
+        assert report.sampled_pairs == 0
+        assert report.stale is False
+
 
 class TestDatasetWeighting:
     """Equal weighting keeps small corpora relevant next to large ones."""
