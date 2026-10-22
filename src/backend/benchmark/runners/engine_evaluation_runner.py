@@ -57,6 +57,8 @@ class ScorerResult:
     default_f1: float = 0.0  # at threshold 0.5
     default_precision: float = 0.0
     default_recall: float = 0.0
+    ece: float = 0.0  # expected calibration error, 10 equal-width bins
+    brier: float = 0.0
     scores: List[float] = field(default_factory=list)
     labels: List[int] = field(default_factory=list)
 
@@ -120,9 +122,9 @@ class EngineEvaluationReport:
             "",
             "## Ranking",
             "",
-            "| Scorer | Kind | AUC-ROC | F1@best | P@best | R@best | "
+            "| Scorer | Kind | AUC-ROC | ECE | Brier | F1@best | P@best | R@best | "
             "F1@0.5 | P@0.5 | R@0.5 | Threshold | Support |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
 
         ranked = sorted(
@@ -135,6 +137,8 @@ class EngineEvaluationReport:
                 "| "
                 f"{scorer.name} | {scorer.kind} | "
                 f"{scorer.auc_roc:.4f} | "
+                f"{scorer.ece:.4f} | "
+                f"{scorer.brier:.4f} | "
                 f"{scorer.best_f1:.4f} | "
                 f"{scorer.best_precision:.4f} | "
                 f"{scorer.best_recall:.4f} | "
@@ -183,6 +187,13 @@ class EngineEvaluationReport:
                 (
                     "- F1@best is the maximum F1 over a 0.02 threshold sweep; "
                     "F1@0.5 uses the standard 0.5 cutoff."
+                ),
+                (
+                    "- ECE (10 equal-width bins) and Brier compare the score to "
+                    "the observed label rate. Low AUC with low ECE is a weak but "
+                    "honest score; high AUC with high ECE ranks well but its "
+                    "absolute value is not a probability. ECE also moves with a "
+                    "corpus' positive rate, so compare it within a corpus."
                 ),
             ]
         )
@@ -617,6 +628,7 @@ class EngineEvaluationRunner:
             scores, labels, self.threshold_step
         )
         default = EngineEvaluationRunner.metrics_at_threshold(scores, labels, 0.5)
+        calibration = EngineEvaluationRunner.calibration_metrics(scores, labels)
         return ScorerResult(
             name=name,
             kind=kind,
@@ -630,9 +642,44 @@ class EngineEvaluationRunner:
             default_f1=round(default["f1"], 6),
             default_precision=round(default["precision"], 6),
             default_recall=round(default["recall"], 6),
+            ece=round(calibration["ece"], 6),
+            brier=round(calibration["brier"], 6),
             scores=[float(value) for value in scores],
             labels=[int(value) for value in labels],
         )
+
+    @staticmethod
+    def calibration_metrics(
+        scores: List[float],
+        labels: List[int],
+        bins: int = 10,
+    ) -> Dict[str, float]:
+        """Return expected calibration error and the Brier score.
+
+        A similarity score is only readable as a probability if these are low;
+        the corpora in ``data/datasets`` differ by more than an order of
+        magnitude here, so the number is reported next to the AUC instead of
+        being assumed.
+        """
+        if not scores:
+            return {"ece": 0.0, "brier": 0.0}
+        brier = sum((score - label) ** 2 for score, label in zip(scores, labels)) / len(
+            scores
+        )
+        ece = 0.0
+        for index in range(bins):
+            low, high = index / bins, (index + 1) / bins
+            members = [
+                position
+                for position, score in enumerate(scores)
+                if (low <= score < high) or (index == bins - 1 and score == 1.0)
+            ]
+            if not members:
+                continue
+            confidence = sum(scores[position] for position in members) / len(members)
+            accuracy = sum(labels[position] for position in members) / len(members)
+            ece += len(members) / len(scores) * abs(confidence - accuracy)
+        return {"ece": ece, "brier": brier}
 
     @staticmethod
     def _unavailable_scorer(name: str, error: str) -> ScorerResult:

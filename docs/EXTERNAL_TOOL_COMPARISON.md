@@ -83,13 +83,19 @@ Reading:
 
 ### Absolute scores are not calibrated on two of three corpora
 
-Median score, and share of *negative* pairs scored ≥ 0.5:
+Median score, share of *negative* pairs scored ≥ 0.5, and calibration error
+(`engine-eval` now reports ECE over 10 bins and the Brier score):
 
-| Corpus | `fused` positives | `fused` negatives | negatives ≥ 0.5 | `fused_rule` negatives |
-| --- | ---: | ---: | ---: | ---: |
-| IR-Plag | 0.938 | 0.878 | 99% | 0.661 |
-| conplag | 0.569 | 0.195 | 8% | 0.000 |
-| kaggle | 1.000 | 0.775 | 68% | 0.844 |
+| Corpus | `fused` positives | `fused` negatives | negatives ≥ 0.5 | ECE | Brier |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| IR-Plag | 0.938 | 0.878 | 99% | 0.155 | 0.194 |
+| conplag | 0.569 | 0.195 | 8% | 0.070 | 0.133 |
+| kaggle | 1.000 | 0.775 | 68% | 0.419 | 0.353 |
+
+For comparison, the external tools on the same pairs (ECE / Brier): JPlag
+0.261 / 0.262 on IR-Plag, 0.062 / 0.126 on conplag, 0.444 / 0.359 on kaggle;
+Dolos 0.185 / 0.218, 0.053 / 0.124, 0.306 / 0.251. The saturation is not unique
+to our scorer — token matchers also return near-1.0 for same-assignment pairs.
 
 On IR-Plag the production score ranks no better than the rule score but pushes
 almost every independent solution to ~0.88: a fixed 0.5 cutoff would flag the
@@ -98,9 +104,33 @@ like a probability. This is why the table above is AUC (ranking), and why
 `F1@0.5` is not comparable across corpora — on IR-Plag the best swept threshold
 is 0.00 (77% of pairs are positive, so "flag everything" maximises F1).
 
-Consequence for the product: a score shown to a user needs its own
-per-language calibration before it can be read as "how similar", not just a
-rank.
+Note that ECE moves with a corpus' positive rate (IR-Plag is 77% positive), so
+compare ECE within a corpus, not across corpora.
+
+### Cohort normalisation helps classroom jobs and destroys same-assignment ones
+
+`compare_pairs` already computes a per-cohort anchor and never uses it:
+`clean_baseline` is the **median** raw score of the batch and
+`baseline_adjusted_score = (score − baseline) / (1 − baseline)`. Measured on
+the same pairs:
+
+| Corpus | ECE raw → adjusted | Brier raw → adjusted | negatives ≥ 0.5 raw → adjusted | AUC raw → adjusted |
+| --- | --- | --- | --- | --- |
+| IR-Plag | 0.155 → **0.445** | 0.194 → **0.452** | 99% → 15% | 0.618 → 0.626 |
+| conplag | 0.070 → 0.097 | 0.133 → 0.137 | 8% → 3% | 0.813 → 0.803 |
+| kaggle | 0.419 → **0.125** | 0.353 → **0.134** | 68% → 19% | 0.883 → 0.880 |
+
+So the existing anchor is close to what a classroom job needs (kaggle: ECE
+0.42 → 0.13 with ranking unchanged) and is ruinous where the *clean* pairs are
+themselves near-duplicates (IR-Plag: every pair, including real plagiarism,
+falls below the class median and the score collapses — recall of positives ≥ 0.5
+drops from 99% to 41%).
+
+That makes "use the adjusted score" a product decision with a real
+false-negative cost, not a calibration bug to patch silently: the same transform
+that removes the false-positive wall in a normal class hides plagiarism in a
+heavily scaffolded assignment. Do not switch the reported score without a guard
+and without saying which one the user is looking at.
 
 ## How to read the result
 
@@ -115,6 +145,10 @@ rank.
   there as a product finding, not as a bug in the harness.
 - A pair a tool never reports is scored `0` (its "no match" answer) and the run
   logs how many that was. Check that warning before quoting an AUC.
+- AUC and calibration answer different questions. `ECE` / `Brier` say whether
+  the *number* can be read as a probability; the corpora here differ by more
+  than an order of magnitude on them, so do not assume a score of 0.8 means
+  80% anywhere.
 
 ## Paths that must not be quoted as measurements
 

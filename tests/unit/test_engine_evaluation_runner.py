@@ -220,3 +220,50 @@ def test_rule_baseline_is_derived_from_reported_features() -> None:
     ]
     assert scorers["fused_rule"].scores == pytest.approx(expected)
     assert scorers["fused"].scores == pytest.approx([0.91, 0.31])
+
+
+def test_calibration_metrics_of_a_perfect_score() -> None:
+    """Exact probabilities carry zero calibration error."""
+    metrics = EngineEvaluationRunner.calibration_metrics(
+        [0.0, 1.0, 0.0, 1.0], [0, 1, 0, 1]
+    )
+    assert metrics["ece"] == pytest.approx(0.0)
+    assert metrics["brier"] == pytest.approx(0.0)
+
+
+def test_calibration_metrics_of_a_confident_wrong_score() -> None:
+    """A score of 1.0 on every pair is off by the negative rate."""
+    metrics = EngineEvaluationRunner.calibration_metrics([1.0] * 4, [1, 1, 0, 0])
+    assert metrics["ece"] == pytest.approx(0.5)
+    assert metrics["brier"] == pytest.approx(0.5)
+
+
+def test_calibration_metrics_handles_no_pairs() -> None:
+    """An unavailable tool has nothing to calibrate."""
+    assert EngineEvaluationRunner.calibration_metrics([], []) == {
+        "ece": 0.0,
+        "brier": 0.0,
+    }
+
+
+def test_report_without_calibration_fields_still_loads(tmp_path) -> None:
+    """Reports written before ECE/Brier existed must stay readable."""
+    path = tmp_path / "old.json"
+    path.write_text(
+        '{"run_id": "R", "timestamp": "t", "dataset_name": "d", "language": "java",'
+        ' "pair_count": 1, "positive_pairs": 1, "negative_pairs": 0,'
+        ' "runtime_seconds": 0.1, "scorers": [{"name": "fused", "kind": "integritydesk",'
+        ' "available": true, "support": 1, "auc_roc": 0.5}]}'
+    )
+    report = module_report().from_json(path)
+    assert report.scorers[0].ece == 0.0
+    assert report.scorers[0].brier == 0.0
+
+
+def module_report():
+    """Return the report class used by the harness."""
+    from src.backend.benchmark.runners.engine_evaluation_runner import (
+        EngineEvaluationReport,
+    )
+
+    return EngineEvaluationReport

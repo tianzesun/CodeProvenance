@@ -718,7 +718,8 @@ def main() -> int:
         ):
             print(
                 f"  {scorer.name:14} {scorer.kind:16} "
-                f"AUC={scorer.auc_roc:.4f}  F1@best={scorer.best_f1:.4f}"
+                f"AUC={scorer.auc_roc:.4f}  F1@best={scorer.best_f1:.4f}  "
+                f"ECE={scorer.ece:.3f}  Brier={scorer.brier:.3f}"
             )
         for scorer in report.scorers:
             if not scorer.available:
