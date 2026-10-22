@@ -14,9 +14,11 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  FileUp,
+  FileArchive,
+  FileCode,
   Info,
   Loader2,
+  Plus,
   Search,
   Upload,
   X,
@@ -37,7 +39,7 @@ function describeError(error, fallback) {
   if (status === 401) message = 'Your session has expired. Please sign in again.';
   else if (status === 403) message = 'You don’t have permission to do that.';
   else if (status === 413) message = 'The upload is too large. Remove some files or upload a smaller archive.';
-  else if (status === 400 || status === 415 || status === 422) message = 'The files couldn’t be analysed. Check that they are readable source files and try again.';
+  else if (status === 400 || status === 415 || status === 422) message = 'The files couldn’t be analyzed. Check that they are readable source files and try again.';
   else if (status === 429) message = 'Too many requests. Please wait a moment and try again.';
   else if (status !== undefined && status >= 500) message = 'Something went wrong on our side. Please try again.';
 
@@ -60,11 +62,18 @@ function getTone(score) {
   return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300';
 }
 
+// Same thresholds as getTone, so the little meter and the chip always agree.
+function getBarColor(score) {
+  if (score >= 0.7) return 'bg-red-500';
+  if (score >= 0.45) return 'bg-amber-500';
+  return 'bg-emerald-500';
+}
+
 function formatDate(value) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  return new Intl.DateTimeFormat('en-CA', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
 const PAGE_SIZES = [5, 10, 25];
@@ -74,6 +83,24 @@ const ALLOWED_EXTENSIONS = ['zip', 'py', 'java', 'c', 'cpp', 'h', 'js', 'ts', 'g
 const ACCEPT = ALLOWED_EXTENSIONS.map((ext) => `.${ext}`).join(',');
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
+const FILE_TYPE_LABELS = {
+  zip: 'ZIP archive',
+  py: 'Python',
+  java: 'Java',
+  c: 'C',
+  cpp: 'C++',
+  h: 'C/C++ header',
+  js: 'JavaScript',
+  ts: 'TypeScript',
+  go: 'Go',
+  rs: 'Rust',
+  rb: 'Ruby',
+  php: 'PHP',
+  cs: 'C#',
+  kt: 'Kotlin',
+  swift: 'Swift',
+};
+
 function fileExtension(name) {
   const dot = String(name || '').lastIndexOf('.');
   return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
@@ -81,6 +108,11 @@ function fileExtension(name) {
 
 function fileKey(file) {
   return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+// Only react to drags that carry files. Dragging selected text over the page used to light up the dropzone.
+function hasFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes('Files');
 }
 
 function buildPageNumbers(current, total) {
@@ -96,6 +128,12 @@ function buildPageNumbers(current, total) {
   pages.push(total);
   return pages;
 }
+
+const CARD = 'rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950';
+const FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40';
+const SELECT_CLASS = 'h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:disabled:bg-slate-900 dark:disabled:text-slate-500';
+const FILTER_SELECT_CLASS = SELECT_CLASS.replace('h-10', 'h-9');
+const SECONDARY_BUTTON = `inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 ${FOCUS}`;
 
 // ── Page ───────────────────────────────────────────────────────────────────
 
@@ -242,7 +280,9 @@ export default function AIDetectorPage() {
 
   // Adds to the list. "Add more" used to replace it (`setFiles(next)`), so the earlier files were thrown away.
   // Duplicates are skipped, and unsupported or oversized files are dropped with a note.
+  // The list is locked while an upload is being sent, so what was sent is what is on screen.
   const addFiles = (incoming) => {
+    if (uploading) return;
     const list = Array.from(incoming || []);
     if (list.length === 0) return;
 
@@ -266,6 +306,8 @@ export default function AIDetectorPage() {
   };
 
   const canRun = files.length > 0 && !uploading;
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+  const pickFiles = () => fileInputRef.current?.click();
 
   const runDetection = async () => {
     if (!canRun) return;
@@ -320,213 +362,263 @@ export default function AIDetectorPage() {
           eyebrowStyle="badge"
           title="AI-Generated Code Review"
           description="Upload student submissions for automated assistance analysis. Scores are review indicators, not proof."
-          action={
-            <div className="flex flex-wrap items-center gap-2">
-              {uploading && (
-                <button
-                  type="button"
-                  onClick={() => uploadAbortRef.current?.abort()}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Cancel
-                </button>
+        />
+
+        {/* Files on the left, the action on the right: the Run button used to sit in the page header,
+            far from the files it acts on. On narrow screens the card simply follows the files. */}
+        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
+          <div className="min-w-0 space-y-4">
+            <section
+              onDragEnter={(event) => {
+                if (uploading || !hasFiles(event)) return;
+                dragDepth.current += 1;
+                setIsDragging(true);
+              }}
+              onDragOver={(event) => {
+                // Always stop the browser from opening a dropped file in this tab: that would lose the upload.
+                if (hasFiles(event)) event.preventDefault();
+              }}
+              onDragLeave={(event) => {
+                if (uploading || !hasFiles(event)) return;
+                // dragleave also fires when crossing a child element, which made the highlight flicker.
+                dragDepth.current = Math.max(0, dragDepth.current - 1);
+                if (dragDepth.current === 0) setIsDragging(false);
+              }}
+              onDrop={(event) => {
+                if (!hasFiles(event)) return;
+                event.preventDefault();
+                dragDepth.current = 0;
+                setIsDragging(false);
+                addFiles(event.dataTransfer.files);
+              }}
+              className={`relative transition ${CARD} ${isDragging ? '!border-blue-500 ring-2 ring-blue-500/30' : ''}`}
+            >
+              {files.length === 0 ? (
+                <div className="p-3">
+                  <button
+                    type="button"
+                    onClick={pickFiles}
+                    className={`flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-24 text-center transition hover:border-blue-400 hover:bg-blue-50/50 dark:hover:border-blue-500/60 dark:hover:bg-blue-500/5 ${FOCUS} ${isDragging ? 'border-blue-500 bg-blue-50/60 dark:bg-blue-500/10' : 'border-slate-300 dark:border-slate-700'}`}
+                  >
+                    <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+                      <Upload size={22} aria-hidden="true" />
+                    </span>
+                    <span className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
+                      {isDragging ? 'Release to add files' : 'Drop student submissions here'}
+                    </span>
+                    <span className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      or <span className="font-semibold text-blue-600 dark:text-blue-400">choose files</span> from your computer
+                    </span>
+                    <span className="mx-auto mt-5 max-w-md text-xs leading-5 text-slate-500 dark:text-slate-400">
+                      Python, Java, C and C++, JavaScript, TypeScript, Go, Rust, Ruby, PHP, C#, Kotlin, Swift, or a ZIP archive for batch analysis.
+                      Up to {Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB per file.
+                    </span>
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+                    <div>
+                      <h2 className="text-base font-semibold text-slate-900 dark:text-white">
+                        {files.length} submission{files.length === 1 ? '' : 's'} ready for review
+                      </h2>
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{formatSize(totalBytes)} in total</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={pickFiles} disabled={uploading} className={SECONDARY_BUTTON}>
+                        <Plus size={14} aria-hidden="true" />
+                        Add more
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setFiles([]); setFileNotice(''); }}
+                        disabled={uploading}
+                        className={`rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200 ${FOCUS}`}
+                      >
+                        Clear all
+                      </button>
+                    </div>
+                  </div>
+                  <ul aria-label="Selected files" className="max-h-[22rem] divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
+                    {files.map((file, index) => {
+                      const ext = fileExtension(file.name);
+                      return (
+                        <li key={`${fileKey(file)}-${index}`} className="flex items-center gap-3 px-5 py-2.5">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                            {ext === 'zip' ? <FileArchive size={16} aria-hidden="true" /> : <FileCode size={16} aria-hidden="true" />}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200" title={file.name}>{file.name}</div>
+                            <div className="text-xs text-slate-500 dark:text-slate-400">{FILE_TYPE_LABELS[ext] || 'Source file'}</div>
+                          </div>
+                          <div className="shrink-0 text-xs tabular-nums text-slate-500 dark:text-slate-400">{formatSize(file.size)}</div>
+                          <button
+                            type="button"
+                            onClick={() => setFiles(files.filter((_, i) => i !== index))}
+                            disabled={uploading}
+                            aria-label={`Remove ${file.name}`}
+                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-500 dark:hover:bg-red-500/10 dark:hover:text-red-400 ${FOCUS}`}
+                          >
+                            <X size={15} aria-hidden="true" />
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {isDragging && (
+                    <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl bg-blue-50/90 text-sm font-semibold text-blue-700 dark:bg-blue-950/80 dark:text-blue-200">
+                      Release to add files
+                    </div>
+                  )}
+                </div>
               )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ACCEPT}
+                disabled={uploading}
+                className="hidden"
+                onChange={(event) => {
+                  addFiles(event.target.files);
+                  // Lets the same file be chosen again after it has been removed.
+                  event.target.value = '';
+                }}
+              />
+            </section>
+            {fileNotice && (
+              <p role="status" className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+                <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+                {fileNotice}
+              </p>
+            )}
+          </div>
+
+          <aside className="space-y-4 lg:sticky lg:top-6">
+            <section aria-busy={uploading} className={`p-5 ${CARD}`}>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white">Run assessment</h2>
+              {/* The file list already shows the count and total size, so only the empty state needs a line here. */}
+              {files.length === 0 && (
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Add at least one submission to begin.</p>
+              )}
+
+              {/* Hidden for the guest demo: it owns no workspace, so there is nothing to associate an assessment with. */}
+              {!isGuest && (
+                <fieldset disabled={uploading} className="mt-5 space-y-4 border-t border-slate-100 pt-5 dark:border-slate-800">
+                  <legend className="sr-only">Course and assignment</legend>
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                    File under a course <span className="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="ai-course" className="text-sm font-medium text-slate-700 dark:text-slate-200">Course</label>
+                    <select
+                      id="ai-course"
+                      value={selectedCourseId}
+                      onChange={(event) => { setSelectedCourseId(event.target.value); setSelectedAssignmentId(''); }}
+                      disabled={coursesLoading}
+                      className={SELECT_CLASS}
+                    >
+                      <option value="">{coursesLoading ? 'Loading courses…' : coursesError ? 'Courses unavailable' : courses.length ? 'None (standalone assessment)' : 'No courses yet'}</option>
+                      {courses.map((course) => <option key={course.id} value={course.id}>{course.code ? `${course.code} – ` : ''}{course.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="ai-assignment" className="text-sm font-medium text-slate-700 dark:text-slate-200">Assignment</label>
+                    <select
+                      id="ai-assignment"
+                      value={selectedAssignmentId}
+                      onChange={(event) => setSelectedAssignmentId(event.target.value)}
+                      disabled={!selectedCourseId || assignmentsLoading}
+                      className={SELECT_CLASS}
+                    >
+                      <option value="">{!selectedCourseId ? 'Choose a course first' : assignmentsLoading ? 'Loading assignments…' : assignments.length ? 'None (unassociated)' : 'No assignments yet'}</option>
+                      {assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.name}</option>)}
+                    </select>
+                  </div>
+                  {/* A course without an assignment was silently ignored; now it says so. */}
+                  {selectedCourseId && !selectedAssignmentId && !assignmentsLoading && (
+                    <p role="status" className="text-xs leading-5 text-amber-700 dark:text-amber-300">
+                      Choose an assignment as well to file this assessment under the course. With only a course selected it is saved as a standalone assessment.
+                    </p>
+                  )}
+                </fieldset>
+              )}
+
               <button
                 type="button"
                 onClick={runDetection}
                 disabled={!canRun}
-                className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+                className={`mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`}
               >
                 {uploading ? (
                   <>
                     <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-                    Analyzing...
+                    Analyzing…
                   </>
                 ) : (
                   <>
                     <Bot size={16} aria-hidden="true" />
-                    Run Assessment
-                    <ArrowRight size={15} aria-hidden="true" />
+                    Run assessment
                   </>
                 )}
               </button>
-            </div>
-          }
-        />
-
-        <p
-          role="note"
-          className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
-        >
-          <Info size={16} className="mt-0.5 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden="true" />
-          <span>
-            AI-detection scores can be wrong in both directions, and they are least reliable for short submissions, simple
-            exercises and writers who are still learning. Treat a high score as a reason to talk to the student, never as
-            a finding on its own.
-          </span>
-        </p>
-
-        {/* Course & Assignment — hidden for the guest demo: it owns no
-            workspace, so there is nothing to associate an assessment with. */}
-        {!isGuest && (
-          <section className="rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Course &amp; Assignment</h2>
-                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-                  Optional
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                Associate this assessment with a course and assignment for better organization (optional)
-              </p>
-            </div>
-            <div className="p-5">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="ai-course" className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Course</label>
-                  <select
-                    id="ai-course"
-                    value={selectedCourseId}
-                    onChange={(event) => { setSelectedCourseId(event.target.value); setSelectedAssignmentId(''); }}
-                    disabled={coursesLoading}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
-                  >
-                    <option value="">{coursesLoading ? 'Loading courses…' : coursesError ? 'Courses unavailable' : courses.length ? 'None (standalone assessment)' : 'No courses yet'}</option>
-                    {courses.map((course) => <option key={course.id} value={course.id}>{course.code ? `${course.code} – ` : ''}{course.name}</option>)}
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="ai-assignment" className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Assignment</label>
-                  <select
-                    id="ai-assignment"
-                    value={selectedAssignmentId}
-                    onChange={(event) => setSelectedAssignmentId(event.target.value)}
-                    disabled={!selectedCourseId || assignmentsLoading}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:disabled:bg-slate-900 dark:disabled:text-slate-500"
-                  >
-                    <option value="">{!selectedCourseId ? 'None (choose course first if needed)' : assignmentsLoading ? 'Loading assignments…' : assignments.length ? 'None (unassociated)' : 'No assignments yet'}</option>
-                    {assignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              {/* A course without an assignment was silently ignored; now it says so. */}
-              {selectedCourseId && !selectedAssignmentId && !assignmentsLoading && (
-                <p role="status" className="mt-3 flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
-                  Choose an assignment as well to file this assessment under the course. With only a course selected it is saved as a standalone assessment.
-                </p>
+              {uploading && (
+                <>
+                  <button type="button" onClick={() => uploadAbortRef.current?.abort()} className={`mt-2 w-full ${SECONDARY_BUTTON}`}>
+                    Cancel upload
+                  </button>
+                  <p role="status" className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                    Uploading and analyzing. Keep this page open: leaving it cancels the upload.
+                  </p>
+                </>
               )}
-            </div>
-          </section>
-        )}
+            </section>
 
-        <section
-          onDragEnter={() => { dragDepth.current += 1; setIsDragging(true); }}
-          onDragOver={(event) => event.preventDefault()}
-          onDragLeave={() => {
-            // dragleave also fires when crossing a child element, which made the highlight flicker.
-            dragDepth.current = Math.max(0, dragDepth.current - 1);
-            if (dragDepth.current === 0) setIsDragging(false);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            dragDepth.current = 0;
-            setIsDragging(false);
-            addFiles(event.dataTransfer.files);
-          }}
-          className={`rounded-[28px] border bg-white shadow-sm transition dark:bg-slate-950 ${isDragging ? 'border-blue-500 ring-2 ring-blue-500/40' : 'border-slate-200 dark:border-slate-800'}`}
-        >
-          {files.length === 0 ? (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex w-full flex-col items-center justify-center px-8 py-20 text-center"
+            {error && <ErrorState message={error} onRetry={() => runDetection()} />}
+
+            <p
+              role="note"
+              className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
             >
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
-                <Upload size={22} aria-hidden="true" />
-              </div>
-              <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">
-                {isDragging ? 'Release to add files' : 'Upload student code submissions'}
-              </h3>
-              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
-                Accept source files (.py, .java, .cpp, etc.) or compressed archives for batch analysis. Drag files here or select them.
-              </p>
-              <span className="mt-5 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
-                <FileUp size={14} aria-hidden="true" />
-                Select files
+              <Info size={15} className="mt-0.5 shrink-0 text-slate-400 dark:text-slate-500" aria-hidden="true" />
+              <span>
+                AI-detection scores can be wrong in both directions, and they are least reliable for short submissions, simple
+                exercises and writers who are still learning. Treat a high score as a reason to talk to the student, never as
+                a finding on its own.
               </span>
-            </button>
-          ) : (
-            <div className="p-5">
-              <div className="flex items-center justify-between gap-4">
-                <div className="text-sm font-semibold text-slate-900 dark:text-white">{files.length} submission{files.length === 1 ? '' : 's'} ready for review</div>
-                <div className="flex items-center gap-3">
-                  <button type="button" onClick={() => fileInputRef.current?.click()} className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">Add more</button>
-                  <button type="button" onClick={() => { setFiles([]); setFileNotice(''); }} className="text-sm font-semibold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Clear</button>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-2">
-                {files.map((file, index) => (
-                  <div key={`${fileKey(file)}-${index}`} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                    <FileUp size={15} className="text-slate-400 dark:text-slate-500" aria-hidden="true" />
-                    <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700 dark:text-slate-300" title={file.name}>{file.name}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">{formatSize(file.size)}</div>
-                    <button type="button" onClick={() => setFiles(files.filter((_, i) => i !== index))} aria-label={`Remove ${file.name}`} className="text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400">
-                      <X size={14} aria-hidden="true" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ACCEPT}
-            className="hidden"
-            onChange={(event) => {
-              addFiles(event.target.files);
-              // Lets the same file be chosen again after it has been removed.
-              event.target.value = '';
-            }}
-          />
-        </section>
-        {fileNotice && (
-          <p role="status" className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
-            <AlertCircle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
-            {fileNotice}
-          </p>
-        )}
-        {error && <ErrorState message={error} onRetry={() => runDetection()} />}
+            </p>
+          </aside>
+        </div>
 
         {/* Assessment History — hidden for guests: the workspace listing
             they would read is denied to them, so it is always empty. */}
         {!isGuest && (
-          <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+          <section className={`overflow-hidden ${CARD}`}>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-white">
               <button
                 type="button"
                 onClick={() => setHistoryExpanded((expanded) => !expanded)}
                 aria-expanded={historyExpanded}
-                className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-900"
+                className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40 dark:hover:bg-slate-900"
               >
-                <span className="min-w-0">
-                  <span className="block">Assessment History</span>
-                  <span className="mt-1 block text-xs font-normal text-slate-500 dark:text-slate-400">
-                    {historyExpanded
-                      ? 'Previous analyses retained for institutional review.'
-                      : historyLoading
-                        ? 'Loading previous assessments…'
-                        : historyError
-                          ? 'Previous assessments couldn’t be loaded — click to retry'
-                          : `${history.length} previous assessment${history.length === 1 ? '' : 's'} — click to view`}
+                <span className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                    <CalendarClock size={18} aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block">Assessment history</span>
+                    <span className="mt-0.5 block text-xs font-normal text-slate-500 dark:text-slate-400">
+                      {historyExpanded
+                        ? 'Previous analyses retained for institutional review.'
+                        : historyLoading
+                          ? 'Loading previous assessments…'
+                          : historyError
+                            ? 'Previous assessments couldn’t be loaded. Open to retry.'
+                            : `${history.length} previous assessment${history.length === 1 ? '' : 's'}. Open to view.`}
+                    </span>
                   </span>
                 </span>
-                <span className="flex items-center gap-2 text-slate-400 dark:text-slate-500">
-                  <CalendarClock size={18} aria-hidden="true" />
-                  <ChevronDown size={16} aria-hidden="true" className={`transition-transform ${historyExpanded ? 'rotate-180' : ''}`} />
-                </span>
+                <ChevronDown size={18} aria-hidden="true" className={`shrink-0 text-slate-400 transition-transform motion-reduce:transition-none dark:text-slate-500 ${historyExpanded ? 'rotate-180' : ''}`} />
               </button>
             </h2>
             {historyExpanded && (
@@ -538,17 +630,20 @@ export default function AIDetectorPage() {
                     <button type="button" onClick={() => loadHistory()} className="font-semibold underline underline-offset-2">Retry</button>
                   </div>
                 ) : historyLoading ? (
-                  <div role="status" aria-label="Loading previous assessments" className="px-5 py-6">
-                    <div className="space-y-3" aria-hidden="true">
-                      <div className="h-4 w-44 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                      <div className="h-3 w-64 max-w-full animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                      <div className="h-4 w-36 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                      <div className="h-3 w-52 max-w-full animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-                    </div>
+                  <div role="status" aria-label="Loading previous assessments" className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {[0, 1, 2].map((row) => (
+                      <div key={row} aria-hidden="true" className="flex items-center justify-between gap-4 px-5 py-4">
+                        <div className="space-y-2">
+                          <div className="h-4 w-44 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                          <div className="h-3 w-28 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
+                        </div>
+                        <div className="h-6 w-36 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+                      </div>
+                    ))}
                   </div>
                 ) : history.length === 0 ? (
-                  <div className="px-5 py-16 text-center">
-                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                  <div className="px-5 py-14 text-center">
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                       <CalendarClock size={22} aria-hidden="true" />
                     </div>
                     <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No prior assessments recorded</h3>
@@ -559,7 +654,7 @@ export default function AIDetectorPage() {
                 ) : (
                   <>
                     <div className="grid gap-3 border-b border-slate-100 bg-slate-50/70 p-4 sm:grid-cols-2 dark:border-slate-800 dark:bg-slate-900/60">
-                      <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                      <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
                         Filter by course
                         <select
                           value={historyCourseId}
@@ -568,7 +663,7 @@ export default function AIDetectorPage() {
                             setHistoryAssignmentId('');
                             setHistoryPage(1);
                           }}
-                          className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-800 dark:bg-slate-900 dark:text-white"
+                          className={FILTER_SELECT_CLASS}
                         >
                           <option value="">All courses</option>
                           {courses.map((course) => (
@@ -578,7 +673,7 @@ export default function AIDetectorPage() {
                           ))}
                         </select>
                       </label>
-                      <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                      <label className="flex flex-col gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
                         Filter by assignment
                         <select
                           value={historyAssignmentId}
@@ -587,7 +682,7 @@ export default function AIDetectorPage() {
                             setHistoryPage(1);
                           }}
                           disabled={!historyCourseId}
-                          className="h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:disabled:text-slate-500"
+                          className={FILTER_SELECT_CLASS}
                         >
                           <option value="">{historyCourseId ? 'All assignments' : 'Choose a course first…'}</option>
                           {historyAssignments.map((assignment) => (
@@ -597,8 +692,8 @@ export default function AIDetectorPage() {
                       </label>
                     </div>
                     {filteredHistory.length === 0 ? (
-                      <div className="px-5 py-16 text-center">
-                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                      <div className="px-5 py-14 text-center">
+                        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <Search size={22} aria-hidden="true" />
                         </div>
                         <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No assessments match these filters</h3>
@@ -611,27 +706,32 @@ export default function AIDetectorPage() {
                         <ul className="divide-y divide-slate-100 dark:divide-slate-800">
                           {paginatedHistory.map((job) => {
                             const score = Number(job.summary?.highest_ai_probability) || 0;
+                            const percent = Math.round(score * 100);
                             const when = formatDate(job.created_at);
                             return (
                               <li key={job.id}>
                                 <Link
                                   href={`/ai-detector/results/${encodeURIComponent(job.id)}`}
-                                  className="grid gap-3 px-5 py-4 transition hover:bg-slate-50 dark:hover:bg-slate-900 md:grid-cols-[1fr_auto] md:items-center"
+                                  className="group flex flex-col gap-3 px-5 py-4 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500/40 sm:flex-row sm:items-center sm:justify-between dark:hover:bg-slate-900"
                                 >
-                                  <div>
-                                    <div className="font-medium text-slate-900 dark:text-white">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
+                                  <div className="min-w-0">
+                                    <div className="truncate font-medium text-slate-900 dark:text-white">{job.assignment_name || 'AI-Generated Code Analysis Report'}</div>
                                     {/* "Course" was shown for a standalone assessment, which read like a course name. */}
-                                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                      {job.course_name || 'Standalone assessment'}
-                                      {when ? ` · ${when}` : ''}
-                                    </div>
+                                    <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{job.course_name || 'Standalone assessment'}</div>
                                   </div>
-                                  <div className="flex items-center gap-3">
-                                    {/* A detection score isn't a misconduct risk, so the chip no longer says "risk". */}
-                                    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getTone(score)}`}>
-                                      {Math.round(score * 100)}% highest AI score
+                                  <div className="flex shrink-0 items-center gap-4">
+                                    {/* The meter repeats the chip visually so a long list can be scanned at a glance. */}
+                                    <span aria-hidden="true" className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-slate-100 sm:block dark:bg-slate-800">
+                                      <span className={`block h-full rounded-full ${getBarColor(score)}`} style={{ width: `${Math.min(100, percent)}%` }} />
                                     </span>
-                                    <ArrowRight size={16} className="text-slate-400 dark:text-slate-500" aria-hidden="true" />
+                                    <div className="sm:text-right">
+                                      {/* A detection score isn't a misconduct risk, so the chip doesn't say "risk". */}
+                                      <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getTone(score)}`}>
+                                        {percent}% highest AI score
+                                      </span>
+                                      {when && <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{when}</div>}
+                                    </div>
+                                    <ArrowRight size={16} className="hidden text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-slate-500 motion-reduce:transition-none sm:block dark:text-slate-600 dark:group-hover:text-slate-400" aria-hidden="true" />
                                   </div>
                                 </Link>
                               </li>

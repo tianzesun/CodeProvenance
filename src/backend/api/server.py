@@ -5216,7 +5216,38 @@ def _build_ai_detection_summary(submissions: dict[str, str]) -> dict[str, Any]:
 
     from src.backend.engines.ai.orchestrator import AIDetectionOrchestrator
 
-    detector = AIDetectionOrchestrator()
+    try:
+        detector = AIDetectionOrchestrator()
+    except Exception as exc:
+        logger.exception("Failed to construct AI detection orchestrator")
+        entries = [
+            {
+                "name": name,
+                "language": _infer_language_from_filename(name),
+                "ai_probability": 0.0,
+                "confidence": 0.0,
+                "method": "heuristic",
+                "model": "",
+                "status": _ai_status_label(0.0),
+                "signals": {},
+                "signal_labels": {},
+                "signal_interpretations": {},
+                "indicators": [f"Detector initialisation failed: {exc}"],
+                "flagged_lines": [],
+                "flagged_regions": [],
+                "classifier": None,
+                "layers": {},
+                "annotated_snippet": [],
+                "evidence_patterns": {},
+                "code_metrics": _compute_code_metrics(code),
+                "error": str(exc),
+            }
+            for name, code in submissions.items()
+        ]
+        return _finalise_ai_detection_summary(
+            entries, {}, {}, {}, calibration_info
+        )
+
     entries: list[dict[str, Any]] = []
     signal_totals: dict[str, float] = {}
     signal_peaks: dict[str, float] = {}
@@ -5225,7 +5256,34 @@ def _build_ai_detection_summary(submissions: dict[str, str]) -> dict[str, Any]:
 
     for name, code in submissions.items():
         language = _infer_language_from_filename(name)
-        result = detector.analyze(code, language=language)
+        try:
+            result = detector.analyze(code, language=language)
+        except Exception as exc:
+            logger.exception("AI detection failed for %s", name)
+            entries.append(
+                {
+                    "name": name,
+                    "language": language,
+                    "ai_probability": 0.0,
+                    "confidence": 0.0,
+                    "method": "heuristic",
+                    "model": "",
+                    "status": _ai_status_label(0.0),
+                    "signals": {},
+                    "signal_labels": {},
+                    "signal_interpretations": {},
+                    "indicators": [f"Analysis failed: {exc}"],
+                    "flagged_lines": [],
+                    "flagged_regions": [],
+                    "classifier": None,
+                    "layers": {},
+                    "annotated_snippet": [],
+                    "evidence_patterns": {},
+                    "code_metrics": _compute_code_metrics(code),
+                    "error": str(exc),
+                }
+            )
+            continue
         calibration_info = {
             "available": bool(result.get("calibration", {}).get("available")),
             "samples": int(result.get("calibration", {}).get("samples") or 0),
@@ -5288,6 +5346,23 @@ def _build_ai_detection_summary(submissions: dict[str, str]) -> dict[str, Any]:
             }
         )
 
+    return _finalise_ai_detection_summary(
+        entries, signal_totals, signal_peaks, signal_counts, calibration_info
+    )
+
+
+def _finalise_ai_detection_summary(
+    entries: list[dict[str, Any]],
+    signal_totals: dict[str, float],
+    signal_peaks: dict[str, float],
+    signal_counts: dict[str, int],
+    calibration_info: dict[str, Any],
+) -> dict[str, Any]:
+    """Aggregate per-file detection entries into a batch summary.
+
+    Raises when there are no entries at all (every file failed), which
+    causes the background job to be marked as failed upstream.
+    """
     entries.sort(key=lambda entry: (-entry["ai_probability"], entry["name"]))
 
     detection_methods = {entry["method"] for entry in entries if entry["method"]}
@@ -5297,6 +5372,9 @@ def _build_ai_detection_summary(submissions: dict[str, str]) -> dict[str, Any]:
     distribution = {"low": 0, "medium": 0, "high": 0}
     for entry in entries:
         distribution[_ai_bucket(entry["ai_probability"])] += 1
+
+    if not entries:
+        raise ValueError("AI detection failed for every submitted file")
 
     average_score = sum(entry["ai_probability"] for entry in entries) / len(entries)
     highest_score = max((entry["ai_probability"] for entry in entries), default=0.0)
