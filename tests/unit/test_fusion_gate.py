@@ -163,6 +163,29 @@ def test_collect_scores_keeps_the_newest_run_per_corpus(tmp_path) -> None:
     assert new in used
 
 
+def test_collect_scores_breaks_mtime_ties_by_timestamp_in_the_name(tmp_path) -> None:
+    """Copying a report directory rewrites mtimes; the run name still orders it."""
+    old = tmp_path / "ENGINE_EVAL_conplag_20261022_093000.json"
+    new = tmp_path / "ENGINE_EVAL_conplag_20261022_113000.json"
+    for path, auc in ((old, 0.10), (new, 0.90)):
+        path.write_text(
+            json.dumps(
+                {
+                    "dataset_name": "conplag",
+                    "scorers": [{"name": "fused", "available": True, "auc_roc": auc}],
+                }
+            ),
+            encoding="utf-8",
+        )
+    # `cp` gives every file the copy time, so mtimes no longer say anything.
+    os.utime(old, (2000, 2000))
+    os.utime(new, (2000, 2000))
+
+    scores, used = collect_scores([tmp_path])
+    assert scores == {"conplag": 0.90}
+    assert used == [new]
+
+
 def test_collect_scores_ignores_files_that_are_not_reports(tmp_path) -> None:
     """A stray JSON in the report directory must not break the gate."""
     (tmp_path / "notes.json").write_text(

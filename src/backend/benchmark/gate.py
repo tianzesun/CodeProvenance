@@ -237,7 +237,7 @@ def collect_scores(
         ``(scores, used_files)`` — dataset to AUC, and the files that supplied
         them, so the caller can show which run a verdict is based on.
     """
-    newest: dict[str, tuple[float, Path, float]] = {}
+    newest: dict[str, tuple[tuple[float, str], Path, float]] = {}
     for path in paths:
         path = Path(path)
         candidates = sorted(path.rglob("*.json")) if path.is_dir() else [path]
@@ -246,12 +246,15 @@ def collect_scores(
                 continue
             try:
                 scores = load_report_scores(candidate_path, scorer=scorer)
-                mtime = candidate_path.stat().st_mtime
+                # Reports are named with the run timestamp, so the name breaks
+                # mtime ties. Without it, copying a directory (which rewrites
+                # mtimes) could make an older run look newest.
+                key = (candidate_path.stat().st_mtime, candidate_path.name)
             except (OSError, ValueError, TypeError):
                 continue
             for dataset, auc in scores.items():
                 previous = newest.get(dataset)
-                if previous is None or mtime > previous[0]:
-                    newest[dataset] = (mtime, candidate_path, auc)
+                if previous is None or key > previous[0]:
+                    newest[dataset] = (key, candidate_path, auc)
     used = sorted({path for _, path, _ in newest.values()})
     return {dataset: value[2] for dataset, value in newest.items()}, used

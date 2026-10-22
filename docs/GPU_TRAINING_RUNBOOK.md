@@ -170,7 +170,8 @@ BASELINE_REPORT=reports/engine_evaluation_shipped bash scripts/gpu/train_equal.s
 The scripts refuse a `BASELINE_REPORT` that points at the directory the run is
 about to overwrite (`OUT`): you would be judging a run against itself, and the
 old measurement is gone by the time the gate reads it. Copy the reports aside
-first, as above.
+first, as above. Copying is safe even though `cp` rewrites mtimes: the gate picks
+the newest run per corpus by the timestamp in the report filename.
 
 The gate then reads `fused` from those reports instead of the constants, prints a
 `note:` for every corpus where the host value differs from the constant by more
