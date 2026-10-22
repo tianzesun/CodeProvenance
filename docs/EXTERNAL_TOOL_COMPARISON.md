@@ -17,6 +17,12 @@ precision / recall / F1 at the best swept threshold and at 0.5:
 | `jplag`, `dolos` | The real local tools (`tools/external/JPlag/jplag.jar`, `tools/external/dolos-cli`). |
 | `moss` | Real Stanford MOSS, but only when `--moss-user-id` is given (requires a registered MOSS account). Without it the row is reported as unavailable. |
 
+`moss` is also the one tool with an account: the adapter patches the vendored
+`tools/external/moss/moss.pl` so its hardcoded `$userid` comes from
+`MOSS_USER_ID`, falling back to `0`, and `ExternalToolRunner` refuses to submit
+at all when no id is passed. Register with Stanford to obtain an id before
+quoting any MOSS comparison.
+
 Tools that cannot run are reported `available: false` with a reason. No score
 in this harness is simulated.
 
