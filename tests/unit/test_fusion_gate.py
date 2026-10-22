@@ -303,6 +303,25 @@ def test_gate_cli_rejects_an_empty_host_baseline(tmp_path) -> None:
         )
 
 
+def test_gate_cli_refuses_to_judge_a_run_against_itself(tmp_path) -> None:
+    """A baseline file that is also the candidate always passes; that is a bug."""
+    from src.backend.benchmark import __main__ as cli
+
+    report = tmp_path / "learned_fusion_report_1.json"
+    report.write_text(json.dumps({"per_dataset_auc": dict(SHIPPED_BASELINE)}))
+    with pytest.raises(SystemExit):
+        _run_cli(
+            cli,
+            [
+                "fusion-gate",
+                "--report",
+                str(report),
+                "--baseline-report",
+                str(report),
+            ],
+        )
+
+
 def _run_cli(cli, argv: list[str]) -> int:
     """Run the benchmark CLI in-process with ``argv``."""
     import sys

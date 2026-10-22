@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import csv
 import os
+import shutil
 import subprocess
 import tempfile
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
@@ -95,12 +97,18 @@ class DolosBenchmarkEngine(BaseAdapter):
                 text=True,
                 bufsize=1,
                 universal_newlines=True,
+                env=env,
             )
 
-            # Stream output
+            # Keep the tail of the tool output. The CLI writes its error on
+            # stdout, and a RuntimeError without it is undebuggable on a host
+            # where the same command behaves differently ("See logs for details"
+            # pointed at logs nobody kept).
+            tail: deque[str] = deque(maxlen=20)
             if proc.stdout:
                 for line in proc.stdout:
                     line = line.rstrip()
+                    tail.append(line[:500])
                     if progress_cb:
                         progress_cb(line)
             else:
@@ -108,8 +116,14 @@ class DolosBenchmarkEngine(BaseAdapter):
 
             proc.wait()
             if proc.returncode != 0:
+                launched = shutil.which(command_prefix[0], path=env.get("PATH"))
+                launched = launched or command_prefix[0]
+                if cli_path.suffix == ".js":
+                    launched = f"{launched} {cli_path}"
+                output = "\n".join(line for line in tail if line).strip()
                 raise RuntimeError(
-                    f"Dolos exited with code {proc.returncode}. See logs for details."
+                    f"Dolos exited with code {proc.returncode} ({launched})."
+                    + (f"\n{output}" if output else " It printed no output.")
                 )
 
             pairs_path = report_dir / "pairs.csv"

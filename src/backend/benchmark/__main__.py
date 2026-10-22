@@ -888,6 +888,13 @@ def main() -> int:
         scores, used_files = collect_scores(
             [Path(path) for path in args.report], scorer=args.scorer
         )
+        if baseline_files and set(used_files) & set(baseline_files):
+            parser.error(
+                "the baseline report is also the candidate report: "
+                + ", ".join(
+                    str(path) for path in sorted(set(used_files) & set(baseline_files))
+                )
+            )
         result = evaluate_gate(scores, baselines=baselines, tolerance=args.tolerance)
         if args.json:
             print(

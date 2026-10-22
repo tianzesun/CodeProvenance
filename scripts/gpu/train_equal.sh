@@ -32,6 +32,13 @@ TRAIN_CMD=(
 )
 GATE_CMD=("$PYTHON_BIN" -m src.backend.benchmark fusion-gate --report "$OUT")
 if [[ -n "${BASELINE_REPORT:-}" ]]; then
+  # Judging a run against itself always passes; catch the path mistake here
+  # rather than after the training.
+  if [[ "$(realpath -m "$BASELINE_REPORT")" == "$(realpath -m "$OUT")" ]]; then
+    echo "BASELINE_REPORT must be a different directory from OUT ($OUT):" >&2
+    echo "the training report inside it would become its own bar." >&2
+    exit 2
+  fi
   GATE_CMD+=(--baseline-report "$BASELINE_REPORT")
 fi
 

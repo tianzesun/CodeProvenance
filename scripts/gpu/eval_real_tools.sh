@@ -42,6 +42,22 @@ for dataset in IR-Plag-Dataset conplag kaggle_student_code; do
 done
 
 GATE_CMD=("$PYTHON_BIN" -m src.backend.benchmark fusion-gate --report "$OUT")
+if [[ -n "${BASELINE_REPORT:-}" ]]; then
+  # The run below rewrites $OUT, so a baseline that lives there would be
+  # replaced by the very numbers it is supposed to judge.
+  if [[ "$(realpath -m "$BASELINE_REPORT")" == "$(realpath -m "$OUT")" ]]; then
+    echo "BASELINE_REPORT must be a different directory from OUT ($OUT):" >&2
+    echo "this run overwrites it. Keep the shipped-artifact measurement first:" >&2
+    echo "  mkdir -p reports/engine_evaluation_shipped" >&2
+    echo "  cp reports/engine_evaluation/*.json reports/engine_evaluation_shipped/" >&2
+    exit 2
+  fi
+  echo "bar: $BASELINE_REPORT (shipped artifact, measured on this host)"
+  GATE_CMD+=(--baseline-report "$BASELINE_REPORT")
+else
+  echo "bar: built-in shipped-artifact constants (2026-10-22)"
+fi
+echo
 if [[ -n "${DRY_RUN:-}" ]]; then
   printf 'then:     '; printf ' %q' "${GATE_CMD[@]}"; echo
   exit 0

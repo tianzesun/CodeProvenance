@@ -163,8 +163,14 @@ bash scripts/gpu/eval_real_tools.sh
 mkdir -p reports/engine_evaluation_shipped
 cp reports/engine_evaluation/*.json reports/engine_evaluation_shipped/   # before promoting anything
 
+BASELINE_REPORT=reports/engine_evaluation_shipped bash scripts/gpu/eval_real_tools.sh
 BASELINE_REPORT=reports/engine_evaluation_shipped bash scripts/gpu/train_equal.sh
 ```
+
+The scripts refuse a `BASELINE_REPORT` that points at the directory the run is
+about to overwrite (`OUT`): you would be judging a run against itself, and the
+old measurement is gone by the time the gate reads it. Copy the reports aside
+first, as above.
 
 The gate then reads `fused` from those reports instead of the constants, prints a
 `note:` for every corpus where the host value differs from the constant by more

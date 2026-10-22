@@ -96,14 +96,23 @@ Reading:
   (`--moss-user-id`); until then no MOSS comparison exists.
 
 A second run of the same shipped artifact on the T4 host reproduced `fused` on
-IR-Plag and conplag to four decimals but scored kaggle **0.890**. The `rule`
-scorer moved on kaggle too (0.872 → 0.877) and nowhere else, so the host holds a
-slightly different `kaggle_student_code` copy — that corpus is assembled locally
-from the Kaggle CSV, while the two Java corpora are downloaded. That run also had
-no `tools/external/` binaries (`gitignored`), so its JPlag/Dolos rows read
-`UNAVAILABLE: tool did not produce pair scores`. **It is not an external
-comparison and must not be quoted as one.** Check `bash scripts/gpu/setup.sh`'s
-`fingerprint=` lines before comparing across hosts.
+IR-Plag and conplag to four decimals but scored kaggle **0.890**. JPlag says the
+same thing independently — 0.5734 on IR-Plag and 0.8206 on conplag, both exactly
+as above, but 0.8525 on kaggle instead of 0.847 — so the host holds a slightly
+different `kaggle_student_code` copy. That corpus is assembled locally from the
+Kaggle CSV, while the two Java corpora are downloaded. Check
+`bash scripts/gpu/setup.sh`'s `fingerprint=` lines before comparing across hosts.
+
+That run could not measure Dolos at all: `dolos-cli` exited 1 on the first batch
+of every corpus. The failure surfaced as `Dolos exited with code 1. See logs for
+details`, with no logs kept. Two things were wrong on our side: the adapter
+computed a `node20/bin` PATH prefix and then never passed the environment to the
+subprocess — which may be the cause, since `dolos-cli` is a Node script and the
+host's `node` is whatever `PATH` resolves — and the exception discarded the CLI's
+own output, so the actual reason was lost. Both are fixed: the subprocess gets the
+environment, and the error now carries the last 20 lines the tool printed. **No
+Dolos number from the T4 host may be quoted** until a re-run produces one; the
+Dolos column above remains the laptop measurement.
 
 ### Absolute scores are not calibrated on two of three corpora
 
