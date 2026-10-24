@@ -1,5 +1,7 @@
 """Benchmark runner plugin."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from src.backend.bootstrap.plugins.loader import register_plugin
@@ -12,7 +14,7 @@ class BenchmarkRunner(ExecutionPlugin):
 
     name = "benchmark"
 
-    def run(self, dataset: str, mode: str = "full") -> dict[str, Any]:
+    def run(self, dataset: str | None = None, mode: str = "full") -> dict[str, Any]:
         """Run benchmark pipeline.
 
         Args:

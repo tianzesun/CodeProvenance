@@ -12,7 +12,9 @@ console = Console()
 
 @app.command()
 def run(
-    dataset: str = typer.Option(..., help="Dataset name"),
+    dataset: str | None = typer.Option(
+        None, help="Unused: the benchmark runners generate synthetic pairs"
+    ),
     mode: str = typer.Option("full", help="Execution mode"),
 ) -> None:
     """Run benchmark pipeline."""
