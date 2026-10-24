@@ -1,6 +1,5 @@
 """Benchmark runner plugin."""
 
-from pathlib import Path
 from typing import Any
 
 from src.backend.bootstrap.plugins.loader import register_plugin
@@ -17,21 +16,24 @@ class BenchmarkRunner(ExecutionPlugin):
         """Run benchmark pipeline.
 
         Args:
-            dataset: Dataset name to run benchmark on.
+            dataset: Accepted for CLI compatibility; the runners use synthetic data.
             mode: Execution mode (full, core, layer, diagnostic).
 
         Returns:
             Benchmark results dictionary.
         """
-        # Import here to avoid circular imports
-        from src.backend.benchmark.runners import (
-            CoreBenchmarkRunner,
+        # Import here to avoid circular imports. The runners live in their own
+        # modules; the package __init__ does not re-export them.
+        from src.backend.benchmark.runners.core_runner import CoreBenchmarkRunner
+        from src.backend.benchmark.runners.diagnostic_runner import (
             DiagnosticBenchmarkRunner,
-            FullBenchmarkRunner,
+        )
+        from src.backend.benchmark.runners.full_runner import FullBenchmarkRunner
+        from src.backend.benchmark.runners.layer_runner import (
             ThreeLayerBenchmarkRunner,
         )
 
-        runners_map = {
+        runners_map: dict[str, type[Any]] = {
             "full": FullBenchmarkRunner,
             "core": CoreBenchmarkRunner,
             "layer": ThreeLayerBenchmarkRunner,
@@ -44,12 +46,6 @@ class BenchmarkRunner(ExecutionPlugin):
                 f"Unknown mode: {mode}. Available: {list(runners_map.keys())}"
             )
 
-        runner = runner_cls()
-        dataset_path = Path(f"data/{dataset}")
-
-        if not dataset_path.exists():
-            raise FileNotFoundError(f"Dataset not found: {dataset_path}")
-
-        pairs = runner.load_dataset(dataset_path)
-        result = runner.evaluate(pairs)
-        return result.summary_dict()
+        # These runners generate their own synthetic pairs and expose run();
+        # they have no load_dataset/evaluate, so ``dataset`` is not consumed.
+        return runner_cls().run()
