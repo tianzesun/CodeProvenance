@@ -7767,6 +7767,40 @@ def _discard_upload(job_id: str, job_dir: PathLib) -> None:
     _jobs.pop(job_id, None)
 
 
+async def _save_starter_files(
+    starter_files: list[UploadFile], job_dir: PathLib
+) -> tuple[list[str], str | None]:
+    """Save instructor starter files under ``job_dir/starter``.
+
+    Starter files get the same per-file limits as submissions; they used to be
+    read whole and unchecked, so one oversized "starter" bypassed the upload
+    limits and was then matched line by line against every submission.
+
+    Returns:
+        (decoded starter sources, error message or ``None``).
+    """
+    starter_sources: list[str] = []
+    if not starter_files:
+        return starter_sources, None
+    starter_dir = job_dir / "starter"
+    starter_dir.mkdir(exist_ok=True)
+    max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    for f in starter_files:
+        if not (f.filename and _is_code_file(f.filename)):
+            continue
+        # One byte past the limit is enough to reject without buffering the rest.
+        content = await f.read(max_bytes + 1)
+        size_error = _check_submission_size(f.filename, content)
+        if size_error:
+            return [], f"Starter code: {size_error}"
+        safe_name = PathLib(f.filename).name
+        target = _unique_child_path(starter_dir, PathLib(safe_name))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        starter_sources.append(content.decode("utf-8", errors="ignore"))
+    return starter_sources, None
+
+
 @app.post("/api/upload")
 async def upload_files(
     request: Request,
@@ -7781,7 +7815,7 @@ async def upload_files(
     tool_ids: str = Form(default=""),
     source_scan_enabled: bool = Form(default=True),
 ):
-    # Allow unauthenticated uploads for plagiarism checker
+    # Anonymous callers only reach this when ALLOW_ANONYMOUS_ANALYSIS is set.
     current_user = getattr(request.state, "user", None)
     if _is_guest_principal(current_user):
         # A guest demo session must not spend the deployment's GitHub / Stack
@@ -7806,9 +7840,11 @@ async def upload_files(
 
     saved_files = []
     oversized: list[str] = []
+    max_file_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
     for f in files:
         if f.filename and _is_code_file(f.filename):
-            content = await f.read()
+            # One byte past the limit is enough to reject without buffering the rest.
+            content = await f.read(max_file_bytes + 1)
             size_error = _check_submission_size(f.filename, content)
             if size_error:
                 oversized.append(size_error)
@@ -7825,18 +7861,10 @@ async def upload_files(
         _discard_upload(job_id, job_dir)
         return JSONResponse(status_code=400, content={"error": size_error})
 
-    starter_dir = job_dir / "starter"
-    starter_sources = []
-    if starter_files:
-        starter_dir.mkdir(exist_ok=True)
-        for f in starter_files:
-            if f.filename and _is_code_file(f.filename):
-                safe_name = PathLib(f.filename).name
-                target = _unique_child_path(starter_dir, PathLib(safe_name))
-                target.parent.mkdir(parents=True, exist_ok=True)
-                content = await f.read()
-                target.write_bytes(content)
-                starter_sources.append(content.decode("utf-8", errors="ignore"))
+    starter_sources, starter_error = await _save_starter_files(starter_files, job_dir)
+    if starter_error:
+        _discard_upload(job_id, job_dir)
+        return JSONResponse(status_code=400, content={"error": starter_error})
 
     if len(saved_files) < 2:
         _discard_upload(job_id, job_dir)
@@ -7874,7 +7902,7 @@ async def upload_zip(
     tool_ids: str = Form(default=""),
     source_scan_enabled: bool = Form(default=True),
 ):
-    # Allow unauthenticated uploads for plagiarism checker
+    # Anonymous callers only reach this when ALLOW_ANONYMOUS_ANALYSIS is set.
     current_user = getattr(request.state, "user", None)
     if _is_guest_principal(current_user):
         # See upload_files: a demo session never spends external API quota.
@@ -7938,18 +7966,10 @@ async def upload_zip(
             status_code=400, content={"error": "Zip must contain at least 2 code files"}
         )
 
-    starter_dir = job_dir / "starter"
-    starter_sources = []
-    if starter_files:
-        starter_dir.mkdir(exist_ok=True)
-        for f in starter_files:
-            if f.filename and _is_code_file(f.filename):
-                safe_name = PathLib(f.filename).name
-                target = _unique_child_path(starter_dir, PathLib(safe_name))
-                target.parent.mkdir(parents=True, exist_ok=True)
-                content = await f.read()
-                target.write_bytes(content)
-                starter_sources.append(content.decode("utf-8", errors="ignore"))
+    starter_sources, starter_error = await _save_starter_files(starter_files, job_dir)
+    if starter_error:
+        _discard_upload(job_id, job_dir)
+        return JSONResponse(status_code=400, content={"error": starter_error})
 
     dispatch_analysis(
         job_id=job_id,
