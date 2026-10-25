@@ -471,7 +471,7 @@ export default function CompareCasePage() {
           onClose={() => setShareOpen(false)}
           endpoint={`${casePath}/sharing`}
           itemLabel="this case"
-          scopeNote="Everyone its course is shared with can already see this case."
+          ownersNote="The case’s creator and the course’s instructors always have access, and so does anyone the course is shared with."
         />
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-600 dark:text-slate-400">

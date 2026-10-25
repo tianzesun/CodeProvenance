@@ -621,7 +621,7 @@ export default function CoursesPage() {
           onClose={() => setSharingCourse(null)}
           endpoint={`/api/courses/${encodeURIComponent(sharingCourse?.id ?? '')}/sharing`}
           itemLabel={sharingCourse?.code || sharingCourse?.name || 'this course'}
-          scopeNote="Sharing a course shares its assignments, analyses, cases, dossiers and viva outcomes."
+          ownersNote="The course’s instructors always have access. Sharing a course includes its assignments, analyses and cases."
         />
       </div>
     </DashboardLayout>

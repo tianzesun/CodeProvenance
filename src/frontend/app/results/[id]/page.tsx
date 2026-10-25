@@ -762,7 +762,7 @@ export default function ResultsPage() {
                 onClose={() => setShareOpen(false)}
                 endpoint={`/api/job/${encId}/sharing`}
                 itemLabel="this analysis"
-                scopeNote="Shares this analysis, its dossier and viva outcomes. Everyone its course is shared with can already see it."
+                ownersNote="The uploader and the course’s instructors always have access, and so does anyone the course is shared with."
               />
             )}
           </div>
