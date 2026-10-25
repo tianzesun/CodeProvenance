@@ -3887,7 +3887,7 @@ def _normalize_result(result: dict[str, Any]) -> dict[str, Any]:
     for name, value in (result.get("contributions") or {}).items():
         contributions[name] = round(_coerce_float(value), 3)
 
-    return {
+    normalized = {
         "file_a": result.get("file_a", ""),
         "file_b": result.get("file_b", ""),
         "score": round(_coerce_float(result.get("score")), 3),
@@ -3900,6 +3900,15 @@ def _normalize_result(result: dict[str, Any]) -> dict[str, Any]:
         "code_a": result.get("code_a"),
         "code_b": result.get("code_b"),
     }
+    # Pair review decisions. They were dropped here, and every read and write
+    # of a job passes through this function, so a decision vanished from the
+    # job (and job.json) as soon as it was saved; the results page then showed
+    # the job-level status on every pair.
+    if result.get("review_status") in REVIEW_STATUSES:
+        normalized["review_status"] = result["review_status"]
+    if isinstance(result.get("review_notes"), str):
+        normalized["review_notes"] = result["review_notes"]
+    return normalized
 
 
 def _normalize_submission_ai_result(entry: dict[str, Any]) -> dict[str, Any]:
@@ -9862,6 +9871,21 @@ async def get_job_evidence_dossier(job_id: str, request: Request):
     )
 
 
+def _job_submission_names(job: dict[str, Any]) -> set[str]:
+    """Names of the students (submissions) in a job; empty when unknown."""
+    names = (
+        set(job.get("submissions") or {})
+        if isinstance(job.get("submissions"), dict)
+        else set()
+    )
+    for result in job.get("results") or []:
+        if isinstance(result, dict):
+            names.update(
+                str(result[key]) for key in ("file_a", "file_b") if result.get(key)
+            )
+    return names
+
+
 @app.put("/api/job/{job_id}/viva")
 async def record_viva_outcome(job_id: str, request: Request):
     """Record (upsert) the viva outcome for one student submission.
@@ -9870,9 +9894,12 @@ async def record_viva_outcome(job_id: str, request: Request):
     instructor records the conclusion. Re-recording overwrites the previous
     outcome for the same (job, submission).
     """
-    _require_job_access(job_id, request)
+    job = _require_job_access(job_id, request)
 
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except ValueError:  # malformed JSON was a 500
+        raise HTTPException(status_code=400, detail="Invalid viva payload")
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid viva payload")
 
@@ -9880,6 +9907,15 @@ async def record_viva_outcome(job_id: str, request: Request):
     outcome = str(payload.get("outcome") or "").strip()
     if not submission_name:
         raise HTTPException(status_code=400, detail="submission_name is required")
+    # An unknown student was stored as an orphan the dossier never shows (and a
+    # name over the 500-character column was a 500).
+    known_students = _job_submission_names(job)
+    if known_students and submission_name not in known_students:
+        raise HTTPException(
+            status_code=400, detail="submission_name is not a student in this job"
+        )
+    if len(submission_name) > 500:
+        raise HTTPException(status_code=400, detail="submission_name is too long")
     if outcome not in VIVA_OUTCOMES:
         raise HTTPException(
             status_code=400,
@@ -9900,6 +9936,11 @@ async def record_viva_outcome(job_id: str, request: Request):
         except ValueError:
             raise HTTPException(
                 status_code=400, detail="conducted_at must be an ISO timestamp"
+            )
+        if conducted_at.tzinfo is None:
+            # A naive time was stored as server-local time.
+            raise HTTPException(
+                status_code=400, detail="conducted_at must include a timezone"
             )
 
     saved_notes = (notes or "").strip() or None
@@ -9935,19 +9976,13 @@ async def record_viva_outcome(job_id: str, request: Request):
 async def download_dossier_pdf(job_id: str, request: Request):
     """Generate and return a PDF version of the evidence dossier.
 
-    Checks the reports table for a cached PDF first. If not found, builds the
-    dossier from live job data, renders print-ready HTML, converts to PDF,
-    saves to disk, tracks in DB, and serves.
+    Always built from live job data: the dossier carries viva outcomes and
+    review decisions recorded after any earlier download, and serving the
+    first PDF from the reports table left every later outcome out of the
+    document used at hearings. The file is overwritten and catalogued once.
     """
     _require_job_access(job_id, request)
-
-    cached = _resolve_cached_report(job_id, "dossier", "pdf")
-    if cached:
-        return FileResponse(
-            str(cached),
-            media_type="application/pdf",
-            filename=f"integritydesk_dossier_{job_id}.pdf",
-        )
+    already_catalogued = _resolve_cached_report(job_id, "dossier", "pdf") is not None
 
     job = _get_job(job_id)
     if not job:
@@ -9991,7 +10026,10 @@ async def download_dossier_pdf(job_id: str, request: Request):
         )
     else:
         try:
-            _persist_report_record(job_id, "dossier", "pdf", str(pdf_path))
+            if not already_catalogued:
+                _persist_report_record(
+                    job_id, "dossier", "pdf", str(pdf_path), job.get("tenant_id")
+                )
         except SQLAlchemyError:
             logger.warning(
                 "Failed to cache dossier PDF report record for job %s", job_id
