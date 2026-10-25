@@ -117,7 +117,9 @@ def broker_available(timeout: float = 1.0) -> bool:
     return True
 
 
-def _current_user_summary(current_user: dict[str, Any] | None) -> tuple[str | None, str | None]:
+def _current_user_summary(
+    current_user: dict[str, Any] | None
+) -> tuple[str | None, str | None]:
     """Extract the broker-safe ownership fields from a user dict.
 
     The full user dict can carry non-JSON values (datetimes, secrets);
@@ -167,6 +169,9 @@ def dispatch_analysis(
                 threshold=threshold,
                 owner_user_id=owner_user_id,
                 tenant_id=tenant_id,
+                # Without this the worker rebuilt a guest as a normal user and
+                # its tenant-less job was filed under the first tenant.
+                is_guest=bool(current_user and current_user.get("is_guest")),
                 engine_keys_raw=engine_keys_raw,
                 tool_ids_raw=tool_ids_raw,
                 starter_sources=starter_sources,
