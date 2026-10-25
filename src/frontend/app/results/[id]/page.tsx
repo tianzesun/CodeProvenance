@@ -605,6 +605,25 @@ export default function ResultsPage() {
   const confidencePct = hasConfidence ? Math.round(activeResult._confidence * 100) : 0;
   const evidenceTypes = getEvidenceTypes(activeResult);
   const evidenceSignals = buildEvidenceSignals(activeResult).filter((s) => s.fired);
+  // One plain-language paragraph: the score against the threshold, the strongest
+  // evidence, and what was left out before comparing.
+  const plainSummary = (() => {
+    if (!activeResult) return '';
+    const cutoff = Math.round(getThreshold(job) * 100);
+    const parts = [
+      `This pair scored ${similarityDisplay}% overall, ${similarityDisplay >= cutoff ? 'at or above' : 'below'} the ${cutoff}% flag threshold.`,
+    ];
+    const strongest = [...buildEvidenceSignals(activeResult)].sort((a, b) => b.score - a.score).slice(0, 2);
+    if (strongest.length > 0) {
+      parts.push(`Strongest evidence: ${strongest.map((signal) => `${signal.name.toLowerCase()} (${Math.round(signal.score * 100)}%)`).join(' and ')}.`);
+    }
+    const earlier = [activeResult.file_a, activeResult.file_b].find((name) => typeof name === 'string' && name.startsWith('[') && job?.previous_term);
+    if (earlier) parts.push(`One file comes from an earlier offering (${earlier.slice(1, earlier.indexOf(']'))}).`);
+    const commonLines = Number(job?.summary?.common_code_lines) || 0;
+    if (commonLines > 0) parts.push(`${commonLines} line${commonLines === 1 ? '' : 's'} most of the class shares (likely handout code) ${commonLines === 1 ? 'was' : 'were'} left out first, so ${commonLines === 1 ? 'it does' : 'they do'} not count toward this score.`);
+    parts.push('A high score is a reason to look closely, not proof of misconduct.');
+    return parts.join(' ');
+  })();
 
   // External / Public source matches for this specific pair (for side-by-side integration)
   const externalA = job?.web_analysis?.submissions?.find((s: WebAnalysisSubmission) => s.name === activeResult?.file_a);
@@ -664,6 +683,13 @@ export default function ResultsPage() {
   const commonCodeLines = Number(job?.summary?.common_code_lines) || 0;
   const commonCodeNote = commonCodeLines > 0
     ? `${commonCodeLines} line${commonCodeLines === 1 ? '' : 's'} shared by at least half of the submissions (likely starter or handout code) ${commonCodeLines === 1 ? 'was' : 'were'} left out of every comparison.`
+    : null;
+  // Previous-term matching: what this check was also compared against.
+  const previousTerm = job?.previous_term;
+  const previousTermNote = previousTerm
+    ? (previousTerm.offerings || []).length > 0
+      ? `Also compared with ${previousTerm.archived_submissions || 0} submission${previousTerm.archived_submissions === 1 ? '' : 's'} from ${(previousTerm.offerings || []).join(', ')}: ${previousTerm.matches || 0} match${previousTerm.matches === 1 ? '' : 'es'} at or above the threshold. Earlier submissions appear in pairs with their course and term in brackets.`
+      : previousTerm.note || null
     : null;
 
   // Keyboard navigation: J/K or ArrowLeft/ArrowRight when drawer is open
@@ -820,6 +846,11 @@ export default function ResultsPage() {
           {commonCodeNote && (
             <div className="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:text-slate-400">
               {commonCodeNote}
+            </div>
+          )}
+          {previousTermNote && (
+            <div className="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              {previousTermNote}
             </div>
           )}
         </Card>
@@ -1259,6 +1290,11 @@ export default function ResultsPage() {
                     </div>
                   </div>
                   <div className="px-5 py-4">
+                    {plainSummary && (
+                      <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2.5 text-sm leading-6 text-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+                        {plainSummary}
+                      </p>
+                    )}
                     {evidenceSignals.length > 0 ? (
                       <div className="space-y-3">
                         {evidenceSignals.map((signal) => (
