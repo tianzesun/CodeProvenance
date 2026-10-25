@@ -136,8 +136,15 @@ function parseCaseResponse(data: unknown): { caseData: CaseData; comments: CaseC
     throw new CaseShapeError('Unexpected case response');
   }
 
+  // The API returns result_ids beside `case`, not inside it, so the page always
+  // showed "Linked results: —". Deduplicate: older links could be stored twice.
+  const resultIds = payload?.case ? payload.result_ids : found.result_ids;
+  const caseData = Array.isArray(resultIds)
+    ? { ...found, result_ids: Array.from(new Set(resultIds.map(String))) }
+    : found;
+
   const comments = payload?.comments ?? found.comments ?? [];
-  return { caseData: found, comments: Array.isArray(comments) ? comments : [] };
+  return { caseData, comments: Array.isArray(comments) ? comments : [] };
 }
 
 function formatDateTime(value: string): string {

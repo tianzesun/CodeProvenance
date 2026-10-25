@@ -17,7 +17,14 @@ from src.backend.application.services.case_service import (
     CaseService,
 )
 from src.backend.config.database import get_db
-from src.backend.models.database import Assignment, Case, CaseComment, User
+from src.backend.models.database import (
+    Assignment,
+    Case,
+    CaseComment,
+    Job,
+    SimilarityResult,
+    User,
+)
 
 router = APIRouter()
 
@@ -332,6 +339,34 @@ def _require_assignment_in_org(
         raise HTTPException(status_code=404, detail="Assignment not found")
 
 
+def _require_result_in_org(
+    db: Session, result_id: uuid.UUID, user: dict, tenant: dict
+) -> None:
+    """404 unless the similarity result belongs to the caller's workspace.
+
+    The result id was never checked: a case could be linked to another
+    tenant's result (which then showed in the case and its export), and an
+    unknown id was a 500 from the foreign key.
+    """
+    row = (
+        db.query(SimilarityResult, Job)
+        .join(Job, Job.id == SimilarityResult.job_id)
+        .filter(SimilarityResult.id == str(result_id))
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Result not found")
+    job = row[1]
+    same_tenant = bool(
+        job.tenant_id and str(job.tenant_id) == str(user.get("tenant_id") or "")
+    )
+    assignment = db.get(Assignment, job.assignment_id) if job.assignment_id else None
+    course = assignment.course if assignment is not None else None
+    same_org = course is not None and str(course.organization_id) == str(tenant["id"])
+    if not (same_tenant or same_org):
+        raise HTTPException(status_code=404, detail="Result not found")
+
+
 # ==================== Routes ====================
 
 
@@ -415,10 +450,11 @@ async def update_case(
     if changed:
         db.commit()
 
-    if payload.status and payload.status != case.status:
-        service.update_status(case_id, payload.status, user["id"])
+    # Assign first so an explicit status in the same update has the last word.
     if payload.investigator_id:
-        service.assign_reviewer(case_id, payload.investigator_id)
+        service.assign_reviewer(case_id, payload.investigator_id, user["id"])
+    if payload.status and payload.status != service.get_case(case_id).status:
+        service.update_status(case_id, payload.status, user["id"])
 
     # Re-read so the response reflects every change, and never serialize None.
     refreshed = service.get_case(case_id)
@@ -439,7 +475,7 @@ async def assign_reviewer(
     service = CaseService(db)
     _load_case_for_tenant(service, case_id, tenant)
     _require_user_in_org(db, payload.reviewer_id, tenant)
-    case = service.assign_reviewer(case_id, payload.reviewer_id)
+    case = service.assign_reviewer(case_id, payload.reviewer_id, user["id"])
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
     return _serialize_case(case)
@@ -456,6 +492,7 @@ async def link_result(
     """Link a similarity result to a case."""
     service = CaseService(db)
     _load_case_for_tenant(service, case_id, tenant)
+    _require_result_in_org(db, payload.result_id, user, tenant)
     link = service.link_result(case_id, payload.result_id)
     return _serialize_result_link(link)
 
