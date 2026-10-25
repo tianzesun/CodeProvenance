@@ -14212,6 +14212,16 @@ SECRET_SETTING_KEYS = {
     "email_password",
     "sendgrid_api_key",
 }
+#: Start-up value of each secret (settings attribute and environment variable),
+#: restored when a workspace has no key of its own. Without it, a key one
+#: workspace saved stayed live for every other workspace until a restart.
+_SERVER_SECRET_BASELINE = {
+    SETTINGS_ATTR_MAP[key]: (
+        getattr(settings, SETTINGS_ATTR_MAP[key], None),
+        os.environ.get(SETTINGS_ATTR_MAP[key]),
+    )
+    for key in SECRET_SETTING_KEYS
+}
 ENGINE_DISPLAY_LABELS = {
     "token": "Token",
     "ast": "AST",
@@ -14363,16 +14373,21 @@ def _apply_runtime_settings_from_record(record: dict[str, Any]) -> None:
         # when the workspace saved its own non-empty value. The merged default
         # is the start-up SecretStr, whose str() is "**********": applying it
         # replaced every server-configured key with asterisks on each request.
+        # A workspace without its own key gets the server's start-up key back.
         if key in SECRET_SETTING_KEYS:
             value = (record or {}).get(key)
             if value and isinstance(value, str):
-                os.environ[attr] = str(value)
-                try:
-                    object.__setattr__(settings, attr, str(value))
-                except Exception:
-                    logger.warning(
-                        "Failed to apply secret setting %s", key, exc_info=True
-                    )
+                live, env_value = str(value), str(value)
+            else:
+                live, env_value = _SERVER_SECRET_BASELINE[attr]
+            if env_value is None:
+                os.environ.pop(attr, None)
+            else:
+                os.environ[attr] = env_value
+            try:
+                object.__setattr__(settings, attr, live)
+            except Exception:
+                logger.warning("Failed to apply secret setting %s", key, exc_info=True)
             continue
 
         if not hasattr(settings, attr):

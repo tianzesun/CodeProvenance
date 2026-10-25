@@ -8,20 +8,29 @@ from fastapi.testclient import TestClient
 from src.backend.api import server
 
 
+@pytest.fixture
+def server_key(monkeypatch):
+    """A server started with OPENAI_API_KEY=server-configured-key."""
+    attr = "OPENAI_API_KEY"
+    key = "server-configured-key"
+    monkeypatch.setitem(server._SERVER_SECRET_BASELINE, attr, (key, key))
+    monkeypatch.setenv(attr, key)
+    before = server.settings.OPENAI_API_KEY
+    yield key
+    object.__setattr__(server.settings, attr, before)
+
+
 def test_saved_settings_do_not_overwrite_server_keys_with_asterisks(
-    monkeypatch,
+    server_key,
 ) -> None:
     """The start-up SecretStr default stringifies to '**********'."""
-    monkeypatch.setenv("OPENAI_API_KEY", "server-configured-key")
 
     server._apply_runtime_settings_from_record({})
 
     assert os.environ["OPENAI_API_KEY"] == "server-configured-key"
 
 
-def test_a_workspaces_own_key_is_still_applied(monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "server-configured-key")
-
+def test_a_workspaces_own_key_is_still_applied(server_key) -> None:
     server._apply_runtime_settings_from_record({"openai_api_key": "workspace-key"})
 
     assert os.environ["OPENAI_API_KEY"] == "workspace-key"
@@ -113,3 +122,23 @@ def test_patch_reports_every_invalid_field(monkeypatch) -> None:
 )
 def test_result_volume_sets_the_results_page_limit(volume, limit) -> None:
     assert server._profile_result_limit({"result_volume": volume}) == limit
+
+
+def test_one_workspaces_key_does_not_carry_over_to_the_next(server_key) -> None:
+    server._apply_runtime_settings_from_record({"openai_api_key": "workspace-a-key"})
+    server._apply_runtime_settings_from_record({})  # workspace B, no key saved
+
+    assert os.environ["OPENAI_API_KEY"] == server_key
+    assert server.settings.OPENAI_API_KEY == server_key
+
+
+def test_embedding_client_receives_the_real_key_not_the_mask() -> None:
+    from pydantic import SecretStr
+
+    from src.backend.engines.similarity.embedding_similarity import (
+        EmbeddingSimilarity,
+    )
+
+    engine = EmbeddingSimilarity(api_key=SecretStr("sk-real"))
+
+    assert engine.api_key == "sk-real"

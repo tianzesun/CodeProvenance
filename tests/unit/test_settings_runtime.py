@@ -114,6 +114,10 @@ class TestApplyRuntimeSettingsFromRecord:
     def test_empty_secret_does_not_wipe_existing_value(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # The server was started with this key; a workspace's blank key keeps it.
+        monkeypatch.setitem(
+            server._SERVER_SECRET_BASELINE, "ANTHROPIC_API_KEY", ("keep-me", "keep-me")
+        )
         monkeypatch.setenv("ANTHROPIC_API_KEY", "keep-me")
         server._apply_runtime_settings_from_record({"anthropic_api_key": ""})
         assert os.environ.get("ANTHROPIC_API_KEY") == "keep-me"
