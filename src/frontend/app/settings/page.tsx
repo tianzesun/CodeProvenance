@@ -749,6 +749,21 @@ export default function SettingsPage() {
 
   // Sends a diagnostic email through the backend's persisted settings. The
   // backend reads what was last saved, so unsaved edits are not used.
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [testWebhookResult, setTestWebhookResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const sendTestWebhook = async () => {
+    setTestingWebhook(true);
+    setTestWebhookResult(null);
+    try {
+      const res = await apiClient.post('/api/settings/webhook/test', {});
+      setTestWebhookResult({ ok: Boolean(res.data?.ok), message: res.data?.message || 'Test completed.' });
+    } catch (err: unknown) {
+      setTestWebhookResult({ ok: false, message: describeError(err, 'The test event could not be sent.') });
+    } finally {
+      setTestingWebhook(false);
+    }
+  };
+
   const sendTestEmail = async () => {
     setTestingEmail(true);
     setTestEmailResult(null);
@@ -2148,6 +2163,26 @@ export default function SettingsPage() {
                   <p className="-mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
                     Receives a signed JSON POST when an analysis finishes or fails, and an alert when one is stuck in the queue. Must be a public https address.
                   </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={sendTestWebhook}
+                      disabled={testingWebhook || dirty || !(settings.webhook_url || '').trim()}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                    >
+                      {testingWebhook ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                      {testingWebhook ? 'Sending...' : 'Send test event'}
+                    </button>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      {dirty ? 'Save first: the test uses the saved URL.' : 'Uses the saved URL.'}
+                    </span>
+                  </div>
+                  {testWebhookResult && (
+                    <div role={testWebhookResult.ok ? 'status' : 'alert'} className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${testWebhookResult.ok ? 'border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300'}`}>
+                      {testWebhookResult.ok ? <CheckCircle size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
+                      <span>{testWebhookResult.message}</span>
+                    </div>
+                  )}
                 </div>
               </Accordion>
 

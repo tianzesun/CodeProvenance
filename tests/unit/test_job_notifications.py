@@ -183,3 +183,47 @@ def test_settings_reject_a_webhook_that_is_not_public_https() -> None:
     with pytest.raises(ValueError):
         server.SETTINGS_VALIDATORS["webhook_url"]("https://127.0.0.1/x")
     assert settings is not None
+
+
+def _admin_client(monkeypatch):
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    from fastapi.testclient import TestClient
+    from jose import jwt as jose_jwt
+
+    from src.backend.api import server
+
+    admin = {"id": str(uuid.uuid4()), "role": "admin", "tenant_id": None}
+    monkeypatch.setattr(server, "_authenticate_request", lambda *a, **k: dict(admin))
+    monkeypatch.setattr(server, "_require_current_user", lambda *a, **k: dict(admin))
+    now = datetime.now(timezone.utc)
+    token = jose_jwt.encode(
+        {"sub": admin["id"], "exp": now + timedelta(minutes=30), "iat": now},
+        settings.auth_jwt_secret or "unit-test-secret",
+        algorithm="HS256",
+    )
+    client = TestClient(server.app)
+    client.cookies.set(server.AUTH_COOKIE_NAME, token)
+    return client
+
+
+def test_the_test_button_posts_to_the_saved_webhook(monkeypatch, override_setting):
+    sent = []
+    monkeypatch.setattr(
+        job_notifications, "post_webhook", lambda url, payload: sent.append(url) or True
+    )
+    override_setting("WEBHOOK_URL", "https://hooks.example.com/t")
+
+    response = _admin_client(monkeypatch).post("/api/settings/webhook/test", json={})
+
+    assert response.json()["ok"] is True
+    assert sent == ["https://hooks.example.com/t"]
+
+
+def test_the_test_button_needs_a_saved_url(monkeypatch, override_setting):
+    override_setting("WEBHOOK_URL", "")
+
+    response = _admin_client(monkeypatch).post("/api/settings/webhook/test", json={})
+
+    assert response.json()["ok"] is False

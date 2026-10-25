@@ -146,8 +146,12 @@ def dispatch_analysis(
     engine_keys_raw: str = "",
     tool_ids_raw: str = "",
     starter_sources: list[str] | None = None,
+    job_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Enqueue analysis on Celery, falling back to in-process execution.
+
+    ``job_overrides`` carries the upload's own choices to a Celery worker,
+    which has no copy of this process's job dict (inline runs share it).
 
     Returns:
         Mapping with ``mode`` (``"celery"`` or ``"inline"``) and, for the
@@ -175,6 +179,7 @@ def dispatch_analysis(
                 engine_keys_raw=engine_keys_raw,
                 tool_ids_raw=tool_ids_raw,
                 starter_sources=starter_sources,
+                job_overrides=job_overrides or None,
             )
             logger.info("Enqueued analysis job %s as Celery task %s", job_id, task.id)
             return {"mode": "celery", "task_id": task.id}

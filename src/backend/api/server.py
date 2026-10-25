@@ -7837,6 +7837,31 @@ def apply_semantic_transforms(code: str, language: str) -> str:
     return code
 
 
+#: Per-upload choices that outrank workspace settings for one job.
+UPLOAD_CHOICE_KEYS = ("source_scan_enabled_override", "previous_term_override")
+
+
+def _upload_choices(job_id: str) -> dict[str, Any]:
+    job = _jobs.get(job_id) or {}
+    return {key: job[key] for key in UPLOAD_CHOICE_KEYS if key in job}
+
+
+def _previous_term_override(value: str | None) -> str | JSONResponse | None:
+    """Validate an upload's previous-term choice (None = workspace setting)."""
+    if value in (None, ""):
+        return None
+    choice = str(value).strip().lower()
+    if choice not in ("off", *previous_term.MODES):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "previous_term_matching must be off, same_course_only "
+                "or all_historical_courses"
+            },
+        )
+    return choice
+
+
 def _discard_upload(job_id: str, job_dir: PathLib) -> None:
     """Drop a rejected upload's directory AND its in-memory job entry.
 
@@ -7926,6 +7951,8 @@ async def upload_files(
     # None = not sent: the workspace/assignment setting decides (a True default
     # here switched the scan on for API clients whose workspace turned it off).
     source_scan_enabled: bool | None = Form(default=None),
+    # None = the workspace's Previous Term Matching setting decides.
+    previous_term_matching: str | None = Form(default=None),
 ):
     # Anonymous callers only reach this when ALLOW_ANONYMOUS_ANALYSIS is set.
     current_user = getattr(request.state, "user", None)
@@ -7937,11 +7964,19 @@ async def upload_files(
     access_error = _assignment_access_error(current_user, assignment_id)
     if access_error:
         return access_error
+    previous_term_override = _previous_term_override(previous_term_matching)
+    if isinstance(previous_term_override, JSONResponse):
+        return previous_term_override
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
         **(
             {"source_scan_enabled_override": source_scan_enabled}
             if source_scan_enabled is not None
+            else {}
+        ),
+        **(
+            {"previous_term_override": previous_term_override}
+            if previous_term_override
             else {}
         ),
         "status": "processing",
@@ -8003,6 +8038,7 @@ async def upload_files(
         engine_keys_raw=engine_keys,
         tool_ids_raw=tool_ids,
         starter_sources=starter_sources,
+        job_overrides=_upload_choices(job_id),
     )
     return JSONResponse(content={"job_id": job_id, "status": "processing"})
 
@@ -8022,6 +8058,8 @@ async def upload_zip(
     # None = not sent: the workspace/assignment setting decides (a True default
     # here switched the scan on for API clients whose workspace turned it off).
     source_scan_enabled: bool | None = Form(default=None),
+    # None = the workspace's Previous Term Matching setting decides.
+    previous_term_matching: str | None = Form(default=None),
 ):
     # Anonymous callers only reach this when ALLOW_ANONYMOUS_ANALYSIS is set.
     current_user = getattr(request.state, "user", None)
@@ -8036,11 +8074,19 @@ async def upload_zip(
             status_code=400, content={"error": "Please upload a .zip file"}
         )
 
+    previous_term_override = _previous_term_override(previous_term_matching)
+    if isinstance(previous_term_override, JSONResponse):
+        return previous_term_override
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
         **(
             {"source_scan_enabled_override": source_scan_enabled}
             if source_scan_enabled is not None
+            else {}
+        ),
+        **(
+            {"previous_term_override": previous_term_override}
+            if previous_term_override
             else {}
         ),
         "status": "processing",
@@ -8111,6 +8157,7 @@ async def upload_zip(
         engine_keys_raw=engine_keys,
         tool_ids_raw=tool_ids,
         starter_sources=starter_sources,
+        job_overrides=_upload_choices(job_id),
     )
     return JSONResponse(content={"job_id": job_id, "status": "processing"})
 
@@ -9126,6 +9173,7 @@ async def _run_analysis_in_workspace(
     # Preserve the per-submission source-scan override set by the upload
     # endpoint. `_jobs[job_id]` is fully rebuilt below, so capture it first.
     _source_scan_override = _jobs.get(job_id, {}).get("source_scan_enabled_override")
+    _previous_term_choice = _jobs.get(job_id, {}).get("previous_term_override")
     # Guest flags are set by the upload endpoint and must survive this rebuild,
     # otherwise the job would quietly become a persisted, workspace-less job.
     _guest_flags = _guest_job_flags(current_user)
@@ -9176,6 +9224,8 @@ async def _run_analysis_in_workspace(
     }
     if _source_scan_override is not None:
         _jobs[job_id]["source_scan_enabled_override"] = bool(_source_scan_override)
+    if _previous_term_choice:
+        _jobs[job_id]["previous_term_override"] = _previous_term_choice
     _persist_job(job_id)
 
     try:
@@ -9394,6 +9444,8 @@ async def _run_analysis_in_workspace(
         # loop stays responsive to other requests while a job analyzes.
         # The Review & Workflow profile used to be stored and never read.
         profile = settings_payload.get("professor_profile") or {}
+        if _previous_term_choice:  # this upload's own choice wins
+            profile = {**profile, "previous_term_matching": _previous_term_choice}
         starter_mode = profile.get("starter_code_handling", "student_written_only")
         results, report = await run_in_threadpool(
             _run_analysis_engines,
@@ -18250,6 +18302,33 @@ async def test_email_delivery(request: Request) -> dict[str, Any]:
             f"Test email accepted by the '{backend}' backend."
             if ok
             else "Delivery failed. Check the backend configuration and credentials."
+        ),
+    }
+
+
+@app.post("/api/settings/webhook/test")
+async def test_webhook_delivery(request: Request) -> dict[str, Any]:
+    """POST a signed test event to the workspace's saved webhook URL."""
+    _require_current_user(request, admin_only=True)
+    from src.backend.application.services.job_notifications import post_webhook
+
+    raw = settings.WEBHOOK_URL
+    url = (raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw) or ""
+    if not url.strip():
+        return {"ok": False, "message": "Save a webhook URL first."}
+    payload = {
+        "event": "test",
+        "message": "IntegrityDesk webhook test",
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ok = await run_in_threadpool(post_webhook, url.strip(), payload)
+    return {
+        "ok": bool(ok),
+        "message": (
+            "The receiver accepted the test event."
+            if ok
+            else "The test event was not accepted. Check that the URL is a public "
+            "https address and that the receiver answers with a 2xx status."
         ),
     }
 

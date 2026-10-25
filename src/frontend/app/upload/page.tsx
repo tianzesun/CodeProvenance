@@ -327,6 +327,8 @@ export default function UploadPage() {
   const [uploadInFlight, setUploadInFlight] = useState(false);
   const [modeRestored, setModeRestored] = useState(false);
   const [sourceScanEnabled, setSourceScanEnabled] = useState(true);
+  // '' = use the workspace's Previous Term Matching setting.
+  const [previousTermChoice, setPreviousTermChoice] = useState('');
   const [tenantExternalScanEnabled, setTenantExternalScanEnabled] = useState<boolean | null>(null);
 
   // Course / assignment picker (options are read from the database)
@@ -738,6 +740,7 @@ export default function UploadPage() {
     fd.append('threshold', String(threshold));
     fd.append('engine_weights', sendWeights ? JSON.stringify(normalizeWeights(engineWeights)) : '{}');
     fd.append('source_scan_enabled', String(effectiveSourceScan));
+    if (previousTermChoice) fd.append('previous_term_matching', previousTermChoice);
     try {
       const url = zipFile ? '/api/upload-zip' : '/api/upload';
       // No manual Content-Type: the browser has to add the multipart boundary itself.
@@ -1380,6 +1383,26 @@ export default function UploadPage() {
                   </span>
                 </span>
               </label>
+            </div>
+
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 dark:border-slate-800 dark:bg-slate-900/50">
+              <label htmlFor="previous-term-choice" className="block text-sm font-semibold text-slate-900 dark:text-white">
+                Compare with earlier terms
+              </label>
+              <select
+                id="previous-term-choice"
+                value={previousTermChoice}
+                onChange={(e) => setPreviousTermChoice(e.target.value)}
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+              >
+                <option value="">Use my workspace setting</option>
+                <option value="off">Off for this check</option>
+                <option value="same_course_only">Earlier offerings of this course</option>
+                <option value="all_historical_courses">All my earlier courses</option>
+              </select>
+              <span className="mt-1.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">
+                Checks each submission against stored submissions from earlier analyses of courses you can open. Earlier offerings need the same course code.
+              </span>
             </div>
 
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
