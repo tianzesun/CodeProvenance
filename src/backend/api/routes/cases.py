@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session, selectinload
 
+from src.backend.application.services import academic_access, sharing
 from src.backend.application.services.case_service import (
     CaseService,
 )
@@ -310,14 +311,20 @@ def get_current_tenant(user: dict = Depends(get_current_user)) -> dict:
 # ==================== Tenant-scoping helpers ====================
 
 
-def _load_case_for_tenant(service: CaseService, case_id: uuid.UUID, tenant: dict):
-    """Fetch a case, requiring it to belong to the caller's organization.
+def _load_case_for_tenant(
+    service: CaseService, case_id: uuid.UUID, tenant: dict, user: dict
+):
+    """Fetch a case the caller may see (application/services/sharing).
 
-    A case in another organization is reported as 404, not 403, so ids from
-    other tenants cannot be probed.
+    It must be in the caller's organization and theirs, shared with them, or
+    under a course they teach; any professor in the organization used to
+    reach every case. Reported as 404, not 403, so ids cannot be probed.
     """
     case = service.get_case(case_id)
     if case is None or str(case.organization_id) != str(tenant["id"]):
+        raise HTTPException(status_code=404, detail="Case not found")
+    scope = sharing.access_scope(service.db, user)
+    if not sharing.case_in_scope(service.db, case, user, scope):
         raise HTTPException(status_code=404, detail="Case not found")
     return case
 
@@ -374,16 +381,22 @@ def _require_result_in_org(
 async def list_cases(
     status: str | None = Query(None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$"),
     limit: int = Query(100, ge=1, le=1000),
+    user=Depends(get_current_user),
     tenant=Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    """List cases for the current tenant/organization."""
+    """List the organization's cases the caller may see."""
     service = CaseService(db)
-    cases = service.get_cases_by_organization(
-        organization_id=tenant["id"],
-        status=status,
-        limit=limit,
-    )
+    scope = sharing.access_scope(db, user)
+    # Fetch the organization's cases, then keep the caller's; a small limit
+    # applied before filtering could hide every case they can see.
+    cases = [
+        case
+        for case in service.get_cases_by_organization(
+            organization_id=tenant["id"], status=status, limit=1000
+        )
+        if sharing.case_in_scope(db, case, user, scope)
+    ][:limit]
     _preload_case_relations(db, cases)
     return [_serialize_case(c) for c in cases]
 
@@ -398,6 +411,11 @@ async def create_case(
     """Create a new investigation case."""
     if payload.assignment_id is not None:
         _require_assignment_in_org(db, payload.assignment_id, tenant)
+        course_id = academic_access.course_id_for_assignment(
+            db, str(payload.assignment_id)
+        )
+        if not academic_access.can_read_course(db, user, course_id):
+            raise HTTPException(status_code=404, detail="Assignment not found")
     service = CaseService(db)
     case = service.create_case(
         organization_id=tenant["id"],
@@ -418,7 +436,7 @@ async def get_case(
 ):
     """Get a case with all linked results and comments."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     case_data = service.get_case_with_results(case_id)
     if not case_data:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -435,7 +453,7 @@ async def update_case(
 ):
     """Update a case (title, priority, status and/or investigator)."""
     service = CaseService(db)
-    case = _load_case_for_tenant(service, case_id, tenant)
+    case = _load_case_for_tenant(service, case_id, tenant, user)
     if payload.investigator_id:
         _require_user_in_org(db, payload.investigator_id, tenant)
 
@@ -473,7 +491,7 @@ async def assign_reviewer(
 ):
     """Assign a reviewer to a case."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     _require_user_in_org(db, payload.reviewer_id, tenant)
     case = service.assign_reviewer(case_id, payload.reviewer_id, user["id"])
     if not case:
@@ -491,7 +509,7 @@ async def link_result(
 ):
     """Link a similarity result to a case."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     _require_result_in_org(db, payload.result_id, user, tenant)
     link = service.link_result(case_id, payload.result_id)
     return _serialize_result_link(link)
@@ -507,7 +525,7 @@ async def add_comment(
 ):
     """Add a comment to a case."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     comment = service.add_comment(case_id, user["id"], payload.body)
     return _serialize_comment(comment)
 
@@ -521,7 +539,7 @@ async def get_timeline(
 ):
     """Get timeline events for a case."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     events = service.timeline.get_case_timeline(case_id)
     return [_serialize_orm_event(e) for e in events]
 
@@ -535,7 +553,7 @@ async def export_case(
 ):
     """Export case data as JSON for audit purposes."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     case_data = service.get_case_with_results(case_id)
     if not case_data:
         raise HTTPException(status_code=404, detail="Case not found")

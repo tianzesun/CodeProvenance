@@ -23,11 +23,17 @@ unit-testable without a database.
 
 from __future__ import annotations
 
-from sqlalchemy import false
+from sqlalchemy import cast, false, or_
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Query, Session
 
 from src.backend.api.middleware.auth import has_permission
-from src.backend.models.database import Assignment, Course, CourseInstructor
+from src.backend.models.database import (
+    Assignment,
+    Course,
+    CourseInstructor,
+    ResourceShare,
+)
 
 #: 403 message used whenever a caller may not manage a course's assignments.
 #: Worded for both failure modes: an admin (whose role holds no
@@ -102,9 +108,26 @@ def visible_course_id_query(db: Session, user: dict | None) -> Query:
     if not user_id:
         # No identity and no registry rights: match nothing rather than all.
         return db.query(Course.id).filter(false())
-    return db.query(CourseInstructor.course_id).filter(
+    taught = db.query(CourseInstructor.course_id).filter(
         CourseInstructor.user_id == user_id
     )
+    # Plus courses an instructor shared with this user or their workspace
+    # (see application/services/sharing).
+    shared = db.query(cast(ResourceShare.resource_id, UUID(as_uuid=False))).filter(
+        ResourceShare.resource_type == "course", _share_audience(user)
+    )
+    return taught.union(shared)
+
+
+def _share_audience(user: dict | None):
+    """Shares addressed to this user or to their workspace."""
+    clauses = []
+    if _user_id(user):
+        clauses.append(ResourceShare.shared_with_user_id == _user_id(user))
+    workspace = (user or {}).get("organization_id") or (user or {}).get("tenant_id")
+    if workspace:
+        clauses.append(ResourceShare.shared_with_workspace == str(workspace))
+    return or_(*clauses) if clauses else false()
 
 
 def can_read_course(db: Session, user: dict | None, course_id: str) -> bool:
@@ -124,7 +147,20 @@ def can_read_course(db: Session, user: dict | None, course_id: str) -> bool:
             .first()
             is not None
         )
-    return is_course_instructor(db, user, course_id)
+    if is_course_instructor(db, user, course_id):
+        return True
+    if not _user_id(user):
+        return False
+    return (
+        db.query(ResourceShare.id)
+        .filter(
+            ResourceShare.resource_type == "course",
+            ResourceShare.resource_id == str(course_id),
+            _share_audience(user),
+        )
+        .first()
+        is not None
+    )
 
 
 def can_manage_course_assignments(

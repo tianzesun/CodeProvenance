@@ -57,7 +57,7 @@ from fastapi.responses import (
 )
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
 
@@ -86,7 +86,7 @@ from src.backend.infrastructure.security import (
 os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
 if settings.MOSS_USER_ID:
     os.environ.setdefault("MOSS_USER_ID", settings.MOSS_USER_ID)
-from src.backend.application.services import academic_access
+from src.backend.application.services import academic_access, sharing
 from src.backend.application.services.similarity_cohort import (
     COHORT_DISCLOSURE,
     CohortContext,
@@ -5807,14 +5807,29 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
         return cached[1]
 
     jobs_by_id: dict[str, dict[str, Any]] = {}
+    scope = sharing.AccessScope(None, None, None, False)
 
     # 1. DB-backed listing (primary source)
     try:
         with SessionLocal() as db:
+            scope = sharing.access_scope(db, current_user)
             tenant_id = current_user.get("tenant_id") if current_user else None
             q = db.query(Job)
-            if tenant_id:
-                q = q.filter(Job.tenant_id == tenant_id)
+            if not scope.is_platform_admin:
+                # Candidates only; _job_is_accessible decides. Shared jobs and
+                # jobs under a reachable course can sit in another tenant.
+                reachable = [Job.id.in_(scope.shared_job_ids)]
+                if tenant_id:
+                    reachable.append(Job.tenant_id == tenant_id)
+                if scope.course_ids:
+                    reachable.append(
+                        Job.assignment_id.in_(
+                            db.query(Assignment.id).filter(
+                                Assignment.course_id.in_(scope.course_ids)
+                            )
+                        )
+                    )
+                q = q.filter(or_(*reachable))
             db_jobs = q.order_by(Job.created_at.desc()).limit(500).all()
             assignment_ids = [row.assignment_id for row in db_jobs if row.assignment_id]
             assignment_courses = {}
@@ -5827,7 +5842,7 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             for db_job in db_jobs:
                 loaded = _get_job(db_job.id)
-                if loaded and _job_is_accessible(loaded, current_user):
+                if loaded and _job_is_accessible(loaded, current_user, scope):
                     loaded["assignment_id"] = (
                         str(db_job.assignment_id) if db_job.assignment_id else None
                     )
@@ -5842,7 +5857,7 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
     for job_id, job in _jobs.items():
         if job_id not in jobs_by_id:
             normalized = _normalize_job(job)
-            if _job_is_accessible(normalized, current_user):
+            if _job_is_accessible(normalized, current_user, scope):
                 jobs_by_id[job_id] = normalized
 
     # 3. Filesystem fallback (legacy jobs without DB rows)
@@ -5852,7 +5867,7 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             if report_dir.name not in jobs_by_id:
                 job = _get_job(report_dir.name)
-                if job and _job_is_accessible(job, current_user):
+                if job and _job_is_accessible(job, current_user, scope):
                     jobs_by_id[report_dir.name] = job
 
     result = sorted(
@@ -14633,7 +14648,11 @@ def _require_non_guest(request: Request) -> dict[str, Any]:
     return user
 
 
-def _job_is_accessible(job: dict[str, Any], user: dict[str, Any] | None) -> bool:
+def _job_is_accessible(
+    job: dict[str, Any],
+    user: dict[str, Any] | None,
+    scope: sharing.AccessScope | None = None,
+) -> bool:
     # Deny access if no user is authenticated (except for guest jobs)
     if user is None:
         # Guest access applies to unowned jobs. Jobs persisted to the DB always
@@ -14650,18 +14669,45 @@ def _job_is_accessible(job: dict[str, Any], user: dict[str, Any] | None) -> bool
             return False
         return str(job.get("owner_user_id") or "") == str(user.get("id") or "")
 
-    if user.get("role") == "admin":
-        return True
-
     owner_user_id = str(job.get("owner_user_id") or "")
-    if owner_user_id and owner_user_id == user.get("id"):
+    if owner_user_id and owner_user_id == str(user.get("id") or ""):
         return True
 
+    if scope is None:
+        with SessionLocal() as db:
+            scope = sharing.access_scope(db, user)
+    return _job_in_scope(job, scope)
+
+
+def _job_in_scope(job: dict[str, Any], scope: sharing.AccessScope) -> bool:
+    """Non-owner access: shared with the caller, or under a course they reach.
+
+    Same-tenant users used to see every job, and admins every job in every
+    organization. Professors now see their own and shared work; admins see
+    their own organization's (application/services/sharing).
+    """
+    if str(job.get("id") or "") in scope.shared_job_ids:
+        return True
+    if scope.is_platform_admin:
+        return True
+    course_id = _assignment_course_id(job.get("assignment_id"))
+    if course_id and course_id in scope.course_ids:
+        return True
     tenant_id = str(job.get("tenant_id") or "")
-    if tenant_id and tenant_id == user.get("tenant_id"):
-        return True
+    return bool(scope.is_admin and tenant_id and tenant_id == scope.tenant_id)
 
-    return False
+
+@functools.lru_cache(maxsize=4096)
+def _assignment_course_id(assignment_id: str | None) -> str | None:
+    """Course of an assignment (assignments never move between courses)."""
+    if not assignment_id:
+        return None
+    try:
+        with SessionLocal() as db:
+            return academic_access.course_id_for_assignment(db, str(assignment_id))
+    except SQLAlchemyError:
+        logger.warning("Could not resolve course for assignment %s", assignment_id)
+        return None
 
 
 def _require_job_access(job_id: str, request: Request) -> dict[str, Any]:

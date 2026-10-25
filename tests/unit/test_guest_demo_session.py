@@ -295,8 +295,13 @@ class TestGuestJobAccess:
         assert server._job_is_accessible(self.own_job, professor) is False
         assert server._job_is_accessible(self.own_job, other_professor) is False
 
-    def test_admins_keep_their_unrestricted_view(self) -> None:
+    def test_workspace_admins_do_not_see_guest_jobs(self) -> None:
+        """Admins are scoped to their organization; a guest job is in none."""
         admin = {"id": "admin-1", "role": "admin", "tenant_id": "tenant-1"}
+        assert server._job_is_accessible(self.own_job, admin) is False
+
+    def test_platform_admins_keep_their_unrestricted_view(self) -> None:
+        admin = {"id": "admin-1", "role": "admin"}
         assert server._job_is_accessible(self.own_job, admin) is True
 
     def test_guest_job_flags_are_only_set_for_guests(self) -> None:
