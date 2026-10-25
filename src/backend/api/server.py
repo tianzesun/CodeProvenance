@@ -7913,7 +7913,9 @@ async def upload_files(
     threshold: float = Form(default=0.5, ge=0.0, le=1.0),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
-    source_scan_enabled: bool = Form(default=True),
+    # None = not sent: the workspace/assignment setting decides (a True default
+    # here switched the scan on for API clients whose workspace turned it off).
+    source_scan_enabled: bool | None = Form(default=None),
 ):
     # Anonymous callers only reach this when ALLOW_ANONYMOUS_ANALYSIS is set.
     current_user = getattr(request.state, "user", None)
@@ -7927,7 +7929,11 @@ async def upload_files(
         return access_error
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
-        "source_scan_enabled_override": source_scan_enabled,
+        **(
+            {"source_scan_enabled_override": source_scan_enabled}
+            if source_scan_enabled is not None
+            else {}
+        ),
         "status": "processing",
         "progress": _new_job_progress(),
         # Ownership is stamped at creation, not only when the background
@@ -8003,7 +8009,9 @@ async def upload_zip(
     threshold: float = Form(default=0.5, ge=0.0, le=1.0),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
-    source_scan_enabled: bool = Form(default=True),
+    # None = not sent: the workspace/assignment setting decides (a True default
+    # here switched the scan on for API clients whose workspace turned it off).
+    source_scan_enabled: bool | None = Form(default=None),
 ):
     # Anonymous callers only reach this when ALLOW_ANONYMOUS_ANALYSIS is set.
     current_user = getattr(request.state, "user", None)
@@ -8020,7 +8028,11 @@ async def upload_zip(
 
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
-        "source_scan_enabled_override": source_scan_enabled,
+        **(
+            {"source_scan_enabled_override": source_scan_enabled}
+            if source_scan_enabled is not None
+            else {}
+        ),
         "status": "processing",
         "progress": _new_job_progress(),
         # Ownership is stamped at creation, not only when the background
@@ -8793,6 +8805,19 @@ def _processing_batch_workers() -> int:
     return max(1, min(workers, _MAX_PROCESSING_BATCH_WORKERS))
 
 
+def _profile_result_limit(profile: dict[str, Any]) -> int | None:
+    """How many pairs the results page lists by default (None = all)."""
+    from src.backend.engines.scoring.professor_profiles import (
+        professor_profile_catalog,
+    )
+
+    choice = profile.get("result_volume", "top_25")
+    for option in professor_profile_catalog().get("result_volume", []):
+        if option.get("id") == choice:
+            return option.get("limit")
+    return 25
+
+
 def _run_analysis_engines(
     selected_tool_ids,
     submissions,
@@ -8802,6 +8827,7 @@ def _run_analysis_engines(
     fusion_weights,
     starter_sources,
     progress_callback: Callable[[int, int, str, str], None] | None = None,
+    infer_common_code: bool = True,
 ):
     """Run the selected comparison engines and build the report.
 
@@ -8817,6 +8843,8 @@ def _run_analysis_engines(
         threshold: Similarity threshold used for risk classification.
         fusion_weights: Engine weights for the fusion scorer.
         starter_sources: Optional instructor starter code to strip first.
+        infer_common_code: Also strip code most of the class shares
+            (the workspace's starter-code handling setting).
         progress_callback: Optional ``callback(completed, total, file_a, file_b)``
             forwarded to the batch service so the upload page can show which
             pair is being compared right now.
@@ -8826,7 +8854,7 @@ def _run_analysis_engines(
             threshold=threshold,
             weights=fusion_weights or None,
             starter_sources=starter_sources,
-            infer_common_code=True,
+            infer_common_code=infer_common_code,
             min_evidence_tokens=MIN_EVIDENCE_TOKENS,
         )
         results = service.compare_all_pairs(
@@ -9215,6 +9243,9 @@ async def _run_analysis(
         )
         # The engine work is CPU-bound and synchronous; offload it so the event
         # loop stays responsive to other requests while a job analyzes.
+        # The Review & Workflow profile used to be stored and never read.
+        profile = settings_payload.get("professor_profile") or {}
+        starter_mode = profile.get("starter_code_handling", "student_written_only")
         results, report = await run_in_threadpool(
             _run_analysis_engines,
             selected_tool_ids,
@@ -9223,23 +9254,32 @@ async def _run_analysis(
             external_tool_results,
             threshold,
             fusion_weights,
-            starter_sources,
+            # "Compare everything" keeps uploaded starter code in the comparison.
+            [] if starter_mode == "include_starter_code" else starter_sources,
             _pair_progress_callback(job_id),
+            starter_mode == "student_written_only",
         )
+        _jobs[job_id]["result_limit"] = _profile_result_limit(profile)
 
         _jobs[job_id]["external_tool_results"] = external_tool_results
         _persist_job(job_id)
-        _set_job_progress(
-            job_id,
-            "ai_detection",
-            detail=f"Scoring {len(submissions)} submissions for AI authorship signals",
-            completed_units=0,
-            total_units=len(submissions),
-            unit="submissions",
-        )
         # AI detection is CPU-bound (and may load a local code LM); offload it
-        # like the engine work so the event loop stays responsive.
-        ai_detection = await run_in_threadpool(_build_ai_detection_summary, submissions)
+        # like the engine work so the event loop stays responsive. The workspace
+        # can switch it off for similarity-only checks.
+        if profile.get("ai_rewrite_detection") == "off":
+            ai_detection = {}
+        else:
+            _set_job_progress(
+                job_id,
+                "ai_detection",
+                detail=f"Scoring {len(submissions)} submissions for AI authorship signals",
+                completed_units=0,
+                total_units=len(submissions),
+                unit="submissions",
+            )
+            ai_detection = await run_in_threadpool(
+                _build_ai_detection_summary, submissions
+            )
 
         if settings_payload.get("source_scan_enabled"):
             _set_job_progress(
@@ -14002,7 +14042,7 @@ USER_EDITABLE_SETTINGS_DEFAULTS: dict[str, Any] = {
         "assignment_type": "auto_detect",
         "sensitivity": "balanced",
         "starter_code_handling": "student_written_only",
-        "previous_term_matching": "same_course_only",
+        "previous_term_matching": "off",
         "ai_rewrite_detection": "balanced",
         "result_volume": "top_25",
     },
@@ -14159,6 +14199,10 @@ SETTINGS_ATTR_MAP = {
     "v1_system_limits": None,
 }
 
+#: Server-wide switches a workspace admin may not change: debug_mode relaxes the
+#: password policy and authentication for every workspace in the process.
+PLATFORM_ONLY_SETTING_KEYS = frozenset({"debug_mode"})
+
 SECRET_SETTING_KEYS = {
     "openai_api_key",
     "anthropic_api_key",
@@ -14311,14 +14355,17 @@ def _apply_runtime_settings_from_record(record: dict[str, Any]) -> None:
     merged = {**USER_EDITABLE_SETTINGS_DEFAULTS, **(record or {})}
     merged["engine_weights"] = _normalize_engine_weights(merged.get("engine_weights"))
     for key, attr in SETTINGS_ATTR_MAP.items():
-        if attr is None or key not in merged:
+        if attr is None or key not in merged or key in PLATFORM_ONLY_SETTING_KEYS:
             continue
         value = merged[key]
 
         # Secret-like settings: mirror into env (and the settings object) only
-        # when a non-empty value was provided; empty means "leave unchanged".
+        # when the workspace saved its own non-empty value. The merged default
+        # is the start-up SecretStr, whose str() is "**********": applying it
+        # replaced every server-configured key with asterisks on each request.
         if key in SECRET_SETTING_KEYS:
-            if value:
+            value = (record or {}).get(key)
+            if value and isinstance(value, str):
                 os.environ[attr] = str(value)
                 try:
                     object.__setattr__(settings, attr, str(value))
@@ -17643,6 +17690,89 @@ async def suggest_assignment_mode(request: Request) -> dict[str, Any]:
     )
 
 
+def _number_setting(minimum: float, maximum: float, integer: bool = True):
+    """Validator: a number in ``[minimum, maximum]`` (an int when ``integer``)."""
+
+    def check(value: Any) -> int | float:
+        if isinstance(value, bool):
+            raise ValueError("must be a number")
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("must be a number") from None
+        if integer and not number.is_integer():
+            raise ValueError("must be a whole number")
+        if not minimum <= number <= maximum:
+            raise ValueError(f"must be between {minimum:g} and {maximum:g}")
+        return int(number) if integer else number
+
+    return check
+
+
+def _choice_setting(*choices: str):
+    """Validator: one of ``choices`` (case-insensitive)."""
+
+    def check(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text not in choices:
+            raise ValueError(f"must be one of: {', '.join(choices)}")
+        return text
+
+    return check
+
+
+def _url_setting(value: Any) -> str:
+    """Validator: empty, or an http(s) URL."""
+    text = str(value or "").strip()
+    if text and urlparse(text).scheme not in ("http", "https"):
+        raise ValueError("must be an http:// or https:// URL")
+    return text.rstrip("/") if text else ""
+
+
+def _device_setting(value: Any) -> str:
+    """Same rule as AppSettings.EMBEDDING_DEVICE: auto, cpu, mps, cuda or cuda:N."""
+    text = str(value or "").strip().lower()
+    if not re.fullmatch(r"auto|cpu|mps|cuda(:\d+)?", text):
+        raise ValueError("must be auto, cpu, mps, cuda or cuda:N")
+    return text
+
+
+def _bool_setting(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError("must be true or false")
+
+
+def _email_setting(value: Any) -> str:
+    text = str(value or "").strip()
+    if text and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text):
+        raise ValueError("must be an email address")
+    return text
+
+
+#: Server-side checks for workspace settings (PATCH /api/settings).
+SETTINGS_VALIDATORS: dict[str, Callable[[Any], Any]] = {
+    "default_threshold": _number_setting(0.05, 0.99, integer=False),
+    "max_file_size_mb": _number_setting(1, 4096),
+    "max_files_per_job": _number_setting(2, 100000),
+    "batch_size": _number_setting(1, 10000),
+    "embedding_batch_size": _number_setting(1, 4096),
+    "embedding_server_port": _number_setting(1, 65535),
+    "email_port": _number_setting(1, 65535),
+    "embedding_device": _device_setting,
+    "embedding_runtime": _choice_setting(
+        "local_unixcoder", "local", "unixcoder", "remote_openai_compatible", "none"
+    ),
+    "email_backend": _choice_setting("console", "smtp", "sendgrid"),
+    "email_use_tls": _bool_setting,
+    "email_from": _email_setting,
+    "source_scan_enabled": _bool_setting,
+    "webhook_url": _url_setting,
+    "openai_base_url": _url_setting,
+    "embedding_server_url": _url_setting,
+}
+
+
 @app.patch("/api/settings")
 async def update_settings(request: Request):
     current_user = _require_current_user(request, admin_only=True)
@@ -17653,6 +17783,23 @@ async def update_settings(request: Request):
             status_code=400,
             detail="Admin account is not attached to a workspace tenant",
         )
+    # Validate before anything is stored: values such as a -5 threshold, 0
+    # files per job or port "abc" used to be saved and then broke analysis.
+    errors: dict[str, str] = {}
+    for key in list(data):
+        if key in PLATFORM_ONLY_SETTING_KEYS:
+            errors[key] = "is a server-wide setting and cannot be changed here"
+            continue
+        if key in SETTINGS_VALIDATORS:
+            try:
+                data[key] = SETTINGS_VALIDATORS[key](data[key])
+            except ValueError as exc:
+                errors[key] = str(exc)
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Some settings are invalid", "fields": errors},
+        )
 
     with SessionLocal() as db:
         tenant = db.get(Tenant, tenant_id)
@@ -17662,7 +17809,6 @@ async def update_settings(request: Request):
         stored_settings = dict(tenant.settings or {})
         applied = {}
         ignored: dict[str, str] = {}
-        env_updates: dict[str, Any] = {}
 
         for key, value in data.items():
             if key not in SETTINGS_ATTR_MAP and key != "professor_profile":
@@ -17729,8 +17875,6 @@ async def update_settings(request: Request):
                 applied[key] = bool(value) if key in SECRET_SETTING_KEYS else value
             if key == "professor_profile":
                 continue
-            if key in SECRET_SETTING_KEYS and value:
-                env_updates[SETTINGS_ATTR_MAP[key]] = value
 
         # When only a professor profile is sent (no explicit engine weights),
         # derive and persist the profile-based weights so the advanced sliders
@@ -17762,8 +17906,9 @@ async def update_settings(request: Request):
         db.add(tenant)
         db.commit()
 
-    if env_updates:
-        _persist_env_settings(env_updates)
+    # Secrets are not written to src/backend/.env.local any more: that one file
+    # is every workspace's start-up config, so the last admin's keys became all
+    # workspaces' defaults. They are applied from the workspace record instead.
 
     _apply_runtime_settings_from_record(stored_settings)
 
@@ -17784,9 +17929,13 @@ async def update_settings(request: Request):
             proposed_weights,
             data.get("weight_governance_evidence"),
         )
-        engine_config["weights"] = proposed_weights
+        # Same rule as PUT /api/settings/engine-config: a change that needs
+        # validation evidence it does not have is not applied (it was written
+        # to the shared config anyway, bypassing governance).
         if governance_result.requires_validation and not governance_result.allowed:
             engine_config.setdefault("advanced", {})["weights_need_validation"] = True
+        else:
+            engine_config["weights"] = proposed_weights
         submitted_evidence = data.get("weight_governance_evidence")
         _record_weight_audit(
             "weights_updated",

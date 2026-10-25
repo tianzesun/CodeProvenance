@@ -16,7 +16,8 @@ def test_default_professor_profile_is_auto_balanced_top_25() -> None:
     assert applied.profile.assignment_type == "auto_detect"
     assert applied.profile.sensitivity == "balanced"
     assert applied.profile.starter_code_handling == "student_written_only"
-    assert applied.profile.previous_term_matching == "same_course_only"
+    # Cross-term matching is not built yet, so it defaults to off.
+    assert applied.profile.previous_term_matching == "off"
     assert applied.profile.result_volume == "top_25"
     assert applied.result_limit == 25
     assert applied.threshold == 0.75
@@ -71,7 +72,12 @@ def test_legacy_assignment_profile_ids_are_mapped_to_five_profile_model() -> Non
 
 def test_notebook_profile_uses_cell_aware_custom_logic_policy() -> None:
     """Notebook assignments should suppress notebook boilerplate and import noise."""
-    applied = apply_professor_profile({"assignment_type": "notebook_data_analysis"})
+    applied = apply_professor_profile(
+        {
+            "assignment_type": "notebook_data_analysis",
+            "previous_term_matching": "same_course_only",
+        }
+    )
 
     assert applied.weights["history"] > applied.weights["ast"]
     assert applied.policy["cell_aware_compare"] is True

@@ -513,6 +513,10 @@ export default function ResultsPage() {
   const legacyJobStatus = results.some((r) => 'review_status' in r) ? null : job?.review_status || null;
   const statusOf = (r) => pairStatuses[pairKey(r)] || r.review_status || legacyJobStatus || 'unreviewed';
 
+  // The workspace's "pairs shown" setting, stamped on the job at analysis time.
+  const resultLimit = Number(job?.result_limit) > 0 ? Number(job.result_limit) : null;
+  const [showAllPairs, setShowAllPairs] = useState(false);
+
   // === New ranked + filterable table data (client-side, no new API) ===
   const tableData = useMemo(() => {
     const base = results;
@@ -565,9 +569,19 @@ export default function ResultsPage() {
       return b._score - a._score;
     });
 
+    // Keep the N highest-scoring matching pairs (in the chosen sort order)
+    // unless the reviewer asked for all of them.
+    const matching = rows.length;
+    if (resultLimit && !showAllPairs && rows.length > resultLimit) {
+      const top = new Set(
+        [...rows].sort((a, b) => b._score - a._score).slice(0, resultLimit).map((row) => row._key),
+      );
+      rows = rows.filter((row) => top.has(row._key));
+    }
     // Re-assign dense rank after filter
-    return rows.map((row, i) => ({ ...row, _denseRank: i + 1 }));
-  }, [results, searchTerm, minSimilarity, statusFilter, sortMode, pairStatuses, legacyJobStatus]);
+    return Object.assign(rows.map((row, i) => ({ ...row, _denseRank: i + 1 })), { matching });
+  }, [results, searchTerm, minSimilarity, statusFilter, sortMode, pairStatuses, legacyJobStatus, resultLimit, showAllPairs]);
+  const hiddenPairs = Math.max(0, (tableData.matching ?? tableData.length) - tableData.length);
 
   // Active result for the detail view (falls back to the first row of the filtered table)
   const activeResult = useMemo(
@@ -907,6 +921,24 @@ export default function ResultsPage() {
               <h2 className="text-sm font-semibold text-slate-950 dark:text-white">Suspicious Pairs — Ranked</h2>
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 {tableData.length} of {results.length} pairs shown
+                {hiddenPairs > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllPairs(true)}
+                    className="ml-2 font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Show {hiddenPairs} more
+                  </button>
+                )}
+                {showAllPairs && resultLimit && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllPairs(false)}
+                    className="ml-2 font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Show top {resultLimit} only
+                  </button>
+                )}
                 {tableData.length > 0 && (
                   <span className="ml-2 text-slate-400 dark:text-slate-600">· click to open · J/K to navigate</span>
                 )}

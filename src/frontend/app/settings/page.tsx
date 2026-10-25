@@ -68,7 +68,14 @@ function describeError(error: unknown, fallback: string): string {
   );
 
   let message = fallback;
-  if (status === 401) {
+  // The server validates every setting and names each invalid field.
+  const fields = (error as { response?: { data?: { detail?: { fields?: Record<string, string> } } } })?.response?.data?.detail?.fields;
+  if (status === 400 && fields && typeof fields === 'object') {
+    const problems = Object.entries(fields).map(
+      ([key, problem]) => `${NUMBER_RULES[key]?.label ?? key.replace(/_/g, ' ')} ${problem}`,
+    );
+    if (problems.length) message = `Not saved. ${problems.join('; ')}.`;
+  } else if (status === 401) {
     message = 'Your session has expired. Please sign in again.';
   } else if (status === 403) {
     message = 'You don’t have permission to change these settings.';
@@ -111,9 +118,6 @@ const PLAIN_KEYS = [
   'batch_size',
   'max_file_size_mb',
   'max_files_per_job',
-  'audit_log_level',
-  'audit_retention_days',
-  'debug_mode',
   'email_backend',
   'email_host',
   'email_port',
@@ -1535,7 +1539,8 @@ export default function SettingsPage() {
                     )}
                   </div>
                 )}
-                {/* Default + fallback provider routing */}
+                {/* Default provider. A fallback choice used to be offered here,
+                    but nothing ever fell back to it. */}
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Default provider</label>
@@ -1550,27 +1555,9 @@ export default function SettingsPage() {
                       ))}
                     </select>
                   </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Fallback provider</label>
-                    <select
-                      value={String((settings as any)?.llm_fallback_provider || '')}
-                      onChange={(event) => updateSetting('llm_fallback_provider', event.target.value)}
-                      className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    >
-                      <option value="">None</option>
-                      {providers.map((spec: any) => (
-                        <option key={spec.key} value={spec.key}>{spec.label}</option>
-                      ))}
-                    </select>
-                  </div>
                 </div>
-                {(settings as any)?.llm_fallback_provider && (settings as any)?.llm_fallback_provider === ((settings as any)?.llm_provider || 'openai') && (
-                  <p role="status" className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                    The fallback provider is the same as the default, so it adds no redundancy.
-                  </p>
-                )}
                 <div className="mt-3 rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-xs leading-5 text-blue-700 dark:text-blue-300">
-                  <strong className="font-semibold">Note:</strong> API keys are stored encrypted and never exposed to the frontend. Leave the field blank to keep an already-configured key.
+                  <strong className="font-semibold">Note:</strong> API keys are kept on the server and never shown again. Leave the field blank to keep an already-configured key.
                 </div>
               </section>
 
@@ -1642,43 +1629,6 @@ export default function SettingsPage() {
                 </div>
               </Accordion>
 
-              {/* AI Detectors (GPTZero / Grammarly) */}
-              <Accordion
-                title="AI Detectors"
-                description="Connect third-party AI-writing detectors used to score essay and report submissions."
-                isOpen={accordions.aiDetectors}
-                onToggle={() => setAccordions(prev => ({ ...prev, aiDetectors: !prev.aiDetectors }))}
-              >
-                <div className="space-y-4">
-                  {([
-                    ['gptzero_api_key', 'GPTZero', 'GPTZero estimates AI-generation probability and returns per-sentence scores.'],
-                    ['grammarly_api_key', 'Grammarly', 'Grammarly adds tone, grammar, and writing-assistance signals for textual submissions.'],
-                  ] as [string, string, string][]).map(([key, name, help]) => (
-                    <div key={key} className="rounded-xl border border-slate-200 dark:border-slate-800 p-4">
-                      <div className="flex items-center gap-3">
-                        <div className={`h-2.5 w-2.5 rounded-full ${settings[`${key}_configured`] ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
-                        <span className={`text-xs font-semibold ${settings[`${key}_configured`] ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>
-                          {settings[`${key}_configured`] ? `${name} configured` : `${name} not configured`}
-                        </span>
-                      </div>
-                      <div className="mt-3">
-                        <TextInput
-                          label={`${name} API Key`}
-                          type="password"
-                          autoComplete="new-password"
-                          value={(settings[key] as string) || ''}
-                          placeholder={settings[`${key}_configured`] ? `Leave blank to keep the current ${name} key` : `Enter your ${name} API key`}
-                          onChange={(value) => updateSetting(key, value)}
-                        />
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">{help}</p>
-                    </div>
-                  ))}
-                  <div className="rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-xs leading-5 text-blue-700 dark:text-blue-300">
-                    <strong className="font-semibold">Note:</strong> Keys are stored server-side and never returned to the browser. Leave a field blank to keep an already-configured key.
-                  </div>
-                </div>
-              </Accordion>
             </div>
           )}
 
@@ -1726,9 +1676,7 @@ export default function SettingsPage() {
                   onChange={(value) => updateProfile('starter_code_handling', value)}
                 />
                 <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                  {profile.starter_code_handling === 'ignore_starter_code' && 'Starter code is completely excluded from all comparisons. Best for large shared codebases.'}
-                  {profile.starter_code_handling === 'student_written_only' && 'Only the student-written portions are compared. Shared starter code segments are discounted. Recommended default.'}
-                  {profile.starter_code_handling === 'include_starter_code' && 'Full submission including starter code is compared. May increase false positives from template code.'}
+                  {(catalog.starter_code_handling || []).find((o) => o.id === profile.starter_code_handling)?.description}
                 </div>
               </Accordion>
 
@@ -1739,43 +1687,36 @@ export default function SettingsPage() {
                 isOpen={accordions.previousTermMatching}
                 onToggle={() => setAccordions(prev => ({ ...prev, previousTermMatching: !prev.previousTermMatching }))}
               >
-                <SegmentedOptions
-                  label="Previous term matching"
-                  options={catalog.previous_term_matching || []}
-                  value={profile.previous_term_matching}
-                  onChange={(value) => updateProfile('previous_term_matching', value)}
-                />
-                <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                  {profile.previous_term_matching === 'off' && 'No cross-term comparison will be performed. Past submissions are ignored.'}
-                  {profile.previous_term_matching === 'same_course_only' && 'Compares against submissions from the same course in previous terms only. Recommended default.'}
-                  {profile.previous_term_matching === 'all_historical_courses' && 'Compares against all historical submissions across all courses. Most comprehensive but may increase review volume.'}
+                {/* Cross-term matching is not built yet; offering the choice implied
+                    every check also searched past terms. */}
+                <div className="rounded-lg border border-dashed border-slate-200 dark:border-slate-800 p-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                  <span className="mr-2 rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[11px] font-bold uppercase text-slate-500">Coming soon</span>
+                  Each check currently compares the submissions in that upload only. Past terms are not searched yet.
                 </div>
               </Accordion>
 
               {/* AI Rewrite Detection */}
               <Accordion
-                title="AI Rewrite Detection"
-                description="Detect AI-assisted code rewrites, paraphrasing, and structural reorganization."
+                title="AI Authorship Checks"
+                description="Score each Plagiarism Checker submission for AI-generated code signals, alongside similarity."
                 isOpen={accordions.aiRewriteDetection}
                 onToggle={() => setAccordions(prev => ({ ...prev, aiRewriteDetection: !prev.aiRewriteDetection }))}
               >
                 <SegmentedOptions
                   label="AI rewrite detection"
                   options={catalog.ai_rewrite_detection || []}
-                  value={profile.ai_rewrite_detection}
+                  value={profile.ai_rewrite_detection === 'off' ? 'off' : 'balanced'}
                   onChange={(value) => updateProfile('ai_rewrite_detection', value)}
                 />
                 <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                  {profile.ai_rewrite_detection === 'off' && 'AI-assisted rewrite detection is disabled. Only direct similarity is checked.'}
-                  {profile.ai_rewrite_detection === 'balanced' && 'Detects obvious AI rewrites while keeping false positives low. Recommended default.'}
-                  {profile.ai_rewrite_detection === 'aggressive' && 'Maximum detection sensitivity for AI rewrites. Uses AST/CFG analysis to catch paraphrased logic. May increase false positives.'}
+                  {(catalog.ai_rewrite_detection || []).find((o) => o.id === (profile.ai_rewrite_detection === 'off' ? 'off' : 'balanced'))?.description}
                 </div>
               </Accordion>
 
               {/* Review Queue Size */}
               <Accordion
-                title="Review Queue Size"
-                description="How many results should appear in your review list. Top 25 works well for most assignments."
+                title="Pairs Shown on the Results Page"
+                description="How many of the highest-scoring pairs the results page lists first. Reviewers can always show the rest."
                 isOpen={accordions.reviewQueueSize}
                 onToggle={() => setAccordions(prev => ({ ...prev, reviewQueueSize: !prev.reviewQueueSize }))}
               >
@@ -1806,7 +1747,7 @@ export default function SettingsPage() {
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div className="rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-2.5">
                           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Flag threshold</span>
-                          <div className="font-semibold text-slate-900 dark:text-white">{formatPct(applied.threshold)} similar</div>
+                          <div className="font-semibold text-slate-900 dark:text-white">{formatPct(settings.default_threshold ?? applied.threshold)} similar</div>
                         </div>
                         <div className="rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-2.5">
                           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Reviews shown</span>
@@ -1824,14 +1765,17 @@ export default function SettingsPage() {
                 </div>
 
                 <aside className="space-y-6">
+                  {/* What these choices do on every check. This box used to list
+                      features the pipeline did not have. */}
                   <section className="rounded-xl border border-blue-200 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/10 p-5">
-                    <div className="text-sm font-semibold text-blue-950 dark:text-blue-200">System handles automatically</div>
-                    <div className="mt-3 space-y-2 text-sm leading-6 text-blue-800 dark:text-blue-300">
-                      <div>{'\u2022'} Starter code is excluded from comparisons</div>
-                      <div>{'\u2022'} Previous-term submissions are matched when available</div>
-                      <div>{'\u2022'} Runtime behaviour and identical wrong answers are compared</div>
-                      <div>{'\u2022'} Thresholds are automatically adjusted</div>
-                    </div>
+                    <div className="text-sm font-semibold text-blue-950 dark:text-blue-200">On every check</div>
+                    <ul className="mt-3 space-y-2 text-sm leading-6 text-blue-800 dark:text-blue-300">
+                      <li>{'\u2022'} {profile.starter_code_handling === 'include_starter_code' ? 'All code is compared, including starter code' : profile.starter_code_handling === 'ignore_starter_code' ? 'Uploaded starter code is removed before comparing' : 'Uploaded starter code and code most of the class shares are removed'}</li>
+                      <li>{'\u2022'} {profile.ai_rewrite_detection === 'off' ? 'AI-authorship checks are off' : 'Each submission is also scored for AI-authorship signals'}</li>
+                      <li>{'\u2022'} Pairs at or above {formatPct(settings.default_threshold ?? applied.threshold)} similarity are flagged (adjustable per upload)</li>
+                      <li>{'\u2022'} Files too short to judge (a few lines) are never ranked above review</li>
+                      <li>{'\u2022'} Public source scanning is {settings.source_scan_enabled ? 'on' : 'off'}</li>
+                    </ul>
                   </section>
 
                   <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
@@ -1842,8 +1786,8 @@ export default function SettingsPage() {
                         <span className="font-semibold text-slate-900 dark:text-white">{profile.sensitivity?.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-600 dark:text-slate-300">AI Rewrite Detection</span>
-                        <span className="font-semibold text-slate-900 dark:text-white">{profile.ai_rewrite_detection?.replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
+                        <span className="text-slate-600 dark:text-slate-300">AI Authorship Checks</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{profile.ai_rewrite_detection === 'off' ? 'Off' : 'On'}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600 dark:text-slate-300">Starter Code</span>
@@ -1851,7 +1795,7 @@ export default function SettingsPage() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600 dark:text-slate-300">Previous Terms</span>
-                        <span className="font-semibold text-slate-900 dark:text-white text-right max-w-[180px]">{profile.previous_term_matching?.replace(/_/g, ' ') || 'Same course only'}</span>
+                        <span className="font-semibold text-slate-400 dark:text-slate-500 text-right max-w-[180px]">Coming soon</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600 dark:text-slate-300">Results Per Job</span>
@@ -2088,7 +2032,7 @@ export default function SettingsPage() {
               {/* Webhooks */}
               <Accordion
                 title="Webhooks"
-                description="Configure webhooks for real-time notifications when jobs complete or flag high-risk submissions."
+                description="Get an alert at this URL when an analysis is stuck in the queue. (Completion notifications are not sent yet.)"
                 isOpen={accordions.webhooks}
                 onToggle={() => setAccordions(prev => ({ ...prev, webhooks: !prev.webhooks }))}
               >
@@ -2187,22 +2131,6 @@ export default function SettingsPage() {
                       <span>{testEmailResult.message}</span>
                     </div>
                   )}
-                </div>
-              </Accordion>
-
-              {/* Audit & Logging */}
-              <Accordion
-                title="Audit & Logging"
-                description="Configure audit log level and retention policy for compliance and debugging."
-                isOpen={accordions.auditLogging}
-                onToggle={() => setAccordions(prev => ({ ...prev, auditLogging: !prev.auditLogging }))}
-              >
-                <div className="grid gap-4 md:grid-cols-2">
-                  <SelectInput label="Audit Log Level" value={settings.audit_log_level || 'INFO'} options={[['DEBUG', 'Debug'], ['INFO', 'Info'], ['WARNING', 'Warning'], ['ERROR', 'Error']]} onChange={(value) => updateSetting('audit_log_level', value)} />
-                  <TextInput label="Audit Retention (days)" type="number" value={settings.audit_retention_days ?? 365} onChange={(value) => updateNumber('audit_retention_days', value)} {...numberProps('audit_retention_days')} hint={typeof settings.audit_retention_days === 'number' && settings.audit_retention_days < 90 ? 'Below the 90-day compliance minimum recommended here.' : undefined} />
-                </div>
-                <div className="mt-4 rounded-lg bg-amber-50 dark:bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
-                  Audit logs older than the retention period may be automatically pruned. Keep a minimum of 90 days for compliance.
                 </div>
               </Accordion>
 
