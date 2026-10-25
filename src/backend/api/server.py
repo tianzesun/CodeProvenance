@@ -15,6 +15,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 import csv
+import functools
 import hashlib
 import importlib.util
 import json
@@ -385,20 +386,19 @@ TOOL_DISPLAY_ORDER = [
 BENCHMARK_TOOL_METADATA: dict[str, dict[str, Any]] = {
     "integritydesk": {
         "name": "IntegrityDesk",
-        "desc": "Multi-engine fusion across Token, AST, Winnowing, GST, Semantic, and Web signals, with optional AI Detection and Execution/CFG layers.",
+        "desc": "Learned fusion of winnowing, token fingerprint, n-gram, AST, logic-flow, embedding and coverage signals, with optional web-source and AI-detection checks.",
         "color": "#0066cc",
         "gradient": "from-blue-500 to-blue-600",
         "bgLight": "bg-blue-50",
         "ring": "ring-blue-500",
         "engines": [
+            "Winnowing",
             "Token",
             "AST",
-            "Winnowing",
-            "GST",
-            "Semantic",
+            "Logic flow",
+            "Embedding",
             "Web",
             "AI Detection",
-            "Execution/CFG",
         ],
         "source_type": "built-in",
     },
@@ -8884,7 +8884,10 @@ async def _run_analysis(
         ],
         "external_tool_results": {},
         "active_engines": (
-            [
+            # The learned model ignores the engine weights, so list what it
+            # actually combined instead of the engines the form selected.
+            _learned_scoring_status()["signals"]
+            or [
                 ENGINE_DISPLAY_LABELS.get(key, key.title())
                 for key in selected_engine_keys
             ]
@@ -13867,6 +13870,41 @@ ENGINE_DISPLAY_LABELS = {
     "web": "Web",
     "ai_detection": "AI Detection",
 }
+#: Display names for the signals the learned similarity model combines.
+LEARNED_SIGNAL_LABELS = {
+    "ast": "AST",
+    "fingerprint": "Token fingerprint",
+    "embedding": "Embedding",
+    "ngram": "N-gram",
+    "winnowing": "Winnowing",
+    "logic_flow": "Logic flow",
+    "coverage": "Coverage",
+}
+
+
+@functools.lru_cache(maxsize=1)
+def _learned_scoring_status() -> dict[str, Any]:
+    """Whether pair scores come from the learned similarity model.
+
+    That model always combines its own fixed signals, so the upload page's
+    engine weights only reach the rule-based fallback; the page and the job's
+    "active engines" have to say so rather than imply the weights were used.
+    Cached: the artifact only changes on deploy.
+    """
+    from src.backend.engines.scoring.learned_fusion import LearnedFusionScorer
+
+    scorer = LearnedFusionScorer()
+    if not scorer.available:
+        return {"active": False, "signals": []}
+    return {
+        "active": True,
+        "signals": [
+            LEARNED_SIGNAL_LABELS.get(name, name.replace("_", " ").title())
+            for name in scorer.feature_names
+        ],
+    }
+
+
 UPLOAD_ENGINE_KEYS = (
     "token",
     "winnowing",
@@ -17224,6 +17262,7 @@ async def get_upload_settings(request: Request):
                 key for key, value in engine_weights.items() if _coerce_float(value) > 0
             ],
             "assignment_modes": assignment_modes_payload(),
+            "learned_scoring": _learned_scoring_status(),
         }
     )
 
