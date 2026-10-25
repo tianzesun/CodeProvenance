@@ -19,7 +19,8 @@ What changed:
 
 from __future__ import annotations
 
-from collections import defaultdict
+import math
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -27,6 +28,13 @@ from difflib import SequenceMatcher
 from src.backend.engines.mvp.normalization import CodeNormalizer
 
 MAX_LINES = 5000
+#: A line in at least this share of a cohort's submissions is shared code. Set
+#: high so a copying group of under half the class is never suppressed.
+COMMON_CODE_MIN_SHARE = 0.5
+#: Fewer submissions than this cannot separate shared code from copying.
+COMMON_CODE_MIN_SUBMISSIONS = 4
+#: Distinct common-line sequences kept; each one is matched against every file.
+COMMON_CODE_MAX_SEQUENCES = 20
 
 
 @dataclass(frozen=True)
@@ -38,7 +46,9 @@ class StarterRemovalResult:
     total_line_count: int  # ALL lines of the submission
     starter_overlap: float  # removed / meaningful lines
     meaningful_line_count: int = 0
-    removed_lines: tuple[int, ...] = field(default_factory=tuple)  # 1-based line numbers
+    removed_lines: tuple[int, ...] = field(
+        default_factory=tuple
+    )  # 1-based line numbers
 
 
 class StarterCodeRemover:
@@ -60,13 +70,68 @@ class StarterCodeRemover:
         self.normalizer = CodeNormalizer()
         self._starter_sequences: list[list[str]] = []
         self._long_line_keys: set[str] = set()
+        #: Distinct lines inferred as shared by ``from_cohort`` (0 = none).
+        self.inferred_common_lines = 0
         for source in starter_sources:
             keys = [key for _, key, tokens in self._meaningful_lines(source) if key]
             if keys:
                 self._starter_sequences.append(keys[:MAX_LINES])
             self._long_line_keys.update(
-                key for _, key, tokens in self._meaningful_lines(source) if len(tokens) >= min_line_tokens
+                key
+                for _, key, tokens in self._meaningful_lines(source)
+                if len(tokens) >= min_line_tokens
             )
+
+    @classmethod
+    def from_cohort(
+        cls,
+        submissions: Iterable[str],
+        starter_sources: Iterable[str] = (),
+        language: str = "python",
+        *,
+        min_share: float = COMMON_CODE_MIN_SHARE,
+        min_submissions: int = COMMON_CODE_MIN_SUBMISSIONS,
+    ) -> StarterCodeRemover:
+        """Remover for the given starter code plus code most of the class shares.
+
+        Without uploaded starter code, a handout every student builds on makes
+        every pair look similar. As MOSS does, a line found in at least
+        ``min_share`` of the submissions is treated as shared code; it is then
+        removed under the usual rules (a run of ``min_run_lines`` such lines,
+        or one long line), so a common short line on its own stays.
+
+        A cohort smaller than ``min_submissions`` is too small to tell shared
+        code from copying, so only ``starter_sources`` are used.
+        """
+        remover = cls(starter_sources, language)
+        sources = [source or "" for source in submissions]
+        if len(sources) < min_submissions:
+            return remover
+        per_source = [
+            [key for _, key, _ in remover._meaningful_lines(source)][:MAX_LINES]
+            for source in sources
+        ]
+        frequency: Counter[str] = Counter()
+        for keys in per_source:
+            frequency.update(set(keys))
+        needed = max(min_submissions, math.ceil(min_share * len(sources)))
+        common = {key for key, count in frequency.items() if count >= needed}
+        if not common:
+            return remover
+
+        # Each submission's common lines, in its own order, act as one starter
+        # file: a handout block stays contiguous, a student's own code breaks it.
+        sequences = {tuple(key for key in keys if key in common) for keys in per_source}
+        for sequence in sorted(sequences, key=len, reverse=True)[
+            :COMMON_CODE_MAX_SEQUENCES
+        ]:
+            if len(sequence) >= remover.min_run_lines:
+                remover._starter_sequences.append(list(sequence))
+        remover._long_line_keys.update(
+            key for key in common if len(key.split()) >= remover.min_line_tokens
+        )
+        remover.inferred_common_lines = len(common)
+        return remover
 
     @property
     def has_starter(self) -> bool:
@@ -84,7 +149,9 @@ class StarterCodeRemover:
         if self._starter_sequences and meaningful:
             keys = [key for _, key, _ in meaningful]
             for starter_keys in self._starter_sequences:
-                for block in SequenceMatcher(None, starter_keys, keys, autojunk=False).get_matching_blocks():
+                for block in SequenceMatcher(
+                    None, starter_keys, keys, autojunk=False
+                ).get_matching_blocks():
                     if block.size >= self.min_run_lines:
                         marked.update(range(block.b, block.b + block.size))
             for index, (_, key, tokens) in enumerate(meaningful):
@@ -92,12 +159,18 @@ class StarterCodeRemover:
                     marked.add(index)
 
         removed_numbers = {meaningful[i][0] for i in marked}
-        kept = [line for number, line in enumerate(lines, 1) if number not in removed_numbers]
+        kept = [
+            line
+            for number, line in enumerate(lines, 1)
+            if number not in removed_numbers
+        ]
         return StarterRemovalResult(
             filtered_source="\n".join(kept),
             removed_line_count=len(removed_numbers),
             total_line_count=len(lines),
-            starter_overlap=len(removed_numbers) / len(meaningful) if meaningful else 0.0,
+            starter_overlap=(
+                len(removed_numbers) / len(meaningful) if meaningful else 0.0
+            ),
             meaningful_line_count=len(meaningful),
             removed_lines=tuple(sorted(removed_numbers)),
         )
@@ -113,7 +186,9 @@ class StarterCodeRemover:
         """
         normalized = self.normalizer.normalize(source or "", self.language)
         by_line: dict[int, list[str]] = defaultdict(list)
-        for original, number in zip(normalized.original_tokens, normalized.line_numbers):
+        for original, number in zip(
+            normalized.original_tokens, normalized.line_numbers
+        ):
             by_line[number].append(original)
         out = []
         for number in sorted(by_line):

@@ -642,6 +642,13 @@ export default function ResultsPage() {
   const cohortNote = cohortSize > 0
     ? `Similarity ranks pairs against ${cohortSize} compared pairs (median ${formatPercent(cohort.median)}%, p25 ${formatPercent(cohort.p25)}%, p75 ${formatPercent(cohort.p75)}%). ${cohort.disclosure || ''}`.trim()
     : null;
+  // Lines most of the class shared (a handout) were left out of every pair;
+  // say so, or a professor comparing against the raw files sees a lower score
+  // than the visible overlap suggests.
+  const commonCodeLines = Number(job?.summary?.common_code_lines) || 0;
+  const commonCodeNote = commonCodeLines > 0
+    ? `${commonCodeLines} line${commonCodeLines === 1 ? '' : 's'} shared by at least half of the submissions (likely starter or handout code) ${commonCodeLines === 1 ? 'was' : 'were'} left out of every comparison.`
+    : null;
 
   // Keyboard navigation: J/K or ArrowLeft/ArrowRight when drawer is open
   useEffect(() => {
@@ -776,6 +783,11 @@ export default function ResultsPage() {
           {cohortNote && (
             <div className="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:text-slate-400">
               {cohortNote}
+            </div>
+          )}
+          {commonCodeNote && (
+            <div className="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              {commonCodeNote}
             </div>
           )}
         </Card>

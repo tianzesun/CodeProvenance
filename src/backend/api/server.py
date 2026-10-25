@@ -15,6 +15,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 import csv
+import functools
 import hashlib
 import importlib.util
 import json
@@ -66,6 +67,7 @@ from src.backend.api.middleware.auth import api_key_manager
 from src.backend.api.routes import auth, cases, users
 from src.backend.api.routes import settings as settings_router
 from src.backend.application.services.batch_detection_service import (
+    MIN_EVIDENCE_TOKENS,
     BatchDetectionService,
     ComparisonResult,
     _risk_level,
@@ -86,6 +88,7 @@ if settings.MOSS_USER_ID:
     os.environ.setdefault("MOSS_USER_ID", settings.MOSS_USER_ID)
 from src.backend.application.services import academic_access
 from src.backend.application.services.similarity_cohort import (
+    COHORT_DISCLOSURE,
     CohortContext,
     annotate_results,
 )
@@ -383,20 +386,19 @@ TOOL_DISPLAY_ORDER = [
 BENCHMARK_TOOL_METADATA: dict[str, dict[str, Any]] = {
     "integritydesk": {
         "name": "IntegrityDesk",
-        "desc": "Multi-engine fusion across Token, AST, Winnowing, GST, Semantic, and Web signals, with optional AI Detection and Execution/CFG layers.",
+        "desc": "Learned fusion of winnowing, token fingerprint, n-gram, AST, logic-flow, embedding and coverage signals, with optional web-source and AI-detection checks.",
         "color": "#0066cc",
         "gradient": "from-blue-500 to-blue-600",
         "bgLight": "bg-blue-50",
         "ring": "ring-blue-500",
         "engines": [
+            "Winnowing",
             "Token",
             "AST",
-            "Winnowing",
-            "GST",
-            "Semantic",
+            "Logic flow",
+            "Embedding",
             "Web",
             "AI Detection",
-            "Execution/CFG",
         ],
         "source_type": "built-in",
     },
@@ -7767,6 +7769,40 @@ def _discard_upload(job_id: str, job_dir: PathLib) -> None:
     _jobs.pop(job_id, None)
 
 
+async def _save_starter_files(
+    starter_files: list[UploadFile], job_dir: PathLib
+) -> tuple[list[str], str | None]:
+    """Save instructor starter files under ``job_dir/starter``.
+
+    Starter files get the same per-file limits as submissions; they used to be
+    read whole and unchecked, so one oversized "starter" bypassed the upload
+    limits and was then matched line by line against every submission.
+
+    Returns:
+        (decoded starter sources, error message or ``None``).
+    """
+    starter_sources: list[str] = []
+    if not starter_files:
+        return starter_sources, None
+    starter_dir = job_dir / "starter"
+    starter_dir.mkdir(exist_ok=True)
+    max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    for f in starter_files:
+        if not (f.filename and _is_code_file(f.filename)):
+            continue
+        # One byte past the limit is enough to reject without buffering the rest.
+        content = await f.read(max_bytes + 1)
+        size_error = _check_submission_size(f.filename, content)
+        if size_error:
+            return [], f"Starter code: {size_error}"
+        safe_name = PathLib(f.filename).name
+        target = _unique_child_path(starter_dir, PathLib(safe_name))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+        starter_sources.append(content.decode("utf-8", errors="ignore"))
+    return starter_sources, None
+
+
 @app.post("/api/upload")
 async def upload_files(
     request: Request,
@@ -7781,7 +7817,7 @@ async def upload_files(
     tool_ids: str = Form(default=""),
     source_scan_enabled: bool = Form(default=True),
 ):
-    # Allow unauthenticated uploads for plagiarism checker
+    # Anonymous callers only reach this when ALLOW_ANONYMOUS_ANALYSIS is set.
     current_user = getattr(request.state, "user", None)
     if _is_guest_principal(current_user):
         # A guest demo session must not spend the deployment's GitHub / Stack
@@ -7806,9 +7842,11 @@ async def upload_files(
 
     saved_files = []
     oversized: list[str] = []
+    max_file_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
     for f in files:
         if f.filename and _is_code_file(f.filename):
-            content = await f.read()
+            # One byte past the limit is enough to reject without buffering the rest.
+            content = await f.read(max_file_bytes + 1)
             size_error = _check_submission_size(f.filename, content)
             if size_error:
                 oversized.append(size_error)
@@ -7825,18 +7863,10 @@ async def upload_files(
         _discard_upload(job_id, job_dir)
         return JSONResponse(status_code=400, content={"error": size_error})
 
-    starter_dir = job_dir / "starter"
-    starter_sources = []
-    if starter_files:
-        starter_dir.mkdir(exist_ok=True)
-        for f in starter_files:
-            if f.filename and _is_code_file(f.filename):
-                safe_name = PathLib(f.filename).name
-                target = _unique_child_path(starter_dir, PathLib(safe_name))
-                target.parent.mkdir(parents=True, exist_ok=True)
-                content = await f.read()
-                target.write_bytes(content)
-                starter_sources.append(content.decode("utf-8", errors="ignore"))
+    starter_sources, starter_error = await _save_starter_files(starter_files, job_dir)
+    if starter_error:
+        _discard_upload(job_id, job_dir)
+        return JSONResponse(status_code=400, content={"error": starter_error})
 
     if len(saved_files) < 2:
         _discard_upload(job_id, job_dir)
@@ -7874,7 +7904,7 @@ async def upload_zip(
     tool_ids: str = Form(default=""),
     source_scan_enabled: bool = Form(default=True),
 ):
-    # Allow unauthenticated uploads for plagiarism checker
+    # Anonymous callers only reach this when ALLOW_ANONYMOUS_ANALYSIS is set.
     current_user = getattr(request.state, "user", None)
     if _is_guest_principal(current_user):
         # See upload_files: a demo session never spends external API quota.
@@ -7938,18 +7968,10 @@ async def upload_zip(
             status_code=400, content={"error": "Zip must contain at least 2 code files"}
         )
 
-    starter_dir = job_dir / "starter"
-    starter_sources = []
-    if starter_files:
-        starter_dir.mkdir(exist_ok=True)
-        for f in starter_files:
-            if f.filename and _is_code_file(f.filename):
-                safe_name = PathLib(f.filename).name
-                target = _unique_child_path(starter_dir, PathLib(safe_name))
-                target.parent.mkdir(parents=True, exist_ok=True)
-                content = await f.read()
-                target.write_bytes(content)
-                starter_sources.append(content.decode("utf-8", errors="ignore"))
+    starter_sources, starter_error = await _save_starter_files(starter_files, job_dir)
+    if starter_error:
+        _discard_upload(job_id, job_dir)
+        return JSONResponse(status_code=400, content={"error": starter_error})
 
     dispatch_analysis(
         job_id=job_id,
@@ -8702,6 +8724,8 @@ def _run_analysis_engines(
             threshold=threshold,
             weights=fusion_weights or None,
             starter_sources=starter_sources,
+            infer_common_code=True,
+            min_evidence_tokens=MIN_EVIDENCE_TOKENS,
         )
         results = service.compare_all_pairs(
             submissions,
@@ -8860,7 +8884,10 @@ async def _run_analysis(
         ],
         "external_tool_results": {},
         "active_engines": (
-            [
+            # The learned model ignores the engine weights, so list what it
+            # actually combined instead of the engines the form selected.
+            _learned_scoring_status()["signals"]
+            or [
                 ENGINE_DISPLAY_LABELS.get(key, key.title())
                 for key in selected_engine_keys
             ]
@@ -13843,6 +13870,41 @@ ENGINE_DISPLAY_LABELS = {
     "web": "Web",
     "ai_detection": "AI Detection",
 }
+#: Display names for the signals the learned similarity model combines.
+LEARNED_SIGNAL_LABELS = {
+    "ast": "AST",
+    "fingerprint": "Token fingerprint",
+    "embedding": "Embedding",
+    "ngram": "N-gram",
+    "winnowing": "Winnowing",
+    "logic_flow": "Logic flow",
+    "coverage": "Coverage",
+}
+
+
+@functools.lru_cache(maxsize=1)
+def _learned_scoring_status() -> dict[str, Any]:
+    """Whether pair scores come from the learned similarity model.
+
+    That model always combines its own fixed signals, so the upload page's
+    engine weights only reach the rule-based fallback; the page and the job's
+    "active engines" have to say so rather than imply the weights were used.
+    Cached: the artifact only changes on deploy.
+    """
+    from src.backend.engines.scoring.learned_fusion import LearnedFusionScorer
+
+    scorer = LearnedFusionScorer()
+    if not scorer.available:
+        return {"active": False, "signals": []}
+    return {
+        "active": True,
+        "signals": [
+            LEARNED_SIGNAL_LABELS.get(name, name.replace("_", " ").title())
+            for name in scorer.feature_names
+        ],
+    }
+
+
 UPLOAD_ENGINE_KEYS = (
     "token",
     "winnowing",
@@ -16596,20 +16658,20 @@ def _generate_committee_report(
             reproducibility_report,
             ai_text_trust,
         )
-    except Exception as e:
-        import traceback
-
+    except Exception:
+        # The traceback goes to the server log; the file a professor opens gets
+        # a generic message and the job id to quote (it used to embed the full
+        # traceback, exposing internal paths and code).
+        logger.exception("Committee report generation failed for job %s", job_id)
         error_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Report Error</title>
 <style>body{{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#1e293b}}
 .error-box{{background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:20px;margin:20px 0}}
-.error-detail{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:12px;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all}}
 </style></head><body>
 <h1>Report Generation Error</h1>
 <div class="error-box">
-<p><strong>Error generating committee report for job {job_id}</strong></p>
-<p>The report could not be generated due to an internal error. Please try again or contact support.</p>
+<p><strong>The committee report could not be generated.</strong></p>
+<p>Please try again or contact support, quoting reference {_escape_html(str(job_id))}.</p>
 </div>
-<div class="error-detail">{traceback.format_exc()}</div>
 </body></html>"""
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(error_html, encoding="utf-8")
@@ -16637,6 +16699,33 @@ def _generate_committee_report_inner(
     calibration_report = calibration_report or {}
     reproducibility_report = reproducibility_report or {}
     ai_text_trust = ai_text_trust or {}
+    # Scores are NOT normalised to the class (the report used to say they were);
+    # give the class median instead so a committee can read a score in context.
+    summary = report.get("summary", {}) if isinstance(report, dict) else {}
+    class_scores = [
+        float(row.get("score", 0.0))
+        for row in (report.get("all_results") or [] if isinstance(report, dict) else [])
+        if isinstance(row, dict)
+    ]
+    if class_scores:
+        cohort = CohortContext.from_scores(class_scores)
+        class_context_note = _escape_html(
+            f"Pair scores are not rescaled to this class. Across the {cohort.size} "
+            f"pairs compared, the median similarity was {cohort.median:.0%} "
+            f"(middle half {cohort.p25:.0%}\u2013{cohort.p75:.0%}). {COHORT_DISCLOSURE}"
+        )
+    else:
+        class_context_note = _escape_html(COHORT_DISCLOSURE)
+    common_code_lines = int(summary.get("common_code_lines") or 0)
+    common_code_note = (
+        f"<p><strong>Shared code:</strong> {common_code_lines} distinct "
+        f"line{'' if common_code_lines == 1 else 's'} found in at least half of "
+        "the submissions (likely starter or handout code) "
+        f"{'was' if common_code_lines == 1 else 'were'} left out of every "
+        "comparison.</p>"
+        if common_code_lines
+        else ""
+    )
     mode_name = assignment_mode.get("name") or "Introductory Programming"
     mode_version = assignment_mode.get("version") or "1.0.0"
     mode_context = assignment_mode.get("context") or ""
@@ -17043,18 +17132,19 @@ def _generate_committee_report_inner(
 <div class="methodology-intro">
 <p>This report uses a <strong>multi-engine detection approach</strong> that looks for different kinds of similarity:</p>
 <ul class="engine-list">
-<li><strong>Token:</strong> Surface-level text matching (identifiers, keywords, operators)</li>
-<li><strong>AST:</strong> Structural similarity in the code's abstract syntax tree</li>
-<li><strong>Winnowing:</strong> Fingerprint-based similarity using document hashing</li>
-<li><strong>GST:</strong> Algorithmic pattern matching (control flow sequences)</li>
-<li><strong>Semantic:</strong> Meaning-level similarity (what the code does, not just how it looks)</li>
-<li><strong>Web:</strong> Matches against public code repositories and online sources</li>
+<li><strong>Token fingerprint and n-grams:</strong> Surface-level matching of normalized tokens (identifiers renamed, comments and layout ignored)</li>
+<li><strong>Winnowing:</strong> Document fingerprints, the technique MOSS uses</li>
+<li><strong>AST:</strong> Structure of the code's abstract syntax tree</li>
+<li><strong>Logic flow:</strong> The sequence of control-flow and operator tokens, ignoring names</li>
+<li><strong>Embedding:</strong> A code language model's representation of what the code does</li>
+<li><strong>Coverage:</strong> How much of each file falls inside matching regions</li>
 </ul>
+<p>When enabled, a separate <strong>web scan</strong> also checks public code sources; it is reported alongside, not folded into, the pair score.</p>
 <p>Optional <strong>AI Detection</strong> and <strong>Execution/CFG</strong> layers provide additional signals for deeper review when needed.</p>
 </div>
 
 <div class="score-fusion">
-<p><strong>Score combination:</strong> Results from all engines are combined using a <strong>weighted ensemble scoring model</strong> (Bayesian-style fusion). Each engine contributes based on its reliability for the assignment type. This approach detects similarity even when students attempt to conceal copying through variable renaming, function reordering, comment changes, or whitespace modification.</p>
+<p><strong>Score combination:</strong> The signals are combined by a <strong>logistic-regression model trained on labelled plagiarism benchmarks</strong>, then checked by rule-based guardrails: exact copies score 100%, overlap that is mostly starter code is held at review level, and pairs with very little code are never ranked above review. Normalizing tokens means renamed variables, changed comments and reformatted whitespace do not hide copying.</p>
 </div>
 
 <div class="mode-explanation">
@@ -17068,7 +17158,8 @@ def _generate_committee_report_inner(
 </div>
 
 <div class="class-baseline">
-<p><strong>Class baseline normalization:</strong> Before computing pair scores, a class baseline is calculated from all submissions. Pair scores are then normalized relative to this baseline, so you see "high for this class" rather than just raw percentages. This helps distinguish unusual similarity from normal variation in the class.</p>
+<p><strong>Class context:</strong> {class_context_note}</p>
+{common_code_note}
 </div>
 
 <div class="reproducibility">
@@ -17171,6 +17262,7 @@ async def get_upload_settings(request: Request):
                 key for key, value in engine_weights.items() if _coerce_float(value) > 0
             ],
             "assignment_modes": assignment_modes_payload(),
+            "learned_scoring": _learned_scoring_status(),
         }
     )
 

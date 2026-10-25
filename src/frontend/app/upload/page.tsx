@@ -309,6 +309,9 @@ export default function UploadPage() {
     UPLOAD_ENGINE_OPTIONS.map((e) => e.key)
   );
   const [engineWeights, setEngineWeights] = useState<Record<string, number>>({});
+  // Signals the learned similarity model combines. While it scores the pairs the
+  // engine weights below are not used, so the sliders are shown as inactive.
+  const [learnedSignals, setLearnedSignals] = useState<string[]>([]);
   const [threshold, setThreshold] = useState(0.5);
   const [assignmentModes, setAssignmentModes] = useState<AssignmentMode[]>([]);
   const [selectedAssignmentModeId, setSelectedAssignmentModeId] = useState('auto_detect');
@@ -554,6 +557,8 @@ export default function UploadPage() {
       const mp = res.data?.assignment_modes;
       setActiveEngines(keys.length > 0 ? keys : UPLOAD_ENGINE_OPTIONS.map((e) => e.key));
       setAssignmentModes(Array.isArray(mp?.modes) ? mp.modes : []);
+      const learned = res.data?.learned_scoring;
+      setLearnedSignals(learned?.active && Array.isArray(learned.signals) ? learned.signals.map(String) : []);
       if (typeof mp?.default_mode_id === 'string') setSelectedAssignmentModeId((c) => c || mp.default_mode_id);
     }).catch(() => {
       if (active) { setThreshold(0.5); setActiveEngines(UPLOAD_ENGINE_OPTIONS.map((e) => e.key)); setAssignmentModes([]); }
@@ -1448,14 +1453,19 @@ export default function UploadPage() {
                           setWeightsTouched(false);
                         }
                       }}
-                      disabled={!selectedAssignmentMode?.weights}
+                      disabled={!selectedAssignmentMode?.weights || learnedSignals.length > 0}
                       className="text-xs font-medium text-slate-400 hover:text-blue-600 transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-slate-400"
                     >
                       Reset to preset
                     </button>
                   </div>
 
-                  <div className="space-y-1.5">
+                  {learnedSignals.length > 0 && (
+                    <p className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs leading-relaxed text-slate-600 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-400">
+                      Scores come from a model trained on labelled plagiarism benchmarks, which always combines the same signals: {learnedSignals.join(', ')}. These weights only apply if that model is unavailable.
+                    </p>
+                  )}
+                  <div className={`space-y-1.5 ${learnedSignals.length > 0 ? 'opacity-50' : ''}`}>
                     {/* Only engines the workspace has active are listed (every engine used to show). */}
                     {UPLOAD_ENGINE_OPTIONS.filter((engine) => activeEngines.includes(engine.key)).map((engine) => {
                       const weight = engineWeights[engine.key] ?? 0;
@@ -1484,9 +1494,10 @@ export default function UploadPage() {
                               step="1"
                               value={sliderValue}
                               onChange={(e) => updateEngineWeight(engine.key, Number(e.target.value) / 100)}
+                              disabled={learnedSignals.length > 0}
                               aria-label={`${engine.label} weight`}
                               aria-valuetext={`${share}% of the total`}
-                              className="h-2 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-blue-600 dark:bg-slate-700"
+                              className="h-2 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-blue-600 disabled:cursor-not-allowed dark:bg-slate-700"
                             />
                             <span title="Share of the total weight" className="w-10 text-right font-mono text-xs text-slate-600 dark:text-slate-400">{share}%</span>
                           </div>
