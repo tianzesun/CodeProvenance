@@ -87,6 +87,7 @@ if settings.MOSS_USER_ID:
     os.environ.setdefault("MOSS_USER_ID", settings.MOSS_USER_ID)
 from src.backend.application.services import academic_access
 from src.backend.application.services.similarity_cohort import (
+    COHORT_DISCLOSURE,
     CohortContext,
     annotate_results,
 )
@@ -16619,20 +16620,20 @@ def _generate_committee_report(
             reproducibility_report,
             ai_text_trust,
         )
-    except Exception as e:
-        import traceback
-
+    except Exception:
+        # The traceback goes to the server log; the file a professor opens gets
+        # a generic message and the job id to quote (it used to embed the full
+        # traceback, exposing internal paths and code).
+        logger.exception("Committee report generation failed for job %s", job_id)
         error_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Report Error</title>
 <style>body{{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#1e293b}}
 .error-box{{background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:20px;margin:20px 0}}
-.error-detail{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:12px;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all}}
 </style></head><body>
 <h1>Report Generation Error</h1>
 <div class="error-box">
-<p><strong>Error generating committee report for job {job_id}</strong></p>
-<p>The report could not be generated due to an internal error. Please try again or contact support.</p>
+<p><strong>The committee report could not be generated.</strong></p>
+<p>Please try again or contact support, quoting reference {_escape_html(str(job_id))}.</p>
 </div>
-<div class="error-detail">{traceback.format_exc()}</div>
 </body></html>"""
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(error_html, encoding="utf-8")
@@ -16660,6 +16661,33 @@ def _generate_committee_report_inner(
     calibration_report = calibration_report or {}
     reproducibility_report = reproducibility_report or {}
     ai_text_trust = ai_text_trust or {}
+    # Scores are NOT normalised to the class (the report used to say they were);
+    # give the class median instead so a committee can read a score in context.
+    summary = report.get("summary", {}) if isinstance(report, dict) else {}
+    class_scores = [
+        float(row.get("score", 0.0))
+        for row in (report.get("all_results") or [] if isinstance(report, dict) else [])
+        if isinstance(row, dict)
+    ]
+    if class_scores:
+        cohort = CohortContext.from_scores(class_scores)
+        class_context_note = _escape_html(
+            f"Pair scores are not rescaled to this class. Across the {cohort.size} "
+            f"pairs compared, the median similarity was {cohort.median:.0%} "
+            f"(middle half {cohort.p25:.0%}\u2013{cohort.p75:.0%}). {COHORT_DISCLOSURE}"
+        )
+    else:
+        class_context_note = _escape_html(COHORT_DISCLOSURE)
+    common_code_lines = int(summary.get("common_code_lines") or 0)
+    common_code_note = (
+        f"<p><strong>Shared code:</strong> {common_code_lines} distinct "
+        f"line{'' if common_code_lines == 1 else 's'} found in at least half of "
+        "the submissions (likely starter or handout code) "
+        f"{'was' if common_code_lines == 1 else 'were'} left out of every "
+        "comparison.</p>"
+        if common_code_lines
+        else ""
+    )
     mode_name = assignment_mode.get("name") or "Introductory Programming"
     mode_version = assignment_mode.get("version") or "1.0.0"
     mode_context = assignment_mode.get("context") or ""
@@ -17066,18 +17094,19 @@ def _generate_committee_report_inner(
 <div class="methodology-intro">
 <p>This report uses a <strong>multi-engine detection approach</strong> that looks for different kinds of similarity:</p>
 <ul class="engine-list">
-<li><strong>Token:</strong> Surface-level text matching (identifiers, keywords, operators)</li>
-<li><strong>AST:</strong> Structural similarity in the code's abstract syntax tree</li>
-<li><strong>Winnowing:</strong> Fingerprint-based similarity using document hashing</li>
-<li><strong>GST:</strong> Algorithmic pattern matching (control flow sequences)</li>
-<li><strong>Semantic:</strong> Meaning-level similarity (what the code does, not just how it looks)</li>
-<li><strong>Web:</strong> Matches against public code repositories and online sources</li>
+<li><strong>Token fingerprint and n-grams:</strong> Surface-level matching of normalized tokens (identifiers renamed, comments and layout ignored)</li>
+<li><strong>Winnowing:</strong> Document fingerprints, the technique MOSS uses</li>
+<li><strong>AST:</strong> Structure of the code's abstract syntax tree</li>
+<li><strong>Logic flow:</strong> The sequence of control-flow and operator tokens, ignoring names</li>
+<li><strong>Embedding:</strong> A code language model's representation of what the code does</li>
+<li><strong>Coverage:</strong> How much of each file falls inside matching regions</li>
 </ul>
+<p>When enabled, a separate <strong>web scan</strong> also checks public code sources; it is reported alongside, not folded into, the pair score.</p>
 <p>Optional <strong>AI Detection</strong> and <strong>Execution/CFG</strong> layers provide additional signals for deeper review when needed.</p>
 </div>
 
 <div class="score-fusion">
-<p><strong>Score combination:</strong> Results from all engines are combined using a <strong>weighted ensemble scoring model</strong> (Bayesian-style fusion). Each engine contributes based on its reliability for the assignment type. This approach detects similarity even when students attempt to conceal copying through variable renaming, function reordering, comment changes, or whitespace modification.</p>
+<p><strong>Score combination:</strong> The signals are combined by a <strong>logistic-regression model trained on labelled plagiarism benchmarks</strong>, then checked by rule-based guardrails: exact copies score 100%, overlap that is mostly starter code is held at review level, and pairs with very little code are never ranked above review. Normalizing tokens means renamed variables, changed comments and reformatted whitespace do not hide copying.</p>
 </div>
 
 <div class="mode-explanation">
@@ -17091,7 +17120,8 @@ def _generate_committee_report_inner(
 </div>
 
 <div class="class-baseline">
-<p><strong>Class baseline normalization:</strong> Before computing pair scores, a class baseline is calculated from all submissions. Pair scores are then normalized relative to this baseline, so you see "high for this class" rather than just raw percentages. This helps distinguish unusual similarity from normal variation in the class.</p>
+<p><strong>Class context:</strong> {class_context_note}</p>
+{common_code_note}
 </div>
 
 <div class="reproducibility">
