@@ -188,13 +188,14 @@ class TestWhitespaceRegularizationAttack:
     """Collapsing blank lines should defeat the whitespace-rhythm signal."""
 
     def test_whitespace_rhythm_signal_zeros(self) -> None:
-        """Uniform spacing should collapse the rhythm signal to zero."""
+        """Removing blank lines leaves the rhythm signal with no evidence."""
         engine = AIDetectionEngine()
         for code in get_ai_samples().values():
             original = engine.analyze(code, "python")
             assert original["signals"].get("whitespace_rhythm", 0.0) >= 0.9
             reformed = engine.analyze(regularize_whitespace(code), "python")
-            assert reformed["signals"].get("whitespace_rhythm", 1.0) == 0.0
+            # Absent, not 0.0: no blank lines is no evidence, not a human verdict.
+            assert "whitespace_rhythm" not in reformed["signals"]
 
     def test_regularization_does_not_touch_comment_independent_signals(self) -> None:
         """Whitespace changes must not distort statistical signals."""

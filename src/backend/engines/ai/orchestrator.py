@@ -320,7 +320,10 @@ class AIDetectionOrchestrator:
         # ~0 for code, whitespace/vocabulary barely separate), so use the
         # heuristic-only path tuned for the signal ensemble.
         ml_mode = ensemble_result.get("mode") == "ml"
-        ml_probability = ensemble_result.get("ai_probability")
+        # Blend the classifier's own probability. The ensemble's fused
+        # ``ai_probability`` already mixes in stylometry and burstiness, which
+        # _heuristic_fuse counts again, and dilutes the classifier to ~0.2 weight.
+        ml_probability = (ensemble_result.get("classifier") or {}).get("ai_probability")
         fusion_debug: dict[str, Any] = {}
         fusion_notes: list[str] = []
         if bino_result.get("available"):
@@ -376,15 +379,26 @@ class AIDetectionOrchestrator:
         # contribute a phantom confidence value, and no artificial floor is
         # applied: an honest "very low" confidence is more useful to a
         # reviewer than a clamp that masks it.
-        legacy_conf = float(legacy_result.get("confidence", 0.5))
+        # Score agreement and boundary distance against the probability being
+        # safeguarded. The legacy engine's own confidence measures distance
+        # from ITS fused score, which usually differs from this one, so a strong
+        # orchestrator score could be capped for the legacy engine's doubt.
+        # ``pattern_repetition`` is a display alias of ``pattern_library``; the
+        # legacy engine leaves it out of its own confidence, and counting both
+        # here would double-weight that signal in the agreement and variance terms.
+        guard_signals = {k: v for k, v in signals.items() if k != "pattern_repetition"}
+        fused_conf = self.legacy_engine._confidence(guard_signals, fused_probability)
         if bino_result.get("available"):
             bino_conf = float(bino_result.get("confidence", 0.5))
-            raw_confidence = 0.6 * bino_conf + 0.4 * legacy_conf
+            raw_confidence = 0.6 * bino_conf + 0.4 * fused_conf
         else:
-            raw_confidence = legacy_conf
+            raw_confidence = fused_conf
         fused_probability, safeguarded_confidence, safeguard_notes = (
             apply_fp_safeguards(
-                fused_probability, raw_confidence, signals, self._safeguards_config()
+                fused_probability,
+                raw_confidence,
+                guard_signals,
+                self._safeguards_config(),
             )
         )
         combined_confidence = safeguarded_confidence
@@ -444,7 +458,7 @@ class AIDetectionOrchestrator:
 
         using_binoculars = bool(bino_result.get("available"))
         using_ml = ml_mode and ml_probability is not None and not using_binoculars
-        return {
+        result = {
             "ai_probability": round(max(0.0, min(1.0, fused_probability)), 3),
             "confidence": round(max(0.0, min(1.0, combined_confidence)), 3),
             "method": (
@@ -469,6 +483,12 @@ class AIDetectionOrchestrator:
             "calibration": calibration,
             "layers": layers,
         }
+        if legacy_result.get("error"):
+            # The legacy engine swallows its own exceptions and returns 0.0 with
+            # empty signals; pass the failure on so callers do not read the
+            # placeholder as a genuine low score.
+            result["error"] = legacy_result["error"]
+        return result
 
     def _safeguards_config(self) -> dict[str, Any]:
         """Load false-positive safeguard thresholds from the shared config."""
@@ -531,10 +551,10 @@ class AIDetectionOrchestrator:
         # baseline, one benign comment family alone saturated the pattern
         # signal on 37/37 flagged-innocent files, and this boost amplified
         # that single-family saturation into high-band flags.
-        perplexity_signal = signals.get("perplexity", 0.0)
-        corroborated = (
-            docstring >= 0.25 or stylometry >= 0.60 or perplexity_signal >= 0.80
-        )
+        # Perplexity is not a corroborator: under the code LM about half of both
+        # AI and novice-student files score >= 0.80 on it, so it let the boost
+        # fire on uncorroborated fingerprint hits for a coin-flip share of files.
+        corroborated = docstring >= 0.25 or stylometry >= 0.60
         boost = 0.18 * pattern if (pattern >= 0.30 and corroborated) else 0.0
         k = 6.0
         return 1.0 / (1.0 + math.exp(-k * ((raw + boost) - 0.5)))

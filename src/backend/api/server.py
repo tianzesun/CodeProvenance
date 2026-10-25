@@ -5205,6 +5205,34 @@ def _compute_code_metrics(code: str) -> dict[str, Any]:
     }
 
 
+def _ai_failed_entry(name: str, language: str, code: str) -> dict[str, Any]:
+    """Per-file entry for a file the detector could not score.
+
+    The details are logged server-side; the entry carries a generic message.
+    """
+    return {
+        "name": name,
+        "language": language,
+        "ai_probability": 0.0,
+        "confidence": 0.0,
+        "method": "",
+        "model": "",
+        "status": "Not scored",
+        "signals": {},
+        "signal_labels": {},
+        "signal_interpretations": {},
+        "indicators": ["AI analysis failed for this file; it was not scored."],
+        "flagged_lines": [],
+        "flagged_regions": [],
+        "classifier": None,
+        "layers": {},
+        "annotated_snippet": [],
+        "evidence_patterns": {},
+        "code_metrics": _compute_code_metrics(code),
+        "error": "analysis_failed",
+    }
+
+
 def _build_ai_detection_summary(submissions: dict[str, str]) -> dict[str, Any]:
     """Run AI detection on all submissions and aggregate results.
 
@@ -5218,34 +5246,14 @@ def _build_ai_detection_summary(submissions: dict[str, str]) -> dict[str, Any]:
 
     try:
         detector = AIDetectionOrchestrator()
-    except Exception as exc:
+    except Exception:
         logger.exception("Failed to construct AI detection orchestrator")
         entries = [
-            {
-                "name": name,
-                "language": _infer_language_from_filename(name),
-                "ai_probability": 0.0,
-                "confidence": 0.0,
-                "method": "heuristic",
-                "model": "",
-                "status": _ai_status_label(0.0),
-                "signals": {},
-                "signal_labels": {},
-                "signal_interpretations": {},
-                "indicators": [f"Detector initialisation failed: {exc}"],
-                "flagged_lines": [],
-                "flagged_regions": [],
-                "classifier": None,
-                "layers": {},
-                "annotated_snippet": [],
-                "evidence_patterns": {},
-                "code_metrics": _compute_code_metrics(code),
-                "error": str(exc),
-            }
+            _ai_failed_entry(name, _infer_language_from_filename(name), code)
             for name, code in submissions.items()
         ]
         return _finalise_ai_detection_summary(
-            entries, {}, {}, {}, calibration_info
+            entries, {}, {}, {}, {"available": False, "samples": 0}
         )
 
     entries: list[dict[str, Any]] = []
@@ -5258,31 +5266,15 @@ def _build_ai_detection_summary(submissions: dict[str, str]) -> dict[str, Any]:
         language = _infer_language_from_filename(name)
         try:
             result = detector.analyze(code, language=language)
-        except Exception as exc:
+        except Exception:
             logger.exception("AI detection failed for %s", name)
-            entries.append(
-                {
-                    "name": name,
-                    "language": language,
-                    "ai_probability": 0.0,
-                    "confidence": 0.0,
-                    "method": "heuristic",
-                    "model": "",
-                    "status": _ai_status_label(0.0),
-                    "signals": {},
-                    "signal_labels": {},
-                    "signal_interpretations": {},
-                    "indicators": [f"Analysis failed: {exc}"],
-                    "flagged_lines": [],
-                    "flagged_regions": [],
-                    "classifier": None,
-                    "layers": {},
-                    "annotated_snippet": [],
-                    "evidence_patterns": {},
-                    "code_metrics": _compute_code_metrics(code),
-                    "error": str(exc),
-                }
-            )
+            entries.append(_ai_failed_entry(name, language, code))
+            continue
+        if result.get("error"):
+            # The engine caught its own exception and returned a placeholder 0.0;
+            # recording that as a real score would read as "not flagged".
+            logger.error("AI detection failed for %s: %s", name, result["error"])
+            entries.append(_ai_failed_entry(name, language, code))
             continue
         calibration_info = {
             "available": bool(result.get("calibration", {}).get("available")),
@@ -5365,19 +5357,22 @@ def _finalise_ai_detection_summary(
     """
     entries.sort(key=lambda entry: (-entry["ai_probability"], entry["name"]))
 
-    detection_methods = {entry["method"] for entry in entries if entry["method"]}
+    # Failed files carry a placeholder 0.0; counting them would dilute the
+    # average and report them as "low" rather than unscored.
+    scored = [entry for entry in entries if not entry.get("error")]
+    if not scored:
+        raise ValueError("AI detection failed for every submitted file")
+
+    detection_methods = {entry["method"] for entry in scored if entry["method"]}
     using_binoculars = "binoculars" in detection_methods
     using_ml = not using_binoculars and "ml" in detection_methods
 
     distribution = {"low": 0, "medium": 0, "high": 0}
-    for entry in entries:
+    for entry in scored:
         distribution[_ai_bucket(entry["ai_probability"])] += 1
 
-    if not entries:
-        raise ValueError("AI detection failed for every submitted file")
-
-    average_score = sum(entry["ai_probability"] for entry in entries) / len(entries)
-    highest_score = max((entry["ai_probability"] for entry in entries), default=0.0)
+    average_score = sum(entry["ai_probability"] for entry in scored) / len(scored)
+    highest_score = max((entry["ai_probability"] for entry in scored), default=0.0)
     signal_summary = {
         name: {
             "average": round(
@@ -5442,6 +5437,7 @@ def _finalise_ai_detection_summary(
             if entry["ai_probability"] >= AI_MEDIUM_RISK_THRESHOLD
         ),
         "total_files": len(entries),
+        "failed_files": len(entries) - len(scored),
         "average_score": round(average_score, 3),
         "highest_score": round(highest_score, 3),
         "distribution": distribution,

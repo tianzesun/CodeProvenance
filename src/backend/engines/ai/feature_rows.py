@@ -154,7 +154,7 @@ def build_feature_rows(
         key = _sample_key(code, language)
         entry = cache.get(key)
         if entry is None:
-            perp = scorer.score(code)
+            perp = scorer.score(code, language=language)
             entry = {
                 "features": assemble_features(
                     ast_extractor.extract(code, language),

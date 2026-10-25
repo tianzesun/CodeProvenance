@@ -33,6 +33,9 @@ _MODEL_BITS_REF = {
     "huggingface": 8.0,
 }
 
+#: Languages the code LM was trained on; anything else uses the statistical model.
+_LM_LANGUAGES = frozenset({"python", "py", "python3"})
+
 #: Burstiness reported when there is not enough data to measure variation.
 NEUTRAL_BURSTINESS = 0.5
 
@@ -299,12 +302,13 @@ class PerplexityScorer:
         """Train the statistical model on a set of code strings."""
         self.model.train_texts(texts)
 
-    def score(self, code: str) -> dict[str, Any]:
+    def score(self, code: str, language: str = "python") -> dict[str, Any]:
         """Compute perplexity, burstiness and chunk-level signals.
 
         Returns a dict with the raw signal values. Higher ``ai_likelihood``
         means the text looks more AI-generated (low perplexity + high
-        uniformity).
+        uniformity). The code LM (CodeGPT-small-py) is trained on Python only,
+        so other languages are scored with the statistical model.
         """
         chunks = _windowed_chunks(code, self.window, self.overlap)
         if not chunks:
@@ -313,7 +317,7 @@ class PerplexityScorer:
         per_chunk: list[dict[str, Any]] = []
         chunk_scores: list[float] = []
         model_used = "statistical"
-        if self._transformer_available:
+        if self._transformer_available and language.lower() in _LM_LANGUAGES:
             try:
                 per_chunk, chunk_scores = self._score_chunks(chunks, self._transformer_perplexity)
                 model_used = "huggingface"

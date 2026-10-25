@@ -364,7 +364,7 @@ class AIEnsembleScorer:
         stylometry_signals = self._stylometry_signals(stylometry)
 
         # 3. Perplexity / burstiness
-        perp_result = self._perplexity_scorer.score(code)
+        perp_result = self._perplexity_scorer.score(code, language=language)
         # Map a perplexity value to an AI-likeness score in [0,1]. The mapping
         # is log-scaled, so it stays meaningful for both the statistical model
         # (perplexity ~2-3) and a HuggingFace code LM (perplexity in thousands).
