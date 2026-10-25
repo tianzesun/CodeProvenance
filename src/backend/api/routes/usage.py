@@ -134,12 +134,16 @@ def get_usage_summary(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
 
     limits = limits_for_tier(getattr(tenant, "tier", None))
-    return usage_schema.UsageSummary(
-        tenant_id=tenant.id,
-        current_period=period,
-        usage=usage,
-        limits=limits,
-        remaining=remaining_quota(usage, limits),
+    # model_validate rather than the constructor: tenant.id and usage are ORM
+    # values that Pydantic coerces (usage via from_attributes) at runtime.
+    return usage_schema.UsageSummary.model_validate(
+        {
+            "tenant_id": tenant.id,
+            "current_period": period,
+            "usage": usage,
+            "limits": limits,
+            "remaining": remaining_quota(usage, limits),
+        }
     )
 
 

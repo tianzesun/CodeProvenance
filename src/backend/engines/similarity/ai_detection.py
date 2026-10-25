@@ -379,9 +379,14 @@ class AIDetectionEngine:
             "pattern_library": self._signal_pattern_library(code),
             "structural_entropy": self._signal_structural_entropy(code, language),
             "vocabulary_richness": self._signal_vocabulary_richness(code),
-            "whitespace_rhythm": self._signal_whitespace_rhythm(code),
             "docstring_density": self._signal_docstring_density(code),
         }
+        # Too few blank-line runs is no evidence either way, so the signal is left
+        # out like a failed AST analysis below. Reporting 0.0 read as "strongly
+        # human" for ~60% of files and fed the safeguards' contradiction penalty.
+        whitespace_rhythm = self._signal_whitespace_rhythm(code)
+        if whitespace_rhythm is not None:
+            signals["whitespace_rhythm"] = whitespace_rhythm
 
         # Add transformer perplexity if enabled
         if self.use_transformer:
@@ -643,10 +648,11 @@ class AIDetectionEngine:
         hapax_score = max(0.0, min(1.0, 1.0 - hapax_ratio))
         return 0.6 * ttr_score + 0.4 * hapax_score
 
-    def _signal_whitespace_rhythm(self, code: str) -> float:
+    def _signal_whitespace_rhythm(self, code: str) -> float | None:
         """Whitespace rhythm signal.
 
-        LLMs produce very regular blank-line spacing.
+        LLMs produce very regular blank-line spacing. Returns None when there are
+        fewer than three blank-line runs to compare.
         """
         lines = code.splitlines()
         runs: list[int] = []
@@ -662,7 +668,7 @@ class AIDetectionEngine:
             runs.append(run)
 
         if len(runs) < 3:
-            return 0.0
+            return None
 
         run_counter: Counter = Counter(runs)
         entropy = _safe_entropy(run_counter)

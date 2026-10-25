@@ -67,6 +67,11 @@ class ComparisonResult:
     code_b: str | None = None
 
 
+#: Highest score for a pair whose overlap is mostly starter/boilerplate code; the
+#: rule engine's REVIEW score for that case (``FusionEngine._shared_region_result``).
+STARTER_REVIEW_CEILING = 0.5
+
+
 def _risk_level(score: float) -> str:
     """Convert similarity score to review priority level.
 
@@ -231,13 +236,28 @@ class BatchDetectionService:
         features: Any,
         logic_flow: float,
         fused: Any,
+        code_a: str | None = None,
+        code_b: str | None = None,
     ) -> float:
         """Return the effective similarity score for a code pair.
 
         Uses the learned fusion model's calibrated probability when a trained
         artifact is available; otherwise falls back to the rule-based
         ``FusedScore`` from ``FusionEngine`` unchanged.
+
+        A pair where either side has no code once comments are stripped scores
+        0.0: the token-overlap features all report 1.0 for two empty inputs,
+        which the learned model turned into a ~0.97 "critical" match.
         """
+        if (
+            code_a is not None
+            and code_b is not None
+            and (
+                not _strip_comments(code_a).strip()
+                or not _strip_comments(code_b).strip()
+            )
+        ):
+            return 0.0
         learned_scorer = getattr(self, "learned_scorer", None)
         if learned_scorer is not None and learned_scorer.available:
             learned = learned_scorer.score(
@@ -256,7 +276,7 @@ class BatchDetectionService:
             )  # keep exact-match override
         else:
             base = fused.final_score
-        return _apply_structure_sensitivity_floor(
+        score = _apply_structure_sensitivity_floor(
             base,
             features.ast,
             features.fingerprint,
@@ -264,6 +284,18 @@ class BatchDetectionService:
             features.ngram,
             features.winnowing,
         )
+        from src.backend.engines.scoring.fusion_engine import (
+            STARTER_OVERLAP_CAP,
+            FusionEngine,
+        )
+
+        # The rule engine never auto-escalates overlap that is mostly starter or
+        # boilerplate code (it returns REVIEW at 0.5), but the learned score and
+        # the structure floor replaced that, so untouched starter files scored
+        # as critical matches.
+        if FusionEngine._shared_region_overlap(features) >= STARTER_OVERLAP_CAP:
+            score = min(score, STARTER_REVIEW_CEILING)
+        return score
 
     def ingest_folder(self, folder: Path) -> dict[str, str]:
         """Read all code files from a folder.
@@ -324,7 +356,9 @@ class BatchDetectionService:
         import os
         import threading
 
-        files = list(submissions.keys())
+        # Sorted, not upload order: a few features (coverage, ast) depend on which
+        # file comes first, so the same pair could score differently on re-upload.
+        files = sorted(submissions)
         total_pairs = len(files) * (len(files) - 1) // 2
 
         # Build pair list
@@ -488,7 +522,7 @@ class BatchDetectionService:
         features = self.extractor.extract(ca, cb, filename_a=fa, filename_b=fb)
         logic_flow = _logic_flow_similarity(ca, cb)
         fused = self.fusion.fuse(features, logic_flow=logic_flow)
-        final_score = self._primary_score(features, logic_flow, fused)
+        final_score = self._primary_score(features, logic_flow, fused, ca, cb)
 
         # Compute matching blocks for highlighting
         match_result = highlighter.find_matching_segments(ca, cb)
@@ -569,7 +603,7 @@ class BatchDetectionService:
             features = self.extractor.extract(ca, cb, filename_a=fa, filename_b=fb)
             logic_flow = _logic_flow_similarity(ca, cb)
             fused = self.fusion.fuse(features, logic_flow=logic_flow)
-            raw_score = self._primary_score(features, logic_flow, fused)
+            raw_score = self._primary_score(features, logic_flow, fused, ca, cb)
 
             # Compute matching blocks
             match_result = highlighter.find_matching_segments(ca, cb)
@@ -866,7 +900,7 @@ class BatchDetectionService:
         )
         logic_flow = _logic_flow_similarity(chunk_a, chunk_b)
         fused = self.fusion.fuse(features, logic_flow=logic_flow)
-        final_score = self._primary_score(features, logic_flow, fused)
+        final_score = self._primary_score(features, logic_flow, fused, chunk_a, chunk_b)
 
         # Compute matching blocks
         match_result = highlighter.find_matching_segments(chunk_a, chunk_b)

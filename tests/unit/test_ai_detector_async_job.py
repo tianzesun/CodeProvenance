@@ -1,6 +1,9 @@
 """Unit tests for the async AI-detection job and the code-LM cache."""
 
+import pytest
+
 from src.backend.api import server
+from src.backend.engines.ai import orchestrator as orchestrator_module
 from src.backend.engines.ai.perplexity import (
     PerplexityScorer,
     _TRANSFORMER_CACHE,
@@ -93,6 +96,71 @@ class TestFinalizeAIDetectionJob:
             assert server._jobs["job-bad"]["status"] == "failed"
         finally:
             server._jobs.pop("job-bad", None)
+
+
+class TestAIDetectionSummaryFailures:
+    """Files the detector could not score must not count as real low scores."""
+
+    GOOD_CODE = "def add(a, b):\n    return a + b\n" * 5
+
+    def _patch_orchestrator(self, monkeypatch) -> None:
+        real_cls = orchestrator_module.AIDetectionOrchestrator
+
+        class FlakyOrchestrator(real_cls):
+            def analyze(self, code, language="python"):
+                if "RAISE" in code:
+                    raise RuntimeError("secret internal detail")
+                if "SWALLOWED" in code:
+                    return {"ai_probability": 0.0, "error": "legacy engine failed"}
+                return super().analyze(code, language=language)
+
+        monkeypatch.setattr(
+            orchestrator_module, "AIDetectionOrchestrator", FlakyOrchestrator
+        )
+
+    def test_failed_files_are_excluded_from_batch_statistics(self, monkeypatch) -> None:
+        self._patch_orchestrator(monkeypatch)
+        summary = server._build_ai_detection_summary(
+            {
+                "good.py": self.GOOD_CODE,
+                "raised.py": "RAISE",
+                "swallowed.py": "SWALLOWED",
+            }
+        )
+
+        good = next(e for e in summary["submissions"] if e["name"] == "good.py")
+        assert summary["total_files"] == 3
+        assert summary["failed_files"] == 2
+        assert sum(summary["distribution"].values()) == 1
+        assert summary["average_score"] == good["ai_probability"]
+
+    def test_failed_entries_do_not_leak_exception_text(self, monkeypatch) -> None:
+        self._patch_orchestrator(monkeypatch)
+        summary = server._build_ai_detection_summary(
+            {"good.py": self.GOOD_CODE, "raised.py": "RAISE"}
+        )
+
+        failed = next(e for e in summary["submissions"] if e["name"] == "raised.py")
+        assert failed["status"] == "Not scored"
+        assert "secret internal detail" not in str(failed)
+
+    def test_every_file_failing_raises(self, monkeypatch) -> None:
+        self._patch_orchestrator(monkeypatch)
+        with pytest.raises(ValueError, match="every submitted file"):
+            server._build_ai_detection_summary({"a.py": "RAISE", "b.py": "SWALLOWED"})
+
+    def test_orchestrator_init_failure_raises_instead_of_crashing(
+        self, monkeypatch
+    ) -> None:
+        def broken_init(self):
+            raise RuntimeError("cannot load")
+
+        monkeypatch.setattr(
+            orchestrator_module.AIDetectionOrchestrator, "__init__", broken_init
+        )
+        # Used to hit UnboundLocalError on calibration_info.
+        with pytest.raises(ValueError, match="every submitted file"):
+            server._build_ai_detection_summary({"a.py": self.GOOD_CODE})
 
 
 class TestAssignmentResolution:

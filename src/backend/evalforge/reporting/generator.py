@@ -27,6 +27,12 @@ class ReportGenerator:
         if self.evaluation is None:
             self.evaluation = self.runner.evaluate()
 
+    @property
+    def _evaluation(self) -> dict[str, Any]:
+        """Evaluation results; always populated by ``__post_init__``."""
+        assert self.evaluation is not None
+        return self.evaluation
+
     def to_json(self, path: Path) -> None:
         """Save full report as JSON."""
         report = {
@@ -61,7 +67,7 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
 \midrule
 """
 
-        for detector_name, data in self.evaluation.items():
+        for detector_name, data in self._evaluation.items():
             if detector_name == "agreement":
                 continue
 
@@ -83,7 +89,7 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
 
     def to_html(self, path: Path) -> None:
         """Generate interactive HTML dashboard."""
-        [d for d in self.evaluation if d != "agreement"]
+        [d for d in self._evaluation if d != "agreement"]
 
         html = f"""<!DOCTYPE html>
 <html>
@@ -123,7 +129,7 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
             <tbody>
 """
 
-        for detector_name, data in self.evaluation.items():
+        for detector_name, data in self._evaluation.items():
             if detector_name == "agreement":
                 continue
 
@@ -152,11 +158,11 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
 
         # Show per-clone-type performance for best detector
         best_detector = max(
-            (d for d in self.evaluation if d != "agreement"),
-            key=lambda d: self.evaluation[d]["metrics"]["f1"],
+            (d for d in self._evaluation if d != "agreement"),
+            key=lambda d: self._evaluation[d]["metrics"]["f1"],
         )
 
-        per_type = self.evaluation[best_detector]["metrics"]["per_clone_type"]
+        per_type = self._evaluation[best_detector]["metrics"]["per_clone_type"]
         clone_type_names = [
             "Unrelated",
             "Low Similarity",
@@ -194,7 +200,7 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
         best_f1 = 0.0
         best_detector = None
 
-        for detector_name, data in self.evaluation.items():
+        for detector_name, data in self._evaluation.items():
             if detector_name == "agreement":
                 continue
 
@@ -207,7 +213,7 @@ Detector & Precision & Recall & F1 & ROC-AUC & PR-AUC & ECE \\
         lines.append("")
         lines.append("All detectors:")
 
-        for detector_name, data in self.evaluation.items():
+        for detector_name, data in self._evaluation.items():
             if detector_name == "agreement":
                 continue
 
