@@ -9901,6 +9901,117 @@ def _job_submission_names(job: dict[str, Any]) -> set[str]:
     return names
 
 
+async def _read_sharing_request(request: Request) -> tuple[bool, list[str]]:
+    """Parse ``{"workspace": bool, "user_ids": [str, ...]}``."""
+    try:
+        payload = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid sharing payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid sharing payload")
+    workspace = payload.get("workspace", False)
+    user_ids = payload.get("user_ids", [])
+    if not isinstance(workspace, bool) or not (
+        isinstance(user_ids, list) and all(isinstance(u, str) for u in user_ids)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="workspace must be true/false and user_ids a list of ids",
+        )
+    return workspace, user_ids
+
+
+def _apply_sharing(
+    db: Any,
+    resource_type: str,
+    resource_id: str,
+    user: dict[str, Any],
+    workspace: bool,
+    user_ids: list[str],
+) -> dict[str, Any]:
+    try:
+        shares = sharing.set_sharing(
+            db,
+            resource_type,
+            resource_id,
+            sharer=user,
+            workspace=workspace,
+            user_ids=user_ids,
+        )
+    except sharing.SharingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {**shares, "can_manage": True}
+
+
+def _can_manage_job_sharing(db: Any, job: dict[str, Any], user: dict[str, Any]) -> bool:
+    """The uploader, or a primary instructor of the job's course."""
+    if str(job.get("owner_user_id") or "") == str(user.get("id") or ""):
+        return True
+    course_id = _assignment_course_id(job.get("assignment_id"))
+    return bool(course_id) and sharing.can_manage_course_sharing(db, user, course_id)
+
+
+@app.get("/api/courses/{course_id}/sharing")
+async def get_course_sharing(course_id: str, request: Request):
+    """Who a course is shared with, for anyone who can see the course."""
+    user = _require_non_guest(request)
+    with SessionLocal() as db:
+        if not academic_access.can_read_course(db, user, course_id):
+            raise HTTPException(status_code=404, detail="Course not found")
+        return {
+            **sharing.get_sharing(db, "course", course_id),
+            "can_manage": sharing.can_manage_course_sharing(db, user, course_id),
+        }
+
+
+@app.put("/api/courses/{course_id}/sharing")
+async def set_course_sharing(course_id: str, request: Request):
+    """Replace a course's shares (its primary instructors only)."""
+    user = _require_non_guest(request)
+    workspace, user_ids = await _read_sharing_request(request)
+    with SessionLocal() as db:
+        if not academic_access.can_read_course(db, user, course_id):
+            raise HTTPException(status_code=404, detail="Course not found")
+        if not sharing.can_manage_course_sharing(db, user, course_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the course's primary instructors can change sharing",
+            )
+        result = _apply_sharing(db, "course", course_id, user, workspace, user_ids)
+    _JOB_LIST_CACHE.clear()  # the course's jobs move in or out of job lists
+    return result
+
+
+@app.get("/api/job/{job_id}/sharing")
+async def get_job_sharing(job_id: str, request: Request):
+    """Who an analysis is shared with (beyond its course's audience)."""
+    user = _require_non_guest(request)
+    job = _require_job_access(job_id, request)
+    with SessionLocal() as db:
+        return {
+            **sharing.get_sharing(db, "job", job_id),
+            "can_manage": _can_manage_job_sharing(db, job, user),
+        }
+
+
+@app.put("/api/job/{job_id}/sharing")
+async def set_job_sharing(job_id: str, request: Request):
+    """Replace an analysis's shares (its uploader or course instructors)."""
+    user = _require_non_guest(request)
+    job = _require_job_access(job_id, request)
+    workspace, user_ids = await _read_sharing_request(request)
+    with SessionLocal() as db:
+        if not _can_manage_job_sharing(db, job, user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the uploader or the course's primary instructors "
+                "can change sharing",
+            )
+        result = _apply_sharing(db, "job", job_id, user, workspace, user_ids)
+    _JOB_LIST_CACHE.clear()  # shared users' job lists change
+    return result
+
+
 @app.put("/api/job/{job_id}/viva")
 async def record_viva_outcome(job_id: str, request: Request):
     """Record (upsert) the viva outcome for one student submission.

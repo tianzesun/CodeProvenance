@@ -205,3 +205,89 @@ def test_primary_instructors_manage_sharing_but_tas_do_not(world) -> None:
         assert not sharing.can_manage_course_sharing(
             db, _user(world, "colleague"), world["course"]
         )
+
+
+def _client_as(world, name: str, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from fastapi.testclient import TestClient
+    from jose import jwt as jose_jwt
+
+    from src.backend.config.settings import settings as app_settings
+
+    user = _user(world, name)
+    monkeypatch.setattr(server, "_authenticate_request", lambda *a, **k: dict(user))
+    now = datetime.now(timezone.utc)
+    token = jose_jwt.encode(
+        {"sub": user["id"], "exp": now + timedelta(minutes=30), "iat": now},
+        app_settings.auth_jwt_secret or "unit-test-secret",
+        algorithm="HS256",
+    )
+    client = TestClient(server.app)
+    client.cookies.set(server.AUTH_COOKIE_NAME, token)
+    return client
+
+
+def test_course_sharing_endpoints(world, monkeypatch) -> None:
+    url = f"/api/courses/{world['course']}/sharing"
+    body = {"workspace": False, "user_ids": [world["colleague"]]}
+
+    assert _client_as(world, "colleague", monkeypatch).get(url).status_code == 404
+    assert _client_as(world, "ta", monkeypatch).put(url, json=body).status_code == 403
+    owner = _client_as(world, "owner", monkeypatch)
+    rejected = owner.put(
+        url, json={"workspace": False, "user_ids": [world["outsider"]]}
+    )
+    assert rejected.status_code == 400
+    assert owner.put(url, json={"workspace": "yes"}).status_code == 400
+
+    saved = owner.put(url, json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["user_ids"] == [world["colleague"]]
+
+    colleague = _client_as(world, "colleague", monkeypatch)
+    seen = colleague.get(url)
+    assert seen.status_code == 200
+    assert seen.json()["can_manage"] is False
+    assert colleague.put(url, json={"workspace": True}).status_code == 403
+
+
+def test_job_sharing_endpoints(world, monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(server, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(server, "_jobs", {})
+    server._jobs[world["job"]] = {
+        "id": world["job"],
+        "status": "completed",
+        "assignment_id": world["assignment"],
+        "owner_user_id": world["ta"],
+        "results": [],
+    }
+    url = f"/api/job/{world['job']}/sharing"
+
+    assert _client_as(world, "colleague", monkeypatch).get(url).status_code == 404
+    # The course's primary instructor manages it, though the TA uploaded it.
+    owner = _client_as(world, "owner", monkeypatch)
+    saved = owner.put(url, json={"workspace": True, "user_ids": []})
+    assert saved.status_code == 200, saved.text
+
+    seen = _client_as(world, "colleague", monkeypatch).get(url)
+    assert seen.status_code == 200
+    assert seen.json()["workspace"] is True
+    assert _client_as(world, "outsider", monkeypatch).get(url).status_code == 404
+
+
+def test_case_sharing_endpoints(world, monkeypatch) -> None:
+    case_url = f"/api/cases/{world['case']}"
+
+    assert _client_as(world, "colleague", monkeypatch).get(case_url).status_code == 404
+    shared = _client_as(world, "owner", monkeypatch).put(
+        f"{case_url}/sharing", json={"user_ids": [world["colleague"]]}
+    )
+    assert shared.status_code == 200, shared.text
+
+    colleague = _client_as(world, "colleague", monkeypatch)
+    assert colleague.get(case_url).status_code == 200
+    assert (
+        colleague.put(f"{case_url}/sharing", json={"workspace": True}).status_code
+        == 403
+    )

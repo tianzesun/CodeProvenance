@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from src.backend.application.services import academic_access
 from src.backend.models.database import (
     SHARE_RESOURCE_TYPES,
+    Assignment,
     Case,
     CourseInstructor,
     ResourceShare,
@@ -243,7 +244,13 @@ def set_sharing(
     return get_sharing(db, resource_type, resource_id)
 
 
-def case_in_scope(db: Session, case: Case, user: dict, scope: AccessScope) -> bool:
+def case_in_scope(
+    db: Session,
+    case: Case,
+    user: dict,
+    scope: AccessScope,
+    assignment_courses: dict[str, str | None] | None = None,
+) -> bool:
     """Whether the caller may see a case (and so, with full edit, change it).
 
     Its creator and assigned reviewer, anyone it or its course was shared
@@ -255,8 +262,11 @@ def case_in_scope(db: Session, case: Case, user: dict, scope: AccessScope) -> bo
     if str(case.id) in scope.shared_case_ids or scope.is_platform_admin:
         return True
     if case.assignment_id:
-        course_id = academic_access.course_id_for_assignment(
-            db, str(case.assignment_id)
+        key = str(case.assignment_id)
+        course_id = (
+            assignment_courses.get(key)
+            if assignment_courses is not None
+            else academic_access.course_id_for_assignment(db, key)
         )
         if course_id and course_id in scope.course_ids:
             return True
@@ -265,3 +275,12 @@ def case_in_scope(db: Session, case: Case, user: dict, scope: AccessScope) -> bo
         and scope.organization_id
         and str(case.organization_id) == scope.organization_id
     )
+
+
+def assignment_course_map(db: Session, cases: Iterable[Case]) -> dict[str, str | None]:
+    """Course of each case's assignment, in one query (for case lists)."""
+    ids = {str(case.assignment_id) for case in cases if case.assignment_id}
+    if not ids:
+        return {}
+    rows = db.query(Assignment.id, Assignment.course_id).filter(Assignment.id.in_(ids))
+    return {str(aid): str(cid) if cid else None for aid, cid in rows.all()}

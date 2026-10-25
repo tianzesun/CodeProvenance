@@ -390,12 +390,14 @@ async def list_cases(
     scope = sharing.access_scope(db, user)
     # Fetch the organization's cases, then keep the caller's; a small limit
     # applied before filtering could hide every case they can see.
+    candidates = service.get_cases_by_organization(
+        organization_id=tenant["id"], status=status, limit=1000
+    )
+    courses = sharing.assignment_course_map(db, candidates)
     cases = [
         case
-        for case in service.get_cases_by_organization(
-            organization_id=tenant["id"], status=status, limit=1000
-        )
-        if sharing.case_in_scope(db, case, user, scope)
+        for case in candidates
+        if sharing.case_in_scope(db, case, user, scope, courses)
     ][:limit]
     _preload_case_relations(db, cases)
     return [_serialize_case(c) for c in cases]
@@ -513,6 +515,70 @@ async def link_result(
     _require_result_in_org(db, payload.result_id, user, tenant)
     link = service.link_result(case_id, payload.result_id)
     return _serialize_result_link(link)
+
+
+class CaseSharing(BaseModel):
+    """Who a case is shared with beyond its owners and its course's audience."""
+
+    workspace: bool = False
+    user_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+def _can_manage_case_sharing(db: Session, case: Case, user: dict) -> bool:
+    """The case's creator, or a primary instructor of its course."""
+    if str(case.created_by_id or "") == str(user.get("id") or ""):
+        return True
+    course_id = (
+        academic_access.course_id_for_assignment(db, str(case.assignment_id))
+        if case.assignment_id
+        else None
+    )
+    return bool(course_id) and sharing.can_manage_course_sharing(db, user, course_id)
+
+
+@router.get("/cases/{case_id}/sharing", response_model=dict)
+async def get_case_sharing(
+    case_id: uuid.UUID,
+    user=Depends(get_current_user),
+    tenant=Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    """Who a case is shared with, for anyone who can see it."""
+    case = _load_case_for_tenant(CaseService(db), case_id, tenant, user)
+    return {
+        **sharing.get_sharing(db, "case", str(case_id)),
+        "can_manage": _can_manage_case_sharing(db, case, user),
+    }
+
+
+@router.put("/cases/{case_id}/sharing", response_model=dict)
+async def set_case_sharing(
+    case_id: uuid.UUID,
+    payload: CaseSharing,
+    user=Depends(get_current_user),
+    tenant=Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    """Replace a case's shares (its creator or course instructors)."""
+    case = _load_case_for_tenant(CaseService(db), case_id, tenant, user)
+    if not _can_manage_case_sharing(db, case, user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the case's creator or the course's primary instructors "
+            "can change sharing",
+        )
+    try:
+        shares = sharing.set_sharing(
+            db,
+            "case",
+            str(case_id),
+            sharer=user,
+            workspace=payload.workspace,
+            user_ids=[str(uid) for uid in payload.user_ids],
+        )
+    except sharing.SharingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {**shares, "can_manage": True}
 
 
 @router.post("/cases/{case_id}/comments", response_model=dict, status_code=201)
