@@ -10,6 +10,7 @@ import {
   StatusBadge,
 } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
+import ShareDialog from '@/components/ShareDialog';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -184,6 +185,7 @@ export default function CompareCasePage() {
   const [noteText, setNoteText] = useState('');
   const [pendingAction, setPendingAction] = useState<ActionName | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
@@ -454,6 +456,22 @@ export default function CompareCasePage() {
           eyebrowStyle="badge"
           title="Instructor Review Case"
           description={`${assignmentCourse} · ${assignmentTitle}`}
+          action={
+            <button
+              type="button"
+              onClick={() => setShareOpen(true)}
+              className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold"
+            >
+              Share
+            </button>
+          }
+        />
+        <ShareDialog
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          endpoint={`${casePath}/sharing`}
+          itemLabel="this case"
+          scopeNote="Everyone its course is shared with can already see this case."
         />
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-600 dark:text-slate-400">

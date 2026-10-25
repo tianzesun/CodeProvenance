@@ -14,6 +14,7 @@ interface WebAnalysisSubmission {
   match_count?: number;
 }
 import { ButtonLink, Card, Modal } from '@/components/saas/SaaSPrimitives';
+import ShareDialog from '@/components/ShareDialog';
 import {
   AlertCircle,
   CheckCircle2,
@@ -345,6 +346,7 @@ export default function ResultsPage() {
   // the review PATCH is rejected server-side, so the controls stay read-only
   // here rather than showing an optimistic status that was never saved.
   const isGuest = user?.role === 'guest';
+  const [shareOpen, setShareOpen] = useState(false);
   const leftRef = useRef(null);
   const rightRef = useRef(null);
   const syncingRef = useRef(false);
@@ -741,11 +743,27 @@ export default function ResultsPage() {
                 Omitted for the guest demo: /dossier is outside the demo's
                 route set, so the link would only bounce back to the checker. */}
             {!isGuest && (
-              <div className="shrink-0 sm:pt-1">
+              <div className="flex shrink-0 items-center gap-2 sm:pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShareOpen(true)}
+                  className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold"
+                >
+                  Share
+                </button>
                 <ButtonLink href={`/dossier/${encId}`} variant="secondary">
                   Evidence Dossier &amp; Viva Questions
                 </ButtonLink>
               </div>
+            )}
+            {!isGuest && (
+              <ShareDialog
+                open={shareOpen}
+                onClose={() => setShareOpen(false)}
+                endpoint={`/api/job/${encId}/sharing`}
+                itemLabel="this analysis"
+                scopeNote="Shares this analysis, its dossier and viva outcomes. Everyone its course is shared with can already see it."
+              />
             )}
           </div>
 
