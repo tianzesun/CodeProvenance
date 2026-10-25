@@ -48,7 +48,10 @@ _alerted_lock = threading.Lock()
 
 
 def _webhook_url() -> str | None:
-    """Return the validated workspace webhook URL, if one is configured.
+    """Return the validated platform webhook URL (server config), if one is set.
+
+    The platform webhook hears about every stuck job; each workspace's own
+    webhook hears about that workspace's (``_workspace_webhook_url``).
 
     Returns:
         The URL string, or ``None`` when unset or failing validation.
@@ -60,7 +63,30 @@ def _webhook_url() -> str | None:
         url = raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw
     except Exception:
         return None
-    if not (url or "").strip():
+    return _validated(url)
+
+
+def _workspace_webhook_url(tenant_id: str | None) -> str | None:
+    """Return the validated webhook URL a workspace saved, if any."""
+    if not tenant_id:
+        return None
+    try:
+        from src.backend.config.database import SessionLocal
+        from src.backend.models.database import Tenant
+
+        with SessionLocal() as db:
+            tenant = db.get(Tenant, tenant_id)
+            record = (
+                tenant.settings if tenant and isinstance(tenant.settings, dict) else {}
+            )
+    except Exception:
+        logger.debug("Could not read workspace %s webhook", tenant_id)
+        return None
+    return _validated(record.get("webhook_url"))
+
+
+def _validated(url: Any) -> str | None:
+    if not isinstance(url, str) or not url.strip():
         return None
     try:
         from src.backend.api.routes.jobs import validate_webhook_url
@@ -130,6 +156,11 @@ def _stuck_jobs(
                             "name": getattr(row, "name", "") or "",
                             "status": str(row.status),
                             "age_seconds": round(age_seconds, 1),
+                            "tenant_id": (
+                                str(row.tenant_id)
+                                if getattr(row, "tenant_id", None)
+                                else None
+                            ),
                         }
                     )
     except Exception:
@@ -213,27 +244,46 @@ def check_and_alert() -> dict[str, Any]:
     }
     if not fresh:
         return summary
-    url = _webhook_url()
-    if not url:
+    # The platform webhook gets every stuck job; a workspace's own webhook
+    # gets its own (this used to be whichever workspace's URL a request had
+    # last applied to the shared settings).
+    targets: dict[str, list[dict[str, Any]]] = {}
+    platform_url = _webhook_url()
+    if platform_url:
+        targets[platform_url] = list(fresh)
+    by_workspace: dict[str, list[dict[str, Any]]] = {}
+    for job in fresh:
+        if job.get("tenant_id"):
+            by_workspace.setdefault(job["tenant_id"], []).append(job)
+    for tenant_id, jobs in by_workspace.items():
+        url = _workspace_webhook_url(tenant_id)
+        if url and url != platform_url:
+            targets.setdefault(url, []).extend(jobs)
+    if not targets:
         logger.info(
             "Queue watchdog: %d stuck job(s) but no webhook URL configured",
             len(fresh),
         )
         return summary
-    payload = {
-        "event": "jobs.stuck",
-        "checked_at": datetime.now(timezone.utc).isoformat(),
-        "stuck": fresh,
-        "workers": summary["workers"],
-        "message": (
-            f"{len(fresh)} job(s) stuck beyond their age threshold: "
-            + ", ".join(job["id"][:8] for job in fresh)
-        ),
-    }
-    if _post_alert(url, payload):
+    delivered: set[str] = set()
+    for url, jobs in targets.items():
+        listed = [{k: v for k, v in job.items() if k != "tenant_id"} for job in jobs]
+        payload = {
+            "event": "jobs.stuck",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "stuck": listed,
+            "workers": summary["workers"],
+            "message": (
+                f"{len(jobs)} job(s) stuck beyond their age threshold: "
+                + ", ".join(job["id"][:8] for job in jobs)
+            ),
+        }
+        if _post_alert(url, payload):
+            delivered.update(job["id"] for job in jobs)
+    if delivered:
         with _alerted_lock:
-            _alerted_job_ids.update(job["id"] for job in fresh)
-        summary["alerted"] = [job["id"] for job in fresh]
+            _alerted_job_ids.update(delivered)
+        summary["alerted"] = [job["id"] for job in fresh if job["id"] in delivered]
     return summary
 
 

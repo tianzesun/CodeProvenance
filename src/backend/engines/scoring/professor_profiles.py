@@ -210,12 +210,22 @@ def professor_profile_catalog() -> dict[str, Any]:
             },
         ],
         "previous_term_matching": [
-            {"id": "off", "label": "Off"},
-            {"id": "same_course_only", "label": "Same course only", "available": False},
+            {
+                "id": "off",
+                "label": "Off",
+                "description": "Compare this class's submissions with each other only.",
+            },
+            {
+                "id": "same_course_only",
+                "label": "Earlier offerings of this course",
+                "description": "Also check each submission against past terms of the same "
+                "course code (courses you can open). Catches reused past solutions.",
+            },
             {
                 "id": "all_historical_courses",
-                "label": "All historical courses",
-                "available": False,
+                "label": "All my earlier courses",
+                "description": "Also check against every earlier course you can open. "
+                "Slower; useful when assignments move between courses.",
             },
         ],
         "ai_rewrite_detection": [
@@ -330,8 +340,6 @@ def apply_professor_profile(raw: dict[str, Any] | None) -> AppliedProfessorProfi
     warnings = list(notes)
     if profile.starter_code_handling == "include_starter_code":
         warnings.append("Including starter code can increase false positives.")
-    if profile.previous_term_matching == "off":
-        warnings.append("Previous-term reuse will not be checked.")
 
     return AppliedProfessorProfile(
         profile=profile,

@@ -13,6 +13,7 @@ EMAIL_PASSWORD, EMAIL_FROM, EMAIL_USE_TLS and SENDGRID_API_KEY environment
 variables.
 """
 
+import html
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -47,6 +48,10 @@ def _configured_value(attr: str, env_name: str, default: Any) -> Any:
     live = _live_settings()
     if live is not None:
         value = getattr(live, attr, None)
+        # EMAIL_PASSWORD / SENDGRID_API_KEY are SecretStr: str() of one is the
+        # "**********" mask, which was sent to the mail server as the password.
+        if hasattr(value, "get_secret_value"):
+            value = value.get_secret_value()
         if value not in (None, ""):
             return value
     return os.getenv(env_name, default)
@@ -127,6 +132,42 @@ class EmailService:
             "Email delivery is working.\n\n"
             "This is a test message sent from the IntegrityDesk settings page."
         )
+        return await EmailService._deliver(to_email, subject, html_body, text_body)
+
+    @staticmethod
+    async def send_analysis_finished_email(
+        to_email: str,
+        *,
+        title: str,
+        succeeded: bool,
+        submissions: int,
+        flagged_pairs: int,
+        results_url: str,
+    ) -> bool:
+        """Tell the uploader that their analysis finished (no student details)."""
+        safe_title = html.escape(title)
+        safe_url = html.escape(results_url, quote=True)
+        if succeeded:
+            subject = f"Analysis finished: {title}"
+            summary = (
+                f"{submissions} submissions compared; "
+                f"{flagged_pairs} pair{'s' if flagged_pairs != 1 else ''} flagged for review."
+            )
+        else:
+            subject = f"Analysis failed: {title}"
+            summary = (
+                "The analysis could not be completed. Open it to see what happened."
+            )
+        html_body = (
+            '<div style="font-family: Arial, sans-serif; max-width: 600px;">'
+            f"<h2>{html.escape(subject)}</h2>"
+            f"<p>{html.escape(summary)}</p>"
+            f'<p><a href="{safe_url}">Open {safe_title} in IntegrityDesk</a></p>'
+            '<p style="color: #999; font-size: 12px;">You get this email because your '
+            "workspace sends a message when an analysis finishes.</p>"
+            "</div>"
+        )
+        text_body = f"{subject}\n\n{summary}\n\nOpen it: {results_url}\n"
         return await EmailService._deliver(to_email, subject, html_body, text_body)
 
     @staticmethod

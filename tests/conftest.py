@@ -15,6 +15,10 @@ from fastapi.testclient import TestClient
 # takes hours (and its results depend on a model download being present).
 # Tests that specifically exercise Binoculars inject a fake instance instead.
 os.environ.setdefault("BINOCULARS_ENABLED", "0")
+# Workspace credentials are sealed at rest; tests use a fixed, test-only key.
+os.environ.setdefault(
+    "SETTINGS_ENCRYPTION_KEY", "dGVzdC1vbmx5LWtleS1kby1ub3QtdXNlLWluLXByb2Q="
+)
 
 # Add backend to Python path
 backend_path = Path(__file__).parent.parent / "src" / "backend"
@@ -79,9 +83,9 @@ def override_setting() -> Generator[Callable[[str, object], None], None, None]:
         """Set a settings field, remembering its previous value for restoration."""
         if name not in original:
             original[name] = getattr(settings, name)
-        object.__setattr__(settings, name, value)
+        setattr(settings, name, value)
 
     yield _override
 
     for name, value in original.items():
-        object.__setattr__(settings, name, value)
+        setattr(settings, name, value)

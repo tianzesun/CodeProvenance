@@ -99,6 +99,11 @@ AUTH_JWT_SECRET="${AUTH_JWT_SECRET:-$(openssl rand -hex 32)}"
 WEBHOOK_SECRET_KEY="${WEBHOOK_SECRET_KEY:-$(openssl rand -hex 32)}"
 
 ENV_FILE="$APP_DIR/src/backend/.env.local"
+# Encrypts the credentials workspaces save. Prefer injecting it from your secret
+# store; otherwise keep the existing key on re-runs (a new one would make every
+# stored credential unreadable).
+EXISTING_SETTINGS_KEY="$(grep -s '^SETTINGS_ENCRYPTION_KEY=' "$ENV_FILE" | cut -d= -f2- || true)"
+SETTINGS_ENCRYPTION_KEY="${SETTINGS_ENCRYPTION_KEY:-${EXISTING_SETTINGS_KEY:-$(openssl rand -base64 32)}}"
 BACKEND_URL="http://127.0.0.1:$BACKEND_PORT"
 FRONTEND_URL="https://$APP_DOMAIN"
 
@@ -119,6 +124,7 @@ JWT_REFRESH_TOKEN_EXPIRE_DAYS=7
 # Session cookies are served over HTTPS (certbot TLS), so mark them Secure.
 AUTH_COOKIE_SECURE=true
 WEBHOOK_SECRET_KEY=$WEBHOOK_SECRET_KEY
+SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 DATABASE_URL=$DATABASE_URL
 DATABASE_POOL_SIZE=10
 DATABASE_MAX_OVERFLOW=20

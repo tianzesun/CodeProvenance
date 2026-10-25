@@ -6,42 +6,20 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.backend.api import server
+from src.backend.infrastructure import secret_box
 
 
-@pytest.fixture
-def server_key(monkeypatch):
-    """A server started with OPENAI_API_KEY=server-configured-key."""
-    attr = "OPENAI_API_KEY"
-    key = "server-configured-key"
-    monkeypatch.setitem(server._SERVER_SECRET_BASELINE, attr, (key, key))
-    monkeypatch.setenv(attr, key)
-    before = server.settings.OPENAI_API_KEY
-    yield key
-    object.__setattr__(server.settings, attr, before)
-
-
-def test_saved_settings_do_not_overwrite_server_keys_with_asterisks(
-    server_key,
-) -> None:
+def test_saved_settings_never_replace_server_keys_with_asterisks() -> None:
     """The start-up SecretStr default stringifies to '**********'."""
+    overrides = server._workspace_setting_overrides(
+        {**server.USER_EDITABLE_SETTINGS_DEFAULTS}
+    )
 
-    server._apply_runtime_settings_from_record({})
-
-    assert os.environ["OPENAI_API_KEY"] == "server-configured-key"
-
-
-def test_a_workspaces_own_key_is_still_applied(server_key) -> None:
-    server._apply_runtime_settings_from_record({"openai_api_key": "workspace-key"})
-
-    assert os.environ["OPENAI_API_KEY"] == "workspace-key"
+    assert "**********" not in {str(value) for value in overrides.values()}
 
 
-def test_a_workspace_cannot_switch_on_debug_mode(monkeypatch) -> None:
-    before = server.settings.DEBUG_MODE
-
-    server._apply_runtime_settings_from_record({"debug_mode": not before})
-
-    assert server.settings.DEBUG_MODE == before
+def test_a_workspace_cannot_switch_on_debug_mode() -> None:
+    assert "DEBUG_MODE" not in server._workspace_setting_overrides({"debug_mode": True})
 
 
 @pytest.mark.parametrize(
@@ -124,12 +102,16 @@ def test_result_volume_sets_the_results_page_limit(volume, limit) -> None:
     assert server._profile_result_limit({"result_volume": volume}) == limit
 
 
-def test_one_workspaces_key_does_not_carry_over_to_the_next(server_key) -> None:
-    server._apply_runtime_settings_from_record({"openai_api_key": "workspace-a-key"})
-    server._apply_runtime_settings_from_record({})  # workspace B, no key saved
+def test_one_workspaces_key_does_not_carry_over_to_the_next() -> None:
+    from src.backend.config.settings import workspace_overrides
 
-    assert os.environ["OPENAI_API_KEY"] == server_key
-    assert server.settings.OPENAI_API_KEY == server_key
+    server_value = server.settings.OPENAI_API_KEY
+    with workspace_overrides(
+        server._workspace_setting_overrides({"openai_api_key": "workspace-a-key"})
+    ):
+        assert server.settings.OPENAI_API_KEY == "workspace-a-key"
+    with workspace_overrides(server._workspace_setting_overrides({})):  # workspace B
+        assert server.settings.OPENAI_API_KEY == server_value
 
 
 def test_embedding_client_receives_the_real_key_not_the_mask() -> None:
@@ -142,3 +124,217 @@ def test_embedding_client_receives_the_real_key_not_the_mask() -> None:
     engine = EmbeddingSimilarity(api_key=SecretStr("sk-real"))
 
     assert engine.api_key == "sk-real"
+
+
+@pytest.fixture
+def workspace(monkeypatch):
+    """A real workspace row and an admin client for it; yields (client, stored())."""
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    from jose import jwt as jose_jwt
+
+    from src.backend.config.database import SessionLocal
+    from src.backend.config.settings import settings as app_settings
+    from src.backend.models.database import Tenant
+
+    created: list[str] = []
+
+    def make(saved: dict):
+        with SessionLocal() as db:
+            tenant = Tenant(
+                name="Settings test",
+                api_key_hash=f"test-hash-{uuid.uuid4().hex}",
+                settings=saved,
+            )
+            db.add(tenant)
+            db.commit()
+            tenant_id = str(tenant.id)
+        created.append(tenant_id)
+        admin = {"id": str(uuid.uuid4()), "role": "admin", "tenant_id": tenant_id}
+        monkeypatch.setattr(
+            server, "_authenticate_request", lambda *a, **k: dict(admin)
+        )
+        monkeypatch.setattr(
+            server, "_require_current_user", lambda *a, **k: dict(admin)
+        )
+        monkeypatch.setattr(server, "_record_weight_audit", lambda *a, **k: None)
+        now = datetime.now(timezone.utc)
+        token = jose_jwt.encode(
+            {"sub": admin["id"], "exp": now + timedelta(minutes=30), "iat": now},
+            app_settings.auth_jwt_secret or "unit-test-secret",
+            algorithm="HS256",
+        )
+        client = TestClient(server.app)
+        client.cookies.set(server.AUTH_COOKIE_NAME, token)
+
+        def stored() -> dict:
+            with SessionLocal() as db:
+                return dict(db.get(Tenant, tenant_id).settings or {})
+
+        stored.tenant_id = tenant_id
+        return client, stored
+
+    yield make
+    with SessionLocal() as db:
+        db.query(Tenant).filter(Tenant.id.in_(created)).delete(
+            synchronize_session=False
+        )
+        db.commit()
+
+
+def test_a_saved_key_can_be_removed_and_blank_keeps_the_rest(workspace) -> None:
+    client, stored = workspace(
+        {
+            "openai_api_key": "workspace-openai",
+            "llm_api_keys": {"openai": "workspace-openai", "groq": "gk"},
+            "email_password": "smtp-secret",
+        }
+    )
+
+    response = client.patch(
+        "/api/settings",
+        json={
+            "openai_api_key": None,
+            "llm_api_keys": {"openai": None, "groq": ""},
+            "email_password": "",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    saved = stored()
+    assert "openai_api_key" not in saved
+    assert set(saved["llm_api_keys"]) == {"groq"}
+    opened = secret_box.open_record(saved, stored.tenant_id)
+    assert opened["llm_api_keys"] == {"groq": "gk"}
+    assert opened["email_password"] == "smtp-secret"
+
+
+def test_weights_without_validation_evidence_are_not_saved(workspace) -> None:
+    from src.backend.engines.scoring import fusion_engine
+
+    shared_before = fusion_engine.CONFIG_PATH.read_bytes()
+    client, stored = workspace({})
+
+    response = client.patch(
+        "/api/settings", json={"engine_weights": {"token": 5.0, "ast": 0.1}}
+    )
+
+    assert response.status_code == 200, response.text
+    assert "engine_weights" in response.json()["ignored"]
+    assert "engine_weights" not in stored()
+    assert fusion_engine.CONFIG_PATH.read_bytes() == shared_before
+
+
+def test_a_profile_save_stays_in_its_workspace(workspace) -> None:
+    from src.backend.engines.scoring import fusion_engine
+
+    shared_before = fusion_engine.CONFIG_PATH.read_bytes()
+    client, stored = workspace({})
+
+    response = client.patch(
+        "/api/settings",
+        json={"professor_profile": {"starter_code_handling": "include_starter_code"}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert stored()["professor_profile"]["starter_code_handling"] == (
+        "include_starter_code"
+    )
+    assert "engine_weights" in stored()
+    assert fusion_engine.CONFIG_PATH.read_bytes() == shared_before
+
+
+def test_a_new_key_is_stored_sealed_and_used(workspace) -> None:
+    from src.backend.config.settings import workspace_overrides
+
+    client, stored = workspace({})
+
+    response = client.patch("/api/settings", json={"openai_api_key": "sk-new"})
+
+    assert response.status_code == 200, response.text
+    saved = stored()
+    assert "sk-new" not in str(saved)
+    assert secret_box.is_sealed(saved["openai_api_key"])
+    overrides = server._workspace_setting_overrides(saved, stored.tenant_id)
+    with workspace_overrides(overrides):
+        assert server.settings.OPENAI_API_KEY == "sk-new"
+        assert server.settings.llm_api_key("openai") == "sk-new"
+
+
+def test_without_an_encryption_key_new_credentials_are_refused(
+    workspace, override_setting
+) -> None:
+    client, stored = workspace({"email_host": "smtp.example.edu"})
+    override_setting("SETTINGS_ENCRYPTION_KEY", None)
+
+    refused = client.patch("/api/settings", json={"sendgrid_api_key": "SG.x"})
+    other = client.patch("/api/settings", json={"email_port": 2525})
+
+    assert refused.status_code == 400
+    assert "sendgrid_api_key" in refused.json()["detail"]["fields"]
+    assert other.status_code == 200, other.text
+    assert "sendgrid_api_key" not in stored()
+
+
+def _sealed(value="sk-1", workspace_id="ws-a", field="openai_api_key"):
+    return secret_box.seal(value, workspace_id=workspace_id, field=field)
+
+
+def test_sealed_values_round_trip() -> None:
+    assert secret_box.unseal(
+        _sealed(), workspace_id="ws-a", field="openai_api_key"
+    ) == ("sk-1")
+
+
+def test_a_sealed_value_only_opens_in_its_own_workspace_and_field() -> None:
+    sealed = _sealed()
+
+    assert (
+        secret_box.unseal(sealed, workspace_id="ws-b", field="openai_api_key") is None
+    )
+    assert (
+        secret_box.unseal(sealed, workspace_id="ws-a", field="email_password") is None
+    )
+
+
+def test_legacy_plain_text_values_are_still_read_and_get_sealed() -> None:
+    record = {"email_password": "plain", "llm_api_keys": {"groq": "gk"}}
+
+    sealed = secret_box.seal_record(record, "ws-a")
+
+    assert secret_box.is_sealed(sealed["email_password"])
+    assert secret_box.is_sealed(sealed["llm_api_keys"]["groq"])
+    assert secret_box.open_record(sealed, "ws-a") == record
+    assert secret_box.open_record(record, "ws-a") == record
+
+
+def test_key_rotation_keeps_old_values_readable(override_setting) -> None:
+    from pydantic import SecretStr
+
+    old_key = server.settings.SETTINGS_ENCRYPTION_KEY
+    sealed_with_old = _sealed()
+    override_setting("SETTINGS_ENCRYPTION_KEY", SecretStr("A" * 43 + "="))
+    override_setting("SETTINGS_ENCRYPTION_KEY_PREVIOUS", old_key)
+
+    assert (
+        secret_box.unseal(sealed_with_old, workspace_id="ws-a", field="openai_api_key")
+        == "sk-1"
+    )
+    resealed = secret_box.seal_record({"openai_api_key": sealed_with_old}, "ws-a")
+    assert resealed["openai_api_key"] != sealed_with_old
+    override_setting("SETTINGS_ENCRYPTION_KEY_PREVIOUS", None)
+    assert secret_box.open_record(resealed, "ws-a") == {"openai_api_key": "sk-1"}
+
+
+def test_retired_keys_in_an_old_record_are_never_sent_back(monkeypatch) -> None:
+    monkeypatch.setattr(
+        server,
+        "_load_tenant_settings_record",
+        lambda tenant_id: {"gptzero_api_key": "gz-old", "default_threshold": 0.7},
+    )
+
+    payload = server._build_settings_payload("any")
+
+    assert "gz-old" not in str(payload)
+    assert payload["default_threshold"] == 0.7

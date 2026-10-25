@@ -7,13 +7,14 @@ Phase 1 features:
 - Basic report (which pairs scored above threshold)
 """
 
+import contextvars
 import json
 import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +370,8 @@ class BatchDetectionService:
         progress_callback: Callable[[int, int, str, str], None] | None = None,
         use_parallel: bool = True,
         max_workers: int | None = None,
+        pairs: Iterable[tuple[str, str]] | None = None,
+        cohort: Iterable[str] | None = None,
     ) -> list[ComparisonResult]:
         """Compare all pairs of submissions and return ranked results.
 
@@ -379,6 +382,10 @@ class BatchDetectionService:
                 report real progress during long class-wide comparisons.
             use_parallel: Enable parallel execution (3-5x speedup). Default True.
             max_workers: Max thread pool workers. Default: min(8, CPU count).
+            pairs: Compare only these pairs (default: every pair).
+            cohort: Sources to infer shared class code from (default: all
+                ``submissions``), e.g. only the current class when
+                ``submissions`` also holds earlier terms' work.
 
         Performance:
             - Sequential: ~2-5s per pair
@@ -394,17 +401,19 @@ class BatchDetectionService:
             from src.backend.engines.mvp.starter_code import StarterCodeRemover
 
             self.starter_remover = StarterCodeRemover.from_cohort(
-                submissions.values(), self.starter_sources
+                submissions.values() if cohort is None else cohort,
+                self.starter_sources,
             )
         # Sorted, not upload order: a few features (coverage, ast) depend on which
         # file comes first, so the same pair could score differently on re-upload.
-        files = sorted(submissions)
-        total_pairs = len(files) * (len(files) - 1) // 2
-
-        # Build pair list
-        pairs_to_compare = [
-            (fa, fb) for i, fa in enumerate(files) for fb in files[i + 1 :]
-        ]
+        if pairs is None:
+            files = sorted(submissions)
+            pairs_to_compare = [
+                (fa, fb) for i, fa in enumerate(files) for fb in files[i + 1 :]
+            ]
+        else:
+            pairs_to_compare = sorted({tuple(sorted(pair)) for pair in pairs})
+        total_pairs = len(pairs_to_compare)
 
         # Use parallel execution for larger jobs (>10 pairs)
         if use_parallel and total_pairs > 10:
@@ -508,8 +517,13 @@ class BatchDetectionService:
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all pairs
+            # Each worker runs in a copy of this context, so it reads the job's
+            # workspace settings (embedding runtime, keys), not the server's.
             futures = {
-                executor.submit(compare_with_progress, pair): pair for pair in pairs
+                executor.submit(
+                    contextvars.copy_context().run, compare_with_progress, pair
+                ): pair
+                for pair in pairs
             }
 
             # Collect results as they complete

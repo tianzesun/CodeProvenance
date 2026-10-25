@@ -224,3 +224,25 @@ class TestAlertDelivery:
         posted = self._capture_post(monkeypatch)
         assert watchdog._webhook_url() is None
         assert posted == []
+
+    def test_each_workspace_hears_about_its_own_jobs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A workspace webhook gets only that workspace's stuck jobs."""
+        monkeypatch.setattr(app_settings, "WEBHOOK_URL", "")
+        posted = self._capture_post(monkeypatch)
+        with SessionLocal() as db:
+            hooked = _make_tenant(db, "hooked")
+            hooked.settings = {"webhook_url": "https://hooks.example.com/mine"}
+            db.commit()
+            quiet = _make_tenant(db, "quiet")
+            mine = _make_job(db, hooked.id, "queued", "mine", timedelta(hours=2))
+            theirs = _make_job(db, quiet.id, "queued", "theirs", timedelta(hours=2))
+
+        summary = watchdog.check_and_alert()
+
+        assert mine in summary["alerted"] and theirs not in summary["alerted"]
+        to_mine = [p for p in posted if p["url"] == "https://hooks.example.com/mine"]
+        assert len(to_mine) == 1
+        assert mine in to_mine[0]["body"] and theirs not in to_mine[0]["body"]
+        assert "tenant_id" not in to_mine[0]["body"]

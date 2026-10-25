@@ -72,7 +72,13 @@ from src.backend.application.services.batch_detection_service import (
     ComparisonResult,
     _risk_level,
 )
-from src.backend.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
+from src.backend.config.settings import (
+    DEFAULT_ENGINE_WEIGHTS,
+    settings,
+    workspace_overrides,
+)
+from src.backend.application.services import previous_term
+from src.backend.infrastructure import secret_box
 from src.backend.infrastructure.security import (
     hash_password as _hash_password,
 )
@@ -2059,6 +2065,8 @@ def _get_setting_secret(key: str) -> str:
     attr = SETTINGS_ATTR_MAP.get(key)
     if attr:
         value = getattr(settings, attr, None)
+        if hasattr(value, "get_secret_value"):
+            value = value.get_secret_value()
         if value:
             return str(value)
         return os.environ.get(attr, "")
@@ -4316,6 +4324,7 @@ ANALYSIS_STAGE_LABELS: dict[str, str] = {
     "building_pairs": "Building comparison plan",
     "external_tools": "Running external tools",
     "comparing_submissions": "Comparing submissions",
+    "previous_terms": "Comparing with earlier offerings",
     "ai_detection": "Detecting AI-generated code",
     "external_scan": "Scanning external sources",
     "generating_reports": "Generating reports",
@@ -4330,6 +4339,7 @@ ANALYSIS_STAGE_PERCENT: dict[str, float] = {
     "building_pairs": 0.12,
     "external_tools": 0.18,
     "comparing_submissions": 0.20,
+    "previous_terms": 0.73,
     "ai_detection": 0.78,
     "external_scan": 0.86,
     "generating_reports": 0.94,
@@ -8886,6 +8896,145 @@ async def _run_analysis(
     tool_ids_raw: str = "",
     starter_sources: list[str] | None = None,
 ):
+    """Run one analysis job with its uploader's workspace settings in force.
+
+    Jobs run on a worker thread or a Celery worker, outside the request that
+    queued them, so the workspace's settings are looked up again here.
+    """
+    tenant_id = (current_user or {}).get("tenant_id")
+    with await run_in_threadpool(_workspace_settings_scope, tenant_id):
+        response = await _run_analysis_in_workspace(
+            job_id,
+            job_dir,
+            course_name,
+            assignment_name,
+            assignment_id,
+            assignment_mode,
+            threshold,
+            current_user,
+            engine_keys_raw,
+            tool_ids_raw,
+            starter_sources,
+        )
+        await run_in_threadpool(_notify_job_finished, job_id, tenant_id)
+        return response
+
+
+def _compare_with_previous_terms(
+    job_id: str,
+    mode: str,
+    current_user: dict[str, Any] | None,
+    submissions: dict[str, str],
+    starter_sources: list[str] | None,
+    threshold: float,
+    fusion_weights: dict[str, float],
+    infer_common_code: bool,
+) -> tuple[list[Any], dict[str, str]]:
+    """Compare a class with earlier offerings; returns (results, archived sources used).
+
+    Records what was compared in ``_jobs[job_id]["previous_term"]`` for the
+    results page. Never fails the job: problems are logged and skipped.
+    """
+
+    def read_job_files(other_job_id: str) -> dict[str, str]:
+        directory = UPLOADS_DIR / other_job_id
+        return _read_files_from_dir(directory) if directory.is_dir() else {}
+
+    info: dict[str, Any] = {"mode": mode, "offerings": [], "compared_pairs": 0}
+    _jobs[job_id]["previous_term"] = info
+    try:
+        _set_job_progress(
+            job_id,
+            "previous_terms",
+            detail="Looking for earlier offerings to compare with",
+        )
+        with SessionLocal() as db:
+            archive = previous_term.load_archive(
+                db,
+                mode=mode,
+                user=current_user,
+                assignment_id=_jobs[job_id].get("assignment_id"),
+                exclude_job_id=job_id,
+                read_job_files=read_job_files,
+            )
+        pairs = previous_term.candidate_pairs(
+            submissions, archive.sources, starter_sources=starter_sources or ()
+        )
+        info.update(
+            offerings=archive.offerings,
+            archived_submissions=len(archive.sources),
+            compared_pairs=len(pairs),
+            note=archive.note,
+        )
+        if not pairs:
+            return [], {}
+        used = {name: archive.sources[name] for _, name in pairs}
+        _set_job_progress(
+            job_id,
+            "previous_terms",
+            detail=(
+                f"Comparing with {len(used)} submissions from "
+                f"{len(archive.offerings)} earlier offering(s)"
+            ),
+            completed_units=0,
+            total_units=len(pairs),
+            unit="pairs",
+        )
+        service = BatchDetectionService(
+            threshold=threshold,
+            weights=fusion_weights or None,
+            starter_sources=starter_sources,
+            infer_common_code=infer_common_code,
+            min_evidence_tokens=MIN_EVIDENCE_TOKENS,
+        )
+        results = service.compare_all_pairs(
+            {**submissions, **used},
+            pairs=pairs,
+            cohort=submissions.values(),
+            max_workers=_processing_batch_workers(),
+        )
+        info["matches"] = sum(1 for r in results if r.score >= threshold)
+        return results, used
+    except Exception:
+        logger.warning(
+            "Previous-term comparison skipped for job %s", job_id, exc_info=True
+        )
+        info["note"] = "Earlier offerings could not be compared this time."
+        return [], {}
+
+
+def _notify_job_finished(job_id: str, tenant_id: str | None) -> None:
+    """Webhook and (if the workspace asked) owner email for a finished job."""
+    from src.backend.application.services.job_notifications import (
+        notify_job_finished,
+    )
+
+    job = _jobs.get(job_id)
+    if not job:
+        return
+    try:
+        record = _load_tenant_settings_record(tenant_id)
+        notify_job_finished(
+            dict(job, id=job_id),
+            email_owner=bool(record.get("notify_email_on_finish")),
+        )
+    except Exception:
+        logger.warning("Finish notifications failed for job %s", job_id, exc_info=True)
+
+
+async def _run_analysis_in_workspace(
+    job_id,
+    job_dir,
+    course_name,
+    assignment_name,
+    assignment_id: str | None = None,
+    assignment_mode: str = "",
+    threshold: float = 0.5,
+    current_user: dict[str, Any] | None = None,
+    engine_keys_raw: str = "",
+    tool_ids_raw: str = "",
+    starter_sources: list[str] | None = None,
+):
     from src.backend.engines.scoring.assignment_modes import get_assignment_mode
     from src.backend.engines.scoring.uts_course_mapping import get_mode_for_course
 
@@ -9261,6 +9410,28 @@ async def _run_analysis(
         )
         _jobs[job_id]["result_limit"] = _profile_result_limit(profile)
 
+        # Previous-term matching: earlier offerings' submissions the uploader
+        # can access, prefiltered to the closest few per submission.
+        archive_sources: dict[str, str] = {}
+        if (
+            profile.get("previous_term_matching") in previous_term.MODES
+            and "integritydesk" in selected_tool_ids
+        ):
+            previous_results, archive_sources = await run_in_threadpool(
+                _compare_with_previous_terms,
+                job_id,
+                profile["previous_term_matching"],
+                current_user,
+                submissions,
+                [] if starter_mode == "include_starter_code" else starter_sources,
+                threshold,
+                fusion_weights,
+                starter_mode == "student_written_only",
+            )
+            results = sorted(
+                [*results, *previous_results], key=lambda r: r.score, reverse=True
+            )
+
         _jobs[job_id]["external_tool_results"] = external_tool_results
         _persist_job(job_id)
         # AI detection is CPU-bound (and may load a local code LM); offload it
@@ -9306,6 +9477,7 @@ async def _run_analysis(
             detail="Writing HTML, JSON and committee reports",
         )
 
+        all_sources = {**submissions, **archive_sources}
         comparison_details = []
         for r in results:
             detail = type(
@@ -9317,8 +9489,8 @@ async def _run_analysis(
                     "score": r.score,
                     "risk": r.risk_level,
                     "features": r.features,
-                    "code_a": submissions.get(r.file_a, ""),
-                    "code_b": submissions.get(r.file_b, ""),
+                    "code_a": all_sources.get(r.file_a, ""),
+                    "code_b": all_sources.get(r.file_b, ""),
                 },
             )()
             comparison_details.append(detail)
@@ -9351,8 +9523,8 @@ async def _run_analysis(
                 "matching_blocks": r.matching_blocks or [],
                 "fusion_debug": _build_fusion_debug(r, threshold),
                 "ai_detection": pair_ai_details.get(_pair_key(r.file_a, r.file_b), {}),
-                "code_a": submissions.get(r.file_a, ""),
-                "code_b": submissions.get(r.file_b, ""),
+                "code_a": all_sources.get(r.file_a, ""),
+                "code_b": all_sources.get(r.file_b, ""),
                 "external_evidence": _external_evidence_for_pair(
                     r.file_a, r.file_b, external_tool_results
                 ),
@@ -14023,13 +14195,10 @@ USER_EDITABLE_SETTINGS_DEFAULTS: dict[str, Any] = {
     "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
     "max_files_per_job": settings.MAX_FILES_PER_JOB,
     "webhook_url": "",
-    "audit_log_level": "INFO",
-    "audit_retention_days": 365,
+    "notify_email_on_finish": False,
     "debug_mode": False,
     "source_scan_enabled": False,
     "source_scan_sites": ["https://github.com"],
-    "gptzero_api_key": settings.GPTZERO_API_KEY or "",
-    "grammarly_api_key": settings.GRAMMARLY_API_KEY or "",
     "email_backend": settings.EMAIL_BACKEND,
     "email_host": settings.EMAIL_HOST,
     "email_port": settings.EMAIL_PORT,
@@ -14045,110 +14214,6 @@ USER_EDITABLE_SETTINGS_DEFAULTS: dict[str, Any] = {
         "previous_term_matching": "off",
         "ai_rewrite_detection": "balanced",
         "result_volume": "top_25",
-    },
-    "v1_review_rules": {
-        "automated_flagging_enabled": True,
-        "require_multiple_signals": True,
-        "minimum_agreeing_methods": 2,
-        "auto_flag_critical_matches": True,
-        "short_match_suppression": True,
-        "default_review_state": "needs_review",
-        "manual_review_for_critical": True,
-        "second_review_required": True,
-        "second_review_threshold": 0.85,
-        "allow_reviewer_dismissal": True,
-        "require_dismissal_note": True,
-        "show_side_by_side": True,
-        "show_explanation_summary": True,
-        "show_method_contributions": True,
-        "show_confidence_labels": True,
-        "show_transformed_match_notes": True,
-        "report_sort_order": "risk_desc",
-        "hide_low_confidence_by_default": True,
-        "downloadable_reports_enabled": True,
-        "include_reviewer_notes_in_exports": True,
-    },
-    "v1_ai_models": {
-        "openai_enabled": True,
-        "anthropic_enabled": False,
-        "default_provider": "openai",
-        "fallback_provider": "anthropic",
-        "provider_status_alerts": True,
-        "explanation_model": settings.OPENAI_MODEL,
-        "cross_language_model": settings.OPENAI_MODEL,
-        "model_version_pinning": True,
-        "minimum_ai_confidence": 0.60,
-        "minimum_explanation_confidence": 0.65,
-        "require_deterministic_support": True,
-        "semantic_similarity_enabled": True,
-        "ai_explanations_enabled": True,
-        "cross_language_analysis_enabled": False,
-        "ai_influences_final_score": True,
-        "explanation_verbosity": "standard",
-        "max_ai_requests_per_check": 20,
-        "max_tokens_per_request": 4000,
-        "ai_timeout_seconds": 30,
-        "disable_ai_when_limits_reached": True,
-    },
-    "v1_detection_methods": {
-        "apply_all_enabled_by_default": True,
-        "method_selection_by_language": False,
-        "disable_unsupported_methods_automatically": True,
-        "minimum_token_match_length": 8,
-        "ngram_size": 5,
-        "winnowing_window_size": 4,
-        "minimum_ast_similarity": 0.30,
-        "minimum_embedding_similarity": 0.55,
-    },
-    "v1_scoring": {
-        "active_formula": "weighted_v1",
-        "formula_version": "v1",
-        "weighted_score_calculation": True,
-        "normalize_by_file_size": True,
-        "penalize_short_matches": True,
-        "boost_cross_method_agreement": True,
-        "suspicion_threshold": 0.45,
-        "review_threshold": settings.DEFAULT_THRESHOLD,
-        "critical_threshold": 0.85,
-        "short_match_threshold": 0.30,
-        "ai_only_threshold": 0.75,
-        "ignore_threshold": 0.25,
-        "high_risk_threshold": 0.75,
-        "require_second_review_above_critical": True,
-        "require_non_ai_confirmation_below_ai_only": True,
-        "auto_hide_ignored_matches": True,
-        "auto_prioritize_high_risk_matches": True,
-        "active_profile": "balanced",
-        "custom_profile_name": "",
-        "calibration_mode_enabled": False,
-        "compare_current_vs_previous": True,
-        "save_manual_adjustments_as_version": True,
-        "require_approval_before_production_update": True,
-        "calibration_notes": "",
-        "primary_evaluation_metric": "f1",
-        "track_precision": True,
-        "track_recall": True,
-        "track_f1": True,
-        "track_false_positive_rate": True,
-        "track_custom_metrics": False,
-    },
-    "v1_system_limits": {
-        "max_archive_size_mb": 100,
-        "allowed_file_types": ".py,.java,.js,.ts,.cpp,.c,.cs,.go,.rs,.zip",
-        "max_submissions_per_batch": 500,
-        "max_check_runtime_seconds": 900,
-        "max_method_runtime_seconds": 120,
-        "ai_timeout_per_task_seconds": 30,
-        "retry_failed_jobs": True,
-        "max_retry_attempts": 2,
-        "max_parallel_checks": 4,
-        "background_worker_limit": 2,
-        "queue_size_limit": 100,
-        "ai_request_concurrency": 4,
-        "report_retention_days": 365,
-        "temporary_upload_retention_days": 7,
-        "audit_log_retention_days": 365,
-        "automatic_cleanup_schedule": "daily",
     },
 }
 
@@ -14177,13 +14242,10 @@ SETTINGS_ATTR_MAP = {
     "max_file_size_mb": "MAX_FILE_SIZE_MB",
     "max_files_per_job": "MAX_FILES_PER_JOB",
     "webhook_url": "WEBHOOK_URL",
-    "audit_log_level": "AUDIT_LOG_LEVEL",
-    "audit_retention_days": "AUDIT_RETENTION_DAYS",
+    "notify_email_on_finish": None,
     "debug_mode": "DEBUG_MODE",
     "source_scan_enabled": "SOURCE_SCAN_ENABLED",
     "source_scan_sites": "SOURCE_SCAN_SITES",
-    "gptzero_api_key": "GPTZERO_API_KEY",
-    "grammarly_api_key": "GRAMMARLY_API_KEY",
     "email_backend": "EMAIL_BACKEND",
     "email_host": "EMAIL_HOST",
     "email_port": "EMAIL_PORT",
@@ -14192,36 +14254,17 @@ SETTINGS_ATTR_MAP = {
     "email_from": "EMAIL_FROM",
     "email_use_tls": "EMAIL_USE_TLS",
     "sendgrid_api_key": "SENDGRID_API_KEY",
-    "v1_review_rules": None,
-    "v1_ai_models": None,
-    "v1_detection_methods": None,
-    "v1_scoring": None,
-    "v1_system_limits": None,
 }
 
 #: Server-wide switches a workspace admin may not change: debug_mode relaxes the
 #: password policy and authentication for every workspace in the process.
 PLATFORM_ONLY_SETTING_KEYS = frozenset({"debug_mode"})
 
-SECRET_SETTING_KEYS = {
-    "openai_api_key",
-    "anthropic_api_key",
-    "moss_user_id",
-    "gptzero_api_key",
-    "grammarly_api_key",
-    "email_password",
-    "sendgrid_api_key",
-}
-#: Start-up value of each secret (settings attribute and environment variable),
-#: restored when a workspace has no key of its own. Without it, a key one
-#: workspace saved stayed live for every other workspace until a restart.
-_SERVER_SECRET_BASELINE = {
-    SETTINGS_ATTR_MAP[key]: (
-        getattr(settings, SETTINGS_ATTR_MAP[key], None),
-        os.environ.get(SETTINGS_ATTR_MAP[key]),
-    )
-    for key in SECRET_SETTING_KEYS
-}
+#: Credentials: sealed at rest (infrastructure/secret_box) and never sent back
+#: to the browser.
+SECRET_SETTING_KEYS = set(secret_box.WORKSPACE_SECRET_FIELDS)
+#: Single-vendor key settings mirrored in the per-provider ``llm_api_keys`` map.
+LEGACY_KEY_PROVIDERS = {"openai_api_key": "openai", "anthropic_api_key": "anthropic"}
 ENGINE_DISPLAY_LABELS = {
     "token": "Token",
     "ast": "AST",
@@ -14285,6 +14328,10 @@ UPLOAD_ENGINE_KEYS = (
 def _load_tenant_settings_record(tenant_id: str | None) -> dict[str, Any]:
     if not tenant_id:
         return {}
+    try:
+        uuid.UUID(str(tenant_id))
+    except ValueError:
+        return {}  # not a workspace row (e.g. a test or service principal)
 
     with SessionLocal() as db:
         tenant = db.get(Tenant, tenant_id)
@@ -14295,7 +14342,12 @@ def _load_tenant_settings_record(tenant_id: str | None) -> dict[str, Any]:
 
 def _build_settings_payload(tenant_id: str | None) -> dict[str, Any]:
     stored = _load_tenant_settings_record(tenant_id)
-    payload = {**USER_EDITABLE_SETTINGS_DEFAULTS, **stored}
+    # Only known settings go back to the browser: a retired key still in an
+    # old record (e.g. gptzero_api_key) would otherwise be sent unmasked.
+    payload = {
+        **USER_EDITABLE_SETTINGS_DEFAULTS,
+        **{k: v for k, v in stored.items() if k in USER_EDITABLE_SETTINGS_DEFAULTS},
+    }
     payload["engine_weights"] = _normalize_engine_weights(payload.get("engine_weights"))
     payload["source_scan_sites"] = _normalize_source_scan_sites(
         payload.get("source_scan_sites")
@@ -14346,58 +14398,70 @@ def _build_settings_payload(tenant_id: str | None) -> dict[str, Any]:
     return payload
 
 
-def _apply_runtime_settings_from_record(record: dict[str, Any]) -> None:
-    """Push persisted tenant settings onto the live runtime configuration.
+def _workspace_setting_overrides(
+    record: dict[str, Any] | None, tenant_id: str | None = None
+) -> dict[str, Any]:
+    """A workspace's saved settings as ``AppSettings`` attribute overrides.
 
-    Non-secret values are assigned onto the pydantic settings object so every
-    consumer reading ``settings.<ATTR>`` sees the tenant's saved choice without
-    a restart. Secret-like values (API keys, MOSS id) are additionally mirrored
-    into the process environment because some provider clients read
-    ``os.environ`` directly. Called after settings are saved and on every
-    authenticated dashboard request.
+    Used with ``workspace_overrides()`` for the length of one request or job,
+    so ``settings.<ATTR>`` reads the workspace's choice over the start-up
+    value. These used to be assigned onto the one process-wide settings object
+    (and API keys into ``os.environ``) on every request, so a workspace briefly
+    ran with whichever workspace had made the previous request.
 
-    ``AppSettings`` is ``frozen``, so the assignments go through
-    ``object.__setattr__``: this is the one sanctioned place where a saved
-    tenant setting is meant to override the start-up value. Plain ``setattr``
-    raises ``ValidationError`` here, which the ``except`` below would swallow —
-    silently dropping every saved setting (including provider API keys).
+    A secret overrides only when the workspace saved a non-empty value of its
+    own; otherwise the server's start-up key stays in force. Server-wide
+    switches (``debug_mode``) are never taken from a workspace. Stored
+    credentials are decrypted with ``tenant_id`` (they are sealed to it).
     """
-    merged = {**USER_EDITABLE_SETTINGS_DEFAULTS, **(record or {})}
-    merged["engine_weights"] = _normalize_engine_weights(merged.get("engine_weights"))
+    record = secret_box.open_record(record or {}, tenant_id)
+    overrides: dict[str, Any] = {}
     for key, attr in SETTINGS_ATTR_MAP.items():
-        if attr is None or key not in merged or key in PLATFORM_ONLY_SETTING_KEYS:
+        if attr is None or key not in record or key in PLATFORM_ONLY_SETTING_KEYS:
             continue
-        value = merged[key]
-
-        # Secret-like settings: mirror into env (and the settings object) only
-        # when the workspace saved its own non-empty value. The merged default
-        # is the start-up SecretStr, whose str() is "**********": applying it
-        # replaced every server-configured key with asterisks on each request.
-        # A workspace without its own key gets the server's start-up key back.
+        value = record[key]
         if key in SECRET_SETTING_KEYS:
-            value = (record or {}).get(key)
-            if value and isinstance(value, str):
-                live, env_value = str(value), str(value)
-            else:
-                live, env_value = _SERVER_SECRET_BASELINE[attr]
-            if env_value is None:
-                os.environ.pop(attr, None)
-            else:
-                os.environ[attr] = env_value
-            try:
-                object.__setattr__(settings, attr, live)
-            except Exception:
-                logger.warning("Failed to apply secret setting %s", key, exc_info=True)
-            continue
+            if not (value and isinstance(value, str)):
+                continue
+        elif key == "engine_weights":
+            value = _normalize_engine_weights(value)
+        elif key == "llm_api_keys":
+            if not isinstance(value, dict):
+                continue
+            value = {str(name): str(val) for name, val in value.items() if val}
+            if not value:
+                continue
+        elif key in ("llm_model_overrides", "llm_base_urls"):
+            if not isinstance(value, dict):
+                continue
+        overrides[attr] = value
+    return overrides
 
-        if not hasattr(settings, attr):
-            continue
-        try:
-            object.__setattr__(settings, attr, value)
-        except (TypeError, ValueError):
-            logger.warning(
-                "Failed to apply setting %s -> %s=%r", key, attr, value, exc_info=True
-            )
+
+def _new_credential_keys(data: dict[str, Any]) -> list[str]:
+    """Settings keys in a save request that carry a new credential value."""
+    keys = [
+        key
+        for key in SECRET_SETTING_KEYS
+        if isinstance(data.get(key), str) and data[key].strip()
+    ]
+    provider_keys = data.get("llm_api_keys")
+    if isinstance(provider_keys, dict) and any(
+        isinstance(v, str) and v.strip() for v in provider_keys.values()
+    ):
+        keys.append("llm_api_keys")
+    return keys
+
+
+def _saves_new_credential(data: dict[str, Any]) -> bool:
+    return bool(_new_credential_keys(data))
+
+
+def _workspace_settings_scope(tenant_id: str | None):
+    """Read ``settings`` as this workspace sees it (a context manager)."""
+    return workspace_overrides(
+        _workspace_setting_overrides(_load_tenant_settings_record(tenant_id), tenant_id)
+    )
 
 
 def _normalize_source_scan_sites(value: Any) -> list[str]:
@@ -14932,15 +14996,14 @@ async def dashboard_auth_middleware(request: Request, call_next):
             content={"detail": GUEST_WRITE_DENIED_DETAIL},
         )
 
-    if user.get("role") != "api":
-        # API-key principals have no dashboard user; tenant runtime settings
-        # are loaded for interactive sessions only.
-        await run_in_threadpool(
-            lambda: _apply_runtime_settings_from_record(
-                _load_tenant_settings_record(user.get("tenant_id"))
-            )
-        )
-    return await call_next(request)
+    # The workspace's saved settings apply to this request only (API-key
+    # principals included: they act for their workspace too).
+    record = await run_in_threadpool(
+        _load_tenant_settings_record, user.get("tenant_id")
+    )
+    overrides = _workspace_setting_overrides(record, user.get("tenant_id"))
+    with workspace_overrides(overrides):
+        return await call_next(request)
 
 
 @app.get("/report/{job_id}/download", response_class=HTMLResponse)
@@ -17744,6 +17807,21 @@ def _url_setting(value: Any) -> str:
     return text.rstrip("/") if text else ""
 
 
+def _webhook_url_setting(value: Any) -> str:
+    """Validator: empty, or a public https URL (the server POSTs to it)."""
+    from src.backend.api.routes.jobs import validate_webhook_url
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return (validate_webhook_url(text) or "").rstrip("/")
+    except HTTPException as exc:
+        raise ValueError(
+            "must be a public https:// URL without a username or password"
+        ) from exc
+
+
 def _device_setting(value: Any) -> str:
     """Same rule as AppSettings.EMBEDDING_DEVICE: auto, cpu, mps, cuda or cuda:N."""
     text = str(value or "").strip().lower()
@@ -17782,7 +17860,8 @@ SETTINGS_VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "email_use_tls": _bool_setting,
     "email_from": _email_setting,
     "source_scan_enabled": _bool_setting,
-    "webhook_url": _url_setting,
+    "webhook_url": _webhook_url_setting,
+    "notify_email_on_finish": _bool_setting,
     "openai_base_url": _url_setting,
     "embedding_server_url": _url_setting,
 }
@@ -17790,6 +17869,10 @@ SETTINGS_VALIDATORS: dict[str, Callable[[Any], Any]] = {
 
 @app.patch("/api/settings")
 async def update_settings(request: Request):
+    from src.backend.engines.scoring.fusion_policy import (
+        evaluate_weight_change_governance,
+    )
+
     current_user = _require_current_user(request, admin_only=True)
     data = await _read_json_object(request)
     tenant_id = current_user.get("tenant_id")
@@ -17824,14 +17907,44 @@ async def update_settings(request: Request):
         stored_settings = dict(tenant.settings or {})
         applied = {}
         ignored: dict[str, str] = {}
+        governance_result = None
+        weight_audit = None
 
         for key, value in data.items():
             if key not in SETTINGS_ATTR_MAP and key != "professor_profile":
                 continue
             if key in SECRET_SETTING_KEYS and value == "":
                 continue
+            # null removes a saved credential, so the workspace falls back to
+            # the server's own key (blank above means "keep it").
+            if key in SECRET_SETTING_KEYS and value is None:
+                stored_settings.pop(key, None)
+                provider_name = LEGACY_KEY_PROVIDERS.get(key)
+                if provider_name:
+                    provider_keys = dict(stored_settings.get("llm_api_keys") or {})
+                    provider_keys.pop(provider_name, None)
+                    stored_settings["llm_api_keys"] = provider_keys
+                applied[key] = False
+                continue
             if key == "engine_weights":
                 value = _normalize_engine_weights(value)
+                # These are the weights this workspace's analyses use, so the
+                # validation-evidence rule applies here (it used to guard only
+                # the shared engine config, while these were saved anyway).
+                previous_weights = _normalize_engine_weights(
+                    stored_settings.get("engine_weights")
+                    or USER_EDITABLE_SETTINGS_DEFAULTS["engine_weights"]
+                )
+                governance_result = evaluate_weight_change_governance(
+                    previous_weights, value, data.get("weight_governance_evidence")
+                )
+                weight_audit = (previous_weights, value, governance_result.allowed)
+                if (
+                    governance_result.requires_validation
+                    and not governance_result.allowed
+                ):
+                    ignored[key] = "changed weights need validation evidence"
+                    continue
             if key == "source_scan_sites":
                 value = _normalize_source_scan_sites(value)
             if key in ("llm_provider", "llm_fallback_provider"):
@@ -17857,7 +17970,12 @@ async def update_settings(request: Request):
                 merged_keys = dict(stored_settings.get("llm_api_keys") or {})
                 for provider_name, key_value in value.items():
                     provider_key = str(provider_name).strip().lower()
-                    if provider_key and key_value:
+                    if provider_key and key_value is None:
+                        merged_keys.pop(provider_key, None)
+                        for legacy, legacy_provider in LEGACY_KEY_PROVIDERS.items():
+                            if legacy_provider == provider_key:
+                                stored_settings.pop(legacy, None)
+                    elif provider_key and key_value:
                         merged_keys[provider_key] = str(key_value)
                 value = merged_keys
             if key == "llm_model_overrides":
@@ -17907,76 +18025,52 @@ async def update_settings(request: Request):
 
         # Keep the generic per-provider key map in sync with the legacy
         # single-vendor fields so both entry points stay equivalent.
-        for legacy_key, provider_name in (
-            ("openai_api_key", "openai"),
-            ("anthropic_api_key", "anthropic"),
-        ):
+        for legacy_key, provider_name in LEGACY_KEY_PROVIDERS.items():
             legacy_value = data.get(legacy_key)
             if legacy_value:
                 synced_keys = dict(stored_settings.get("llm_api_keys") or {})
                 synced_keys[provider_name] = str(legacy_value)
                 stored_settings["llm_api_keys"] = synced_keys
 
+        # Credentials are sealed with AES-256-GCM before they are stored.
+        if secret_box.is_available():
+            stored_settings = secret_box.seal_record(stored_settings, str(tenant_id))
+        elif _saves_new_credential(data):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "API keys and passwords can't be saved yet",
+                    "fields": {
+                        key: "can't be stored until the server's encryption key is "
+                        "configured (ask your platform administrator)"
+                        for key in _new_credential_keys(data)
+                    },
+                },
+            )
         tenant.settings = stored_settings
         db.add(tenant)
         db.commit()
 
     # Secrets are not written to src/backend/.env.local any more: that one file
     # is every workspace's start-up config, so the last admin's keys became all
-    # workspaces' defaults. They are applied from the workspace record instead.
+    # workspaces' defaults. Each request reads its own workspace's record.
 
-    _apply_runtime_settings_from_record(stored_settings)
-
-    # Persist engine weights and calibration config to yaml file
-    from src.backend.engines.scoring.fusion_engine import FusionEngine
-    from src.backend.engines.scoring.fusion_policy import (
-        evaluate_weight_change_governance,
-    )
-
-    engine_config = FusionEngine.get_current_config()
-    governance_result = None
-
-    if "engine_weights" in data:
-        proposed_weights = _normalize_engine_weights(data["engine_weights"])
-        previous_weights = dict(engine_config.get("weights", {}))
-        governance_result = evaluate_weight_change_governance(
-            engine_config.get("weights", {}),
-            proposed_weights,
-            data.get("weight_governance_evidence"),
-        )
-        # Same rule as PUT /api/settings/engine-config: a change that needs
-        # validation evidence it does not have is not applied (it was written
-        # to the shared config anyway, bypassing governance).
-        if governance_result.requires_validation and not governance_result.allowed:
-            engine_config.setdefault("advanced", {})["weights_need_validation"] = True
-        else:
-            engine_config["weights"] = proposed_weights
+    # Weights and profiles are kept per workspace (above) and are what its
+    # analyses use. They used to be written into the shared engine config too,
+    # so one workspace's save changed the defaults for every other workspace;
+    # that file is platform calibration, edited via PUT engine-config.
+    if weight_audit is not None:
         submitted_evidence = data.get("weight_governance_evidence")
         _record_weight_audit(
             "weights_updated",
             actor_user_id=current_user.get("id"),
-            weights_before=previous_weights,
-            weights_after=proposed_weights,
+            weights_before=weight_audit[0],
+            weights_after=weight_audit[1],
             evidence=(
                 submitted_evidence if isinstance(submitted_evidence, dict) else None
             ),
-            allowed=governance_result.allowed,
+            allowed=weight_audit[2],
         )
-    elif "professor_profile" in data:
-        from src.backend.engines.scoring.professor_profiles import (
-            apply_professor_profile,
-            professor_profile_to_engine_weights,
-        )
-
-        applied_profile = apply_professor_profile(data.get("professor_profile"))
-        engine_config["weights"] = professor_profile_to_engine_weights(applied_profile)
-        engine_config.setdefault("professor_profile", {})[
-            "applied"
-        ] = applied_profile.to_dict()
-    if "baseline_correction" in data:
-        engine_config["baseline_correction"] = data["baseline_correction"]
-
-    FusionEngine.update_config(engine_config)
 
     response: dict[str, Any] = {
         "status": "ok",

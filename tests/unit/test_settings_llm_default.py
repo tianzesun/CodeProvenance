@@ -126,13 +126,14 @@ class TestDefaultLlmProviderRoundTrip:
         assert response.status_code == 200, response.text
         previous = app_settings.LLM_PROVIDER
         try:
-            # Simulate a backend restart: the live object reverts to env
-            # defaults while the tenant DB record keeps the saved value.
-            object.__setattr__(app_settings, "LLM_PROVIDER", "openai")
-            # The next authenticated request must re-apply the tenant record.
+            # Simulate a backend restart: the start-up configuration is the
+            # env default while the tenant DB record keeps the saved value.
+            setattr(app_settings, "LLM_PROVIDER", "openai")
+            # The next authenticated request reads the tenant record again.
             fresh = client.get("/api/settings", cookies=cookies)
             assert fresh.status_code == 200, fresh.text
             assert fresh.json().get("llm_provider") == "ollama"
-            assert app_settings.LLM_PROVIDER == "ollama"
+            # ...but only for that workspace: the shared configuration is untouched.
+            assert app_settings.LLM_PROVIDER == "openai"
         finally:
-            object.__setattr__(app_settings, "LLM_PROVIDER", previous)
+            setattr(app_settings, "LLM_PROVIDER", previous)

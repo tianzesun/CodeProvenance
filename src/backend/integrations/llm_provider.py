@@ -591,25 +591,6 @@ async def summarize_pair_evidence(
         A dict with ``summary``, ``provider``, ``source`` (``llm`` or
         ``heuristic``), and optional ``fallback_reason``.
     """
-    try:
-        config = resolve_provider_config(provider, api_key_override)
-        llm = LLMProvider(
-            provider=config.provider,
-            api_key=config.api_key,
-            model=config.model,
-            base_url=config.base_url,
-            api_style=config.api_style,
-            transport=transport,
-        )
-    except (LLMError, ValueError) as exc:
-        logger.info("LLM summary unavailable (%s); using heuristic", exc)
-        return {
-            "summary": _heuristic_summary(features),
-            "provider": "heuristic",
-            "source": "heuristic",
-            "fallback_reason": str(exc),
-        }
-
     prompt = build_evidence_prompt(
         code_a,
         code_b,
@@ -618,7 +599,17 @@ async def summarize_pair_evidence(
         file_b=file_b,
         task=task,
     )
-    try:
+
+    async def ask(name: str, key_override: str | None) -> tuple[str, str]:
+        config = resolve_provider_config(name, key_override)
+        llm = LLMProvider(
+            provider=config.provider,
+            api_key=config.api_key,
+            model=config.model,
+            base_url=config.base_url,
+            api_style=config.api_style,
+            transport=transport,
+        )
         text = await llm.complete(
             prompt,
             system=(
@@ -630,17 +621,39 @@ async def summarize_pair_evidence(
             max_tokens=400,
             temperature=0.2,
         )
-    except Exception as exc:
-        logger.warning("LLM summary call failed (%s); using heuristic", exc)
-        return {
-            "summary": _heuristic_summary(features),
-            "provider": "heuristic",
-            "source": "heuristic",
-            "fallback_reason": str(exc),
-        }
+        return text, config.provider
 
+    try:
+        text, used = await ask(provider, api_key_override)
+        return {"summary": text, "provider": used, "source": "llm"}
+    except Exception as exc:
+        primary_error = exc
+
+    # The workspace's fallback provider, when the default one is down, out of
+    # credit or not set up. Only when the caller did not pin a provider.
+    fallback = normalize_provider(settings.LLM_FALLBACK_PROVIDER)
+    primary = normalize_provider(provider) or normalize_provider(settings.LLM_PROVIDER)
+    if not provider and fallback and fallback != primary:
+        try:
+            text, used = await ask(fallback, None)
+            logger.warning(
+                "LLM summary: default provider failed (%s); used fallback %s",
+                type(primary_error).__name__,
+                used,
+            )
+            return {
+                "summary": text,
+                "provider": used,
+                "source": "llm",
+                "fallback_reason": str(primary_error),
+            }
+        except Exception as exc:
+            logger.warning("LLM fallback provider %s also failed (%s)", fallback, exc)
+
+    logger.info("LLM summary unavailable (%s); using heuristic", primary_error)
     return {
-        "summary": text,
-        "provider": config.provider,
-        "source": "llm",
+        "summary": _heuristic_summary(features),
+        "provider": "heuristic",
+        "source": "heuristic",
+        "fallback_reason": str(primary_error),
     }
