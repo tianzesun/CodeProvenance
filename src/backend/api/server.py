@@ -4944,19 +4944,9 @@ def _load_job_from_db(job_id: str) -> dict[str, Any] | None:
                             if r.similarity_score is not None
                             else 0.0
                         ),
-                        "risk_level": (
-                            "CRITICAL"
-                            if float(r.similarity_score or 0) >= 0.85
-                            else (
-                                "HIGH"
-                                if float(r.similarity_score or 0) >= 0.7
-                                else (
-                                    "MEDIUM"
-                                    if float(r.similarity_score or 0) >= 0.5
-                                    else "LOW"
-                                )
-                            )
-                        ),
+                        # The live bands (_risk_level); hard-coded 0.70/0.50
+                        # here relabelled pairs once a job was reloaded.
+                        "risk_level": _risk_level(float(r.similarity_score or 0)),
                         "confidence": (
                             float(r.confidence_level)
                             if r.confidence_level is not None
@@ -5023,6 +5013,16 @@ def _load_job_from_db(job_id: str) -> dict[str, Any] | None:
                 job_dict["similarity_context"] = annotate_results(
                     job_dict["results"], scores=cohort_scores
                 )
+                # Counts come from the whole cohort, not the 200-row page.
+                threshold = job_dict["threshold"]
+                flagged = sum(1 for score in cohort_scores if score >= threshold)
+                job_dict["summary"]["total_pairs"] = len(cohort_scores)
+                job_dict["summary"]["suspicious_pairs"] = flagged
+                job_dict["high_similarity_count"] = flagged
+            # Derived from the pairs' decisions; it was reset to "unreviewed".
+            job_dict["review_status"] = _derive_job_review_status(
+                job_dict["results"], job_dict["threshold"]
+            )
 
             # Compute actual review counts from DB
             if sim_results:
@@ -8173,14 +8173,12 @@ async def detect_ai_generated_code(
                 course = (
                     db.query(Course).filter(Course.id == assignment.course_id).first()
                 )
-                if (
-                    current_user
-                    and current_user.get("organization_id")
-                    and (
-                        course is None
-                        or str(course.organization_id)
-                        != str(current_user["organization_id"])
-                    )
+                # Same rule as the Plagiarism Checker upload: the caller must be
+                # able to read the course. Only an organization mismatch was
+                # checked, so a user without an organization passed for any
+                # assignment and a professor for any course in their org.
+                if course is None or not academic_access.can_read_course(
+                    db, current_user, str(course.id)
                 ):
                     return JSONResponse(
                         status_code=403,

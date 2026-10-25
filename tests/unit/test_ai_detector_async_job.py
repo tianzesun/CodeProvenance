@@ -195,6 +195,7 @@ class TestAssignmentResolution:
         from src.backend.models.database import (
             Assignment,
             Course,
+            CourseInstructor,
             Organization,
             User,
         )
@@ -249,6 +250,9 @@ class TestAssignmentResolution:
                     is_active=True,
                 )
             )
+            db.flush()
+            # The professor teaches the course, which is what grants access.
+            db.add(CourseInstructor(course_id=course_id, user_id=user_id))
             db.commit()
         return org_id, course_id, assignment_id, user_id
 
@@ -359,3 +363,44 @@ class TestAssignmentResolution:
         finally:
             self._cleanup(tag_a)
             self._cleanup(tag_b)
+
+    def test_same_org_professor_not_teaching_the_course_gets_403(
+        self, monkeypatch
+    ) -> None:
+        """Sharing an organization is not access: the course must be theirs."""
+        from fastapi.testclient import TestClient
+
+        from src.backend.config.database import SessionLocal
+        from src.backend.models.database import CourseInstructor
+
+        tag = "same-org-not-teaching"
+        org_id, course_id, assignment_id, user_id = self._seed_org_course_assignment(
+            tag
+        )
+        with SessionLocal() as db:
+            db.query(CourseInstructor).filter(
+                CourseInstructor.course_id == course_id
+            ).delete(synchronize_session=False)
+            db.commit()
+        try:
+            monkeypatch.setattr(
+                server,
+                "_authenticate_request",
+                lambda *a, **k: {
+                    "id": user_id,
+                    "role": "professor",
+                    "tenant_id": None,
+                    "organization_id": org_id,
+                },
+            )
+            resp = TestClient(server.app).post(
+                "/api/ai-detect",
+                data={"assignment_id": assignment_id},
+                files=[
+                    ("files", ("t.py", b"print('long enough text')\n", "text/x-python"))
+                ],
+                cookies=self._cookie_jar(user_id),
+            )
+            assert resp.status_code == 403, resp.text
+        finally:
+            self._cleanup(tag)
