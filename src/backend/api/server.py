@@ -66,6 +66,7 @@ from src.backend.api.middleware.auth import api_key_manager
 from src.backend.api.routes import auth, cases, users
 from src.backend.api.routes import settings as settings_router
 from src.backend.application.services.batch_detection_service import (
+    MIN_EVIDENCE_TOKENS,
     BatchDetectionService,
     ComparisonResult,
     _risk_level,
@@ -8722,6 +8723,8 @@ def _run_analysis_engines(
             threshold=threshold,
             weights=fusion_weights or None,
             starter_sources=starter_sources,
+            infer_common_code=True,
+            min_evidence_tokens=MIN_EVIDENCE_TOKENS,
         )
         results = service.compare_all_pairs(
             submissions,

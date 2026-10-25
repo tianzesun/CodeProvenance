@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from src.backend.application.services.batch_detection_service import (
+    MIN_EVIDENCE_TOKENS,
     BatchDetectionService,
     _logic_flow_similarity,
 )
@@ -21,7 +22,7 @@ class _ConfidentLearnedScorer:
 
 @pytest.fixture(scope="module")
 def service() -> BatchDetectionService:
-    svc = BatchDetectionService()
+    svc = BatchDetectionService(min_evidence_tokens=MIN_EVIDENCE_TOKENS)
     svc.learned_scorer = _ConfidentLearnedScorer()
     return svc
 
@@ -51,11 +52,37 @@ def test_pair_without_code_scores_zero(
     assert _score(service, code_a, code_b) == 0.0
 
 
+LONG_ENOUGH = (
+    "def mean(values):\n"
+    "    if not values:\n"
+    "        return 0.0\n"
+    "    total = 0.0\n"
+    "    for value in values:\n"
+    "        total += value\n"
+    "    return total / len(values)\n"
+)
+
+
 def test_pair_with_code_still_uses_learned_score(
     service: BatchDetectionService,
 ) -> None:
-    code = "def double(n):\n    return n * 2\n"
-    assert _score(service, code, code) > 0.9
+    assert _score(service, LONG_ENOUGH, LONG_ENOUGH) > 0.9
+
+
+@pytest.mark.parametrize(
+    ("code_a", "code_b"),
+    [
+        ("x = 1\n", "y = 2\n"),
+        ("print('hi')\n", "print('bye')\n"),
+        ("def solve():\n    pass\n", "def main():\n    pass\n"),
+        ("x = 1\n", LONG_ENOUGH),
+    ],
+)
+def test_too_little_code_is_held_at_review(
+    service: BatchDetectionService, code_a: str, code_b: str
+) -> None:
+    """A few tokens normalise to the same shape; that is not a critical match."""
+    assert 0.0 < _score(service, code_a, code_b) <= 0.5
 
 
 def test_upload_order_does_not_change_scores() -> None:

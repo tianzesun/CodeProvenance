@@ -70,6 +70,9 @@ class ComparisonResult:
 #: Highest score for a pair whose overlap is mostly starter/boilerplate code; the
 #: rule engine's REVIEW score for that case (``FusionEngine._shared_region_result``).
 STARTER_REVIEW_CEILING = 0.5
+#: Default ``min_evidence_tokens`` for classroom jobs: the same floor the MVP
+#: pipeline uses (``engines.mvp.pipeline.MIN_TOKENS``).
+MIN_EVIDENCE_TOKENS = 30
 
 
 def _risk_level(score: float) -> str:
@@ -142,6 +145,11 @@ def _strip_comments(code: str) -> str:
     return code
 
 
+def _code_token_count(code: str) -> int:
+    """Number of code tokens once comments are stripped (any language)."""
+    return len(re.findall(r"\w+|[^\w\s]", _strip_comments(code)))
+
+
 def _multiset_jaccard(tokens_a: list[str], tokens_b: list[str]) -> float:
     """Calculate multiset Jaccard similarity for two token streams."""
     if not tokens_a and not tokens_b:
@@ -208,7 +216,19 @@ class BatchDetectionService:
         threshold: float = 0.5,
         weights: dict[str, float] | None = None,
         starter_sources: list[str] | None = None,
+        infer_common_code: bool = False,
+        min_evidence_tokens: int = 0,
     ):
+        """
+        Args:
+            infer_common_code: Also strip code that most of the cohort shares
+                (see ``StarterCodeRemover.from_cohort``) before comparing.
+            min_evidence_tokens: Cap a pair at the REVIEW score when either
+                side has fewer code tokens than this (0 = off).
+
+        Both are classroom policies, off by default so benchmark and training
+        runs keep raw pair scores.
+        """
         from src.backend.domain.decision import DecisionEngine
         from src.backend.engines.features.feature_extractor import FeatureExtractor
         from src.backend.engines.scoring.fusion_engine import FusionEngine
@@ -220,6 +240,9 @@ class BatchDetectionService:
         self.threshold = threshold
         self.weights = weights
         self.learned_scorer = LearnedFusionScorer()
+        self.starter_sources = list(starter_sources or [])
+        self.infer_common_code = infer_common_code
+        self.min_evidence_tokens = min_evidence_tokens
         self.starter_remover = None
         if starter_sources:
             from src.backend.engines.mvp.starter_code import StarterCodeRemover
@@ -295,6 +318,17 @@ class BatchDetectionService:
         # as critical matches.
         if FusionEngine._shared_region_overlap(features) >= STARTER_OVERLAP_CAP:
             score = min(score, STARTER_REVIEW_CEILING)
+        # A few lines of code are too little evidence for a high-priority match:
+        # ``x = 1`` and ``y = 2`` normalise to the same tokens and scored 1.0. Keep
+        # such pairs visible for review, but never above it.
+        min_tokens = getattr(self, "min_evidence_tokens", 0)
+        if (
+            min_tokens
+            and code_a is not None
+            and code_b is not None
+            and min(_code_token_count(code_a), _code_token_count(code_b)) < min_tokens
+        ):
+            score = min(score, STARTER_REVIEW_CEILING)
         return score
 
     def ingest_folder(self, folder: Path) -> dict[str, str]:
@@ -356,6 +390,12 @@ class BatchDetectionService:
         import os
         import threading
 
+        if self.infer_common_code:
+            from src.backend.engines.mvp.starter_code import StarterCodeRemover
+
+            self.starter_remover = StarterCodeRemover.from_cohort(
+                submissions.values(), self.starter_sources
+            )
         # Sorted, not upload order: a few features (coverage, ast) depend on which
         # file comes first, so the same pair could score differently on re-upload.
         files = sorted(submissions)
@@ -698,6 +738,11 @@ class BatchDetectionService:
                 "total_pairs": total,
                 "suspicious_pairs": len(suspicious),
                 "threshold": self.threshold,
+                # Distinct lines treated as shared by most of the class and
+                # left out of every comparison (0 when inference was off).
+                "common_code_lines": getattr(
+                    self.starter_remover, "inferred_common_lines", 0
+                ),
             },
             "suspicious": [
                 {
