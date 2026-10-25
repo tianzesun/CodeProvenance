@@ -459,10 +459,10 @@ export default function ResultsPage() {
     setPairStatuses((prev) => ({ ...prev, [key]: newStatus }));
 
     try {
-      // review_status is the job-level status the backend still expects ("backward compat"). Note it
-      // overwrites the whole job's status with this pair's, so the backend should treat it as legacy.
+      // Only the pair's decision: the backend derives the job's review status
+      // from all its flagged pairs (sending this pair's status as the job's
+      // made the last pair touched decide the whole assignment).
       await updateReview({
-        review_status: newStatus,
         pair_reviews: { [key]: { status: newStatus } },
       });
       setSavedFlash(true);

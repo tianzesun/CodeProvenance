@@ -1,5 +1,7 @@
 """Unit tests for web search scoring behavior."""
 
+import pytest
+
 from src.backend.infrastructure.indexing.web_search import WebSearchService
 
 SUBMISSION = """import os
@@ -285,3 +287,28 @@ def test_perform_full_web_scan_sorts_by_computed_similarity(monkeypatch) -> None
         result["web_results"][0]["similarity"]
         >= result["web_results"][-1]["similarity"]
     )
+
+
+@pytest.mark.parametrize(
+    ("language", "expected_suffix"),
+    [("sql", " language:sql"), ("unknown", ""), ("", "")],
+)
+def test_search_github_language_qualifier(
+    monkeypatch, language: str, expected_suffix: str
+) -> None:
+    """An unknown language must not filter the search down to nothing."""
+    service = WebSearchService(github_token="token")
+    queries: list[str] = []
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        queries.append(params["q"])
+        return _MockResponse({"items": []})
+
+    monkeypatch.setattr(
+        "src.backend.infrastructure.indexing.web_search.requests.get", fake_get
+    )
+    service.search_github(SUBMISSION, language)
+
+    assert queries
+    assert all(q.endswith(expected_suffix) for q in queries)
+    assert not any("language:unknown" in q or q.endswith("language:") for q in queries)

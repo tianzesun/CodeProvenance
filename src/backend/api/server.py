@@ -714,8 +714,30 @@ def _infer_language_from_filename(filename: str) -> str:
         ".kt": "kotlin",
         ".swift": "swift",
         ".scala": "scala",
+        ".r": "r",
+        ".sql": "sql",
+        ".sh": "shell",
+        ".bash": "shell",
+        ".zsh": "shell",
+        ".ps1": "powershell",
+        ".lua": "lua",
+        ".pl": "perl",
+        ".pm": "perl",
+        ".ex": "elixir",
+        ".exs": "elixir",
+        ".dart": "dart",
+        ".clj": "clojure",
+        ".hs": "haskell",
+        ".ml": "ocaml",
+        ".fs": "fsharp",
+        ".erl": "erlang",
+        ".vue": "vue",
+        ".svelte": "svelte",
     }
-    return language_map.get(suffix, "python")
+    # Unmapped (e.g. ".m": MATLAB or Objective-C) is "unknown", not "python":
+    # Python-only analysis was applied to it and the web scan searched only
+    # Python repositories for its source.
+    return language_map.get(suffix, "unknown")
 
 
 def _infer_pmd_language_from_filename(filename: str) -> str:
@@ -2455,6 +2477,8 @@ def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> list[str]:
             if member.endswith("/"):
                 continue
             member_path = PathLib(member)
+            if _is_archive_junk(member_path):
+                continue
             if _is_code_file(member_path.name):
                 # Reject on the declared size and on the file count BEFORE
                 # decompressing: the per-file limit used to be checked only after
@@ -2493,6 +2517,15 @@ def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> list[str]:
     return extracted
 
 
+def _is_archive_junk(member_path: PathLib) -> bool:
+    """macOS Finder metadata: ``__MACOSX/`` copies and ``._name`` resource forks.
+
+    They carry code extensions, so they used to become extra binary
+    "submissions" paired against every student.
+    """
+    return "__MACOSX" in member_path.parts or member_path.name.startswith("._")
+
+
 def _unique_child_path(root_dir: PathLib, relative_path: PathLib) -> PathLib:
     """Return a child path under root_dir without overwriting existing uploads."""
     target = root_dir / relative_path
@@ -2512,20 +2545,23 @@ def _unique_child_path(root_dir: PathLib, relative_path: PathLib) -> PathLib:
 
 def _read_files_from_dir(directory: PathLib) -> dict[str, str]:
     submissions = {}
-    for ext in ALLOWED_EXTENSIONS:
-        for f in directory.rglob(f"*{ext}"):
-            try:
-                # Reserved "starter" subdirectory holds instructor-provided
-                # templates; those files must never be read back as student
-                # submissions (they would inflate pair results).
-                rel_parts = f.relative_to(directory).parts
-                if "starter" in rel_parts:
-                    continue
-                content = f.read_text(encoding="utf-8", errors="ignore")
-                if len(content.strip()) > 10:
-                    submissions[_normalize_submission_name(f, directory)] = content
-            except Exception as e:
-                logger.warning(f"Skipping {f.name}: {e}")
+    # One walk filtered by _is_code_file: globbing "*{ext}" per extension was
+    # case-sensitive, so "Alice.PY" passed the upload check and was then dropped.
+    for f in sorted(directory.rglob("*")):
+        if not f.is_file() or not _is_code_file(f.name):
+            continue
+        # Reserved "starter" subdirectory holds instructor-provided templates;
+        # those files must never be read back as student submissions (they
+        # would inflate pair results).
+        if "starter" in f.relative_to(directory).parts:
+            continue
+        try:
+            content = f.read_text(encoding="utf-8", errors="ignore")
+        except Exception as e:
+            logger.warning(f"Skipping {f.name}: {e}")
+            continue
+        if len(content.strip()) > 10:
+            submissions[_normalize_submission_name(f, directory)] = content
     return submissions
 
 
@@ -4675,7 +4711,15 @@ def _recover_job_from_report(job_id: str) -> dict[str, Any] | None:
     return recovered_job
 
 
-def _load_persisted_job(job_id: str) -> dict[str, Any] | None:
+def _load_persisted_job(
+    job_id: str, *, mark_interrupted: bool = True
+) -> dict[str, Any] | None:
+    """Load job.json into the cache.
+
+    ``mark_interrupted`` turns a stored "processing" status into "failed": right
+    for a cold load after a restart, wrong for the poll-time refresh of a job
+    that is still running here or in a worker, which it used to fail mid-run.
+    """
     metadata_path = _job_metadata_path(job_id)
     if metadata_path.exists():
         try:
@@ -4684,7 +4728,7 @@ def _load_persisted_job(job_id: str) -> dict[str, Any] | None:
             logger.exception(f"Failed to read persisted job metadata for {job_id}")
         else:
             stored_job["id"] = job_id
-            normalized = _normalize_job(stored_job, from_disk=True)
+            normalized = _normalize_job(stored_job, from_disk=mark_interrupted)
             _jobs[job_id] = normalized
             _persist_job(job_id)
             return normalized
@@ -4759,7 +4803,7 @@ def _get_job(job_id: str) -> dict[str, Any] | None:
     if job_id in _jobs:
         cached = _normalize_job(_jobs[job_id])
         if _job_status_rank(cached.get("status")) < _JOB_STATUS_RANK["completed"]:
-            refreshed = _load_persisted_job(job_id)
+            refreshed = _load_persisted_job(job_id, mark_interrupted=False)
             if refreshed is None and _job_status_rank(
                 _read_job_status_from_db(job_id)
             ) > _job_status_rank(cached.get("status")):
@@ -7769,6 +7813,36 @@ def _discard_upload(job_id: str, job_dir: PathLib) -> None:
     _jobs.pop(job_id, None)
 
 
+def _assignment_access_error(
+    current_user: dict[str, Any] | None, assignment_id: str | None
+) -> JSONResponse | None:
+    """403/400 response when the uploader may not file a job under ``assignment_id``.
+
+    The id was used unchecked, so an upload could be attached to another
+    workspace's assignment: its settings applied, its roster used to link
+    submissions to students, and the job counted in its course analytics.
+    """
+    if not assignment_id:
+        return None
+    try:
+        with SessionLocal() as db:
+            course_id = academic_access.course_id_for_assignment(db, assignment_id)
+            if not course_id or not academic_access.can_read_course(
+                db, current_user, course_id
+            ):
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "The selected assignment is not available."},
+                )
+    except SQLAlchemyError:
+        logger.warning("Could not verify assignment %s", assignment_id, exc_info=True)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "The selected assignment could not be loaded."},
+        )
+    return None
+
+
 async def _save_starter_files(
     starter_files: list[UploadFile], job_dir: PathLib
 ) -> tuple[list[str], str | None]:
@@ -7824,6 +7898,9 @@ async def upload_files(
         # Overflow quota on anonymous requests. This override outranks the
         # tenant and assignment settings, so forcing it here sticks.
         source_scan_enabled = False
+    access_error = _assignment_access_error(current_user, assignment_id)
+    if access_error:
+        return access_error
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
         "source_scan_enabled_override": source_scan_enabled,
@@ -7909,6 +7986,9 @@ async def upload_zip(
     if _is_guest_principal(current_user):
         # See upload_files: a demo session never spends external API quota.
         source_scan_enabled = False
+    access_error = _assignment_access_error(current_user, assignment_id)
+    if access_error:
+        return access_error
     if not file.filename or not file.filename.lower().endswith(".zip"):
         return JSONResponse(
             status_code=400, content={"error": "Please upload a .zip file"}
@@ -8943,11 +9023,21 @@ async def _run_analysis(
         )
         submissions = _read_files_from_dir(job_dir)
         if len(submissions) < 2:
-            del _jobs[job_id]
-            return JSONResponse(
-                status_code=400,
-                content={"error": "At least 2 valid code files required"},
+            # Fail the job visibly. Deleting it from the cache left job.json at
+            # "processing", which later read as "the backend restarted".
+            message = (
+                "At least 2 code files with content are required; "
+                f"{len(submissions)} could be read from the upload."
             )
+            _jobs[job_id]["status"] = "failed"
+            _jobs[job_id]["error"] = message
+            _set_job_progress(job_id, "failed", detail=message)
+            _persist_job(job_id)
+            try:
+                _update_job_status_in_db(job_id, "failed", message)
+            except SQLAlchemyError:
+                logger.warning("Could not mark job %s failed in DB", job_id)
+            return JSONResponse(status_code=400, content={"error": message})
 
         _jobs[job_id]["file_count"] = len(submissions)
         _jobs[job_id]["status"] = "analyzing"
@@ -9392,27 +9482,37 @@ async def _run_analysis(
         # and without logging an error stack.
         logger.info("Analysis cancelled for job %s", job_id)
         return JSONResponse(content={"job_id": job_id, "status": "cancelled"})
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
+        # The exception text (SQL and parameters) stays in the log; the job
+        # payload served to the browser gets a generic warning.
         logger.exception(f"DB persistence failed for job {job_id}")
+        warning = (
+            "Results may not be saved to the database. "
+            f"The server has logged the details (reference {job_id})."
+        )
         if job_id in _jobs:
-            _jobs[job_id][
-                "persistence_warning"
-            ] = f"Results may not be saved to database: {e!s}"
+            _jobs[job_id]["persistence_warning"] = warning
             _persist_job(job_id)
         return JSONResponse(
             status_code=200,
             content={
                 "job_id": job_id,
                 "status": "completed",
-                "persistence_warning": f"Results may not be saved to database: {e!s}",
+                "persistence_warning": warning,
             },
         )
     except Exception as e:
         logger.exception(f"Analysis failed for job {job_id}")
         if job_id in _jobs:
+            # /api/jobs/{id} returns error and progress.detail, so they carry a
+            # generic message; the exception itself is in the log.
+            message = (
+                "Analysis failed. The server has logged the details "
+                f"(reference {job_id})."
+            )
             _jobs[job_id]["status"] = "failed"
-            _jobs[job_id]["error"] = str(e)
-            _set_job_progress(job_id, "failed", detail=str(e)[:200])
+            _jobs[job_id]["error"] = message
+            _set_job_progress(job_id, "failed", detail=message)
             _persist_job(job_id)
             try:
                 _update_job_status_in_db(job_id, "failed", str(e))
@@ -9907,6 +10007,58 @@ async def download_dossier_pdf(job_id: str, request: Request):
     return response
 
 
+def _validated_pair_reviews(raw: Any) -> dict[str, dict[str, str]]:
+    """Normalise ``pair_reviews`` to ``{key: {"status"?, "notes"?}}``.
+
+    Accepts the legacy ``review_status`` / ``review_notes`` keys. An unknown
+    status or non-string note is a 400; it used to be stored as given, or to
+    500 on ``.strip()``.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="pair_reviews must be an object")
+    cleaned: dict[str, dict[str, str]] = {}
+    for key, data in raw.items():
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="Invalid pair review")
+        entry: dict[str, str] = {}
+        status_value = data.get("status", data.get("review_status"))
+        if status_value is not None:
+            if status_value not in REVIEW_STATUSES:
+                raise HTTPException(status_code=400, detail="Invalid review status")
+            entry["status"] = status_value
+        notes_value = data.get("notes", data.get("review_notes"))
+        if notes_value is not None:
+            if not isinstance(notes_value, str):
+                raise HTTPException(
+                    status_code=400, detail="Review notes must be a string"
+                )
+            entry["notes"] = notes_value.strip()
+        cleaned[str(key)] = entry
+    return cleaned
+
+
+def _derive_job_review_status(results: list[dict[str, Any]], threshold: float) -> str:
+    """Job-level review status from its flagged pairs' decisions.
+
+    The most serious decision wins (escalated, then confirmed). Otherwise the
+    job needs review while any flagged pair is undecided or marked for review,
+    and is dismissed only once every flagged pair has been dismissed.
+    """
+    flagged = [r for r in results if _coerce_float(r.get("score"), 0.0) >= threshold]
+    statuses = [r.get("review_status") or "unreviewed" for r in flagged]
+    if "escalated" in statuses:
+        return "escalated"
+    if "confirmed" in statuses:
+        return "confirmed"
+    if not statuses or all(status == "unreviewed" for status in statuses):
+        return "unreviewed"
+    if all(status == "dismissed" for status in statuses):
+        return "dismissed"
+    return "needs_review"
+
+
 @app.patch("/api/job/{job_id}/review")
 async def update_job_review(job_id: str, request: Request):
     # Review dispositions are durable decisions; a demo session records none.
@@ -9924,7 +10076,13 @@ async def update_job_review(job_id: str, request: Request):
     ):
         raise HTTPException(status_code=400, detail="No review updates provided")
 
-    if "review_status" in payload:
+    pair_reviews = _validated_pair_reviews(payload.get("pair_reviews"))
+
+    # With pair decisions the job status is derived from them (below). The
+    # results page also sent the pair's status as ``review_status``, so the
+    # last pair touched set the whole job: dismissing one harmless pair made
+    # an assignment with confirmed pairs read "dismissed" on the dashboard.
+    if "review_status" in payload and not pair_reviews:
         review_status = payload.get("review_status")
         if review_status not in REVIEW_STATUSES:
             raise HTTPException(status_code=400, detail="Invalid review status")
@@ -9937,11 +10095,9 @@ async def update_job_review(job_id: str, request: Request):
         job["review_notes"] = review_notes.strip()
 
     # Per-pair review persistence to database (SimilarityResult rows)
-    if "pair_reviews" in payload and isinstance(payload.get("pair_reviews"), dict):
+    if pair_reviews:
         with SessionLocal() as db:
-            for pair_key, review_data in payload["pair_reviews"].items():
-                if not isinstance(review_data, dict):
-                    continue
+            for pair_key, review_data in pair_reviews.items():
                 parts = (
                     str(pair_key).split("::")
                     if "::" in str(pair_key)
@@ -9959,32 +10115,25 @@ async def update_job_review(job_id: str, request: Request):
                         .first()
                     )
                     if sim:
-                        if "status" in review_data or "review_status" in review_data:
-                            sim.review_status = review_data.get(
-                                "status"
-                            ) or review_data.get("review_status")
-                        if "notes" in review_data or "review_notes" in review_data:
-                            sim.review_notes = (
-                                review_data.get("notes")
-                                or review_data.get("review_notes")
-                                or ""
-                            ).strip() or None
+                        if "status" in review_data:
+                            sim.review_status = review_data["status"]
+                        if "notes" in review_data:
+                            sim.review_notes = review_data["notes"] or None
             db.commit()
 
     # Also reflect in in-memory results if present
-    if (
-        "results" in job
-        and isinstance(job["results"], list)
-        and "pair_reviews" in payload
-    ):
+    if pair_reviews and isinstance(job.get("results"), list):
         for r in job["results"]:
-            k = f"{r.get('file_a')}::{r.get('file_b')}"
-            if k in payload["pair_reviews"]:
-                rd = payload["pair_reviews"][k]
-                if "status" in rd or "review_status" in rd:
-                    r["review_status"] = rd.get("status") or rd.get("review_status")
-                if "notes" in rd or "review_notes" in rd:
-                    r["review_notes"] = rd.get("notes") or rd.get("review_notes")
+            rd = pair_reviews.get(f"{r.get('file_a')}::{r.get('file_b')}")
+            if rd is None:
+                continue
+            if "status" in rd:
+                r["review_status"] = rd["status"]
+            if "notes" in rd:
+                r["review_notes"] = rd["notes"]
+        job["review_status"] = _derive_job_review_status(
+            job["results"], _coerce_float(job.get("threshold"), 0.5)
+        )
 
     job["review_updated_at"] = datetime.now().isoformat()
     _jobs[job_id] = job

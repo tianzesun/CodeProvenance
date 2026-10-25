@@ -147,7 +147,7 @@ class TestInlineRunProtection:
         monkeypatch.setattr(
             server,
             "_load_persisted_job",
-            lambda _j: {
+            lambda _j, **_kw: {
                 "id": job_id,
                 "status": "analyzing",
                 "progress": {
@@ -181,7 +181,7 @@ class TestInlineRunProtection:
         monkeypatch.setattr(
             server,
             "_load_persisted_job",
-            lambda _j: {
+            lambda _j, **_kw: {
                 "id": job_id,
                 "status": "analyzing",
                 "progress": {
@@ -218,7 +218,11 @@ class TestAdoptionPreservesIdentity:
             "_load_persisted_job",
             # The real recovery path stamps owner_user_id=None via
             # _normalize_job — an explicit empty, not a missing key.
-            lambda _j: {"id": job_id, "status": "completed", "owner_user_id": None},
+            lambda _j, **_kw: {
+                "id": job_id,
+                "status": "completed",
+                "owner_user_id": None,
+            },
         )
         try:
             refreshed = server._get_job(job_id)
@@ -227,5 +231,38 @@ class TestAdoptionPreservesIdentity:
             assert refreshed["status"] == "completed"
             assert refreshed["guest"] is True
             assert refreshed["owner_user_id"] == "guest-abc123"
+        finally:
+            _forget(job_id)
+
+
+class TestRefreshDoesNotFailARunningJob:
+    """Re-reading job.json mid-run must not apply the restart guard."""
+
+    def test_polling_a_running_job_keeps_it_running(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        monkeypatch.setattr(server, "REPORTS_DIR", tmp_path)
+        monkeypatch.setattr(server, "_read_job_status_from_db", lambda job_id: None)
+        job_id = f"poll-running-{uuid.uuid4()}"
+        _seed(job_id, "analyzing", server._new_job_progress())
+        server._persist_job(job_id)  # job.json says "analyzing", as mid-run
+        try:
+            job = server._get_job(job_id)
+
+            assert job["status"] == "analyzing"
+            assert not job.get("error")
+        finally:
+            _forget(job_id)
+
+    def test_cold_load_still_marks_an_interrupted_job_failed(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        monkeypatch.setattr(server, "REPORTS_DIR", tmp_path)
+        job_id = f"poll-cold-{uuid.uuid4()}"
+        _seed(job_id, "analyzing", server._new_job_progress())
+        server._persist_job(job_id)
+        _forget(job_id)  # a restart empties the cache
+        try:
+            assert server._get_job(job_id)["status"] == "failed"
         finally:
             _forget(job_id)

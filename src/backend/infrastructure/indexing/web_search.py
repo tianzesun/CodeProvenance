@@ -165,6 +165,11 @@ class WebSearchService:
             return []
 
         probes = self._extract_probe_queries(query_code)
+        # No qualifier for an unrecognised language: "language:unknown" matches
+        # nothing on GitHub, so the search would silently return no sources.
+        qualifier = (
+            f" language:{language}" if language and language != "unknown" else ""
+        )
         mapped: dict[str, dict[str, Any]] = {}
         for probe in probes:
             try:
@@ -174,7 +179,7 @@ class WebSearchService:
                         **self.github_headers,
                         "Accept": "application/vnd.github.text-match+json",
                     },
-                    params={"q": f"{probe} language:{language}", "per_page": 5},
+                    params={"q": f"{probe}{qualifier}", "per_page": 5},
                     timeout=8,
                 )
                 response.raise_for_status()

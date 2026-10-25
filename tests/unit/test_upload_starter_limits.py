@@ -51,3 +51,17 @@ def test_starter_within_limits_is_passed_to_the_analysis(client: TestClient) -> 
 
     assert response.status_code == 200, response.text
     assert client.captured["starter_sources"] == ["def main():\n    pass\n"]
+
+
+@pytest.mark.parametrize(
+    ("filename", "language"),
+    [
+        ("query.sql", "sql"),
+        ("run.sh", "shell"),
+        ("analysis.r", "r"),
+        ("model.m", "unknown"),
+        ("main.py", "python"),
+    ],
+)
+def test_language_is_not_guessed_as_python(filename: str, language: str) -> None:
+    assert server._infer_language_from_filename(filename) == language
