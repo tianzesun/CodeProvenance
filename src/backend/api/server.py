@@ -9663,6 +9663,7 @@ async def _run_analysis_in_workspace(
                         "matching_blocks": r.matching_blocks or [],
                         "code_a": r.code_a,
                         "code_b": r.code_b,
+                        "review_hold": getattr(r, "review_hold", None),
                     }
                     for r in results
                 ],

@@ -66,6 +66,10 @@ class ComparisonResult:
     matching_blocks: list[dict[str, Any]] = field(default_factory=list)
     code_a: str | None = None
     code_b: str | None = None
+    #: Why the score was held at the review level, when that lowered it:
+    #: ``short_files`` (too little code to judge) or ``shared_code`` (the
+    #: overlap is mostly starter or boilerplate code).
+    review_hold: str | None = None
 
 
 #: Highest score for a pair whose overlap is mostly starter/boilerplate code; the
@@ -263,7 +267,18 @@ class BatchDetectionService:
         code_a: str | None = None,
         code_b: str | None = None,
     ) -> float:
-        """Return the effective similarity score for a code pair.
+        """Return the effective similarity score for a code pair."""
+        return self._scored(features, logic_flow, fused, code_a, code_b)[0]
+
+    def _scored(
+        self,
+        features: Any,
+        logic_flow: float,
+        fused: Any,
+        code_a: str | None = None,
+        code_b: str | None = None,
+    ) -> tuple[float, str | None]:
+        """The effective similarity score and, if it was held at review, why.
 
         Uses the learned fusion model's calibrated probability when a trained
         artifact is available; otherwise falls back to the rule-based
@@ -281,7 +296,7 @@ class BatchDetectionService:
                 or not _strip_comments(code_b).strip()
             )
         ):
-            return 0.0
+            return 0.0, None
         learned_scorer = getattr(self, "learned_scorer", None)
         if learned_scorer is not None and learned_scorer.available:
             learned = learned_scorer.score(
@@ -317,8 +332,9 @@ class BatchDetectionService:
         # boilerplate code (it returns REVIEW at 0.5), but the learned score and
         # the structure floor replaced that, so untouched starter files scored
         # as critical matches.
+        hold = None
         if FusionEngine._shared_region_overlap(features) >= STARTER_OVERLAP_CAP:
-            score = min(score, STARTER_REVIEW_CEILING)
+            hold = "shared_code"
         # A few lines of code are too little evidence for a high-priority match:
         # ``x = 1`` and ``y = 2`` normalise to the same tokens and scored 1.0. Keep
         # such pairs visible for review, but never above it.
@@ -329,8 +345,10 @@ class BatchDetectionService:
             and code_b is not None
             and min(_code_token_count(code_a), _code_token_count(code_b)) < min_tokens
         ):
-            score = min(score, STARTER_REVIEW_CEILING)
-        return score
+            hold = "short_files"
+        if hold and score > STARTER_REVIEW_CEILING:
+            return STARTER_REVIEW_CEILING, hold
+        return score, None
 
     def ingest_folder(self, folder: Path) -> dict[str, str]:
         """Read all code files from a folder.
@@ -576,7 +594,7 @@ class BatchDetectionService:
         features = self.extractor.extract(ca, cb, filename_a=fa, filename_b=fb)
         logic_flow = _logic_flow_similarity(ca, cb)
         fused = self.fusion.fuse(features, logic_flow=logic_flow)
-        final_score = self._primary_score(features, logic_flow, fused, ca, cb)
+        final_score, review_hold = self._scored(features, logic_flow, fused, ca, cb)
 
         # Compute matching blocks for highlighting
         match_result = highlighter.find_matching_segments(ca, cb)
@@ -616,6 +634,7 @@ class BatchDetectionService:
             matching_blocks=matching_blocks,
             code_a=ca,
             code_b=cb,
+            review_hold=review_hold,
         )
 
     def compare_pairs(

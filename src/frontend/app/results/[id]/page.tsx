@@ -613,6 +613,11 @@ export default function ResultsPage() {
     const parts = [
       `This pair scored ${similarityDisplay}% overall, ${similarityDisplay >= cutoff ? 'at or above' : 'below'} the ${cutoff}% flag threshold.`,
     ];
+    if (activeResult.review_hold === 'short_files') {
+      parts.push('The score is held at 50% because at least one file is very short: a few lines are too little evidence to rank a pair higher, however alike they look.');
+    } else if (activeResult.review_hold === 'shared_code') {
+      parts.push('The score is held at 50% because most of the overlap is starter or boilerplate code, which is expected to match.');
+    }
     const strongest = [...buildEvidenceSignals(activeResult)].sort((a, b) => b.score - a.score).slice(0, 2);
     if (strongest.length > 0) {
       parts.push(`Strongest evidence: ${strongest.map((signal) => `${signal.name.toLowerCase()} (${Math.round(signal.score * 100)}%)`).join(' and ')}.`);
@@ -1030,6 +1035,14 @@ export default function ResultsPage() {
                             <span className={`font-mono text-sm font-semibold ${row._score >= 0.75 ? 'text-red-600 dark:text-red-400' : row._score >= 0.45 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400'}`}>
                               {Math.round((row._score || 0) * 100)}%
                             </span>
+                            {row.review_hold && (
+                              <span
+                                className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                                title={row.review_hold === 'short_files' ? 'Held at review: a file is too short to judge' : 'Held at review: the overlap is mostly starter or boilerplate code'}
+                              >
+                                Held
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <VerdictBadge verdict={row.verdict} />
@@ -1282,7 +1295,7 @@ export default function ResultsPage() {
                   <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
                     <TreePine size={16} className="text-blue-600 dark:text-blue-400" />
                     <div>
-                      <div className="text-sm font-semibold text-slate-950 dark:text-white">Why this pair was flagged</div>
+                      <div className="text-sm font-semibold text-slate-950 dark:text-white">How this score was reached</div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">
                         The signals below are the independent checks that support this verdict. A check is
                         marked as contributing when its score crosses the alert threshold.

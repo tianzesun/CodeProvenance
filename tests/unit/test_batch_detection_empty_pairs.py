@@ -6,6 +6,7 @@ import pytest
 
 from src.backend.application.services.batch_detection_service import (
     MIN_EVIDENCE_TOKENS,
+    STARTER_REVIEW_CEILING,
     BatchDetectionService,
     _logic_flow_similarity,
 )
@@ -126,3 +127,24 @@ def test_starter_code_overlap_is_not_escalated(
     score = service._primary_score(features, logic_flow, fused, starter, starter)
 
     assert score <= 0.5
+
+
+def test_a_short_pair_says_why_it_was_held_at_review(service) -> None:
+    code = "def add(a, b):\n    return a + b\n"
+
+    (result,) = service.compare_all_pairs({"a.py": code, "b.py": code})
+
+    assert result.score == STARTER_REVIEW_CEILING
+    assert result.review_hold == "short_files"
+
+
+def test_a_normal_pair_is_not_marked_as_held(service) -> None:
+    code = "\n".join(
+        f"def f{i}(values):\n    total = 0\n    for v in values:\n        total += v * {i}\n"
+        f"    return total\n"
+        for i in range(8)
+    )
+
+    (result,) = service.compare_all_pairs({"a.py": code, "b.py": code + "\n# x\n"})
+
+    assert result.review_hold is None
