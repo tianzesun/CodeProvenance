@@ -47,5 +47,10 @@ def test_execution_engine_available_tools_filters_unavailable(monkeypatch) -> No
     monkeypatch.setattr(
         "src.backend.engines.execution.execution_engine.shutil.which", lambda name: None
     )
+    # JPlag also runs through Docker, which CI runners have installed.
+    monkeypatch.setattr(
+        "src.backend.engines.execution.execution_engine.SandboxExecutor._check_docker",
+        lambda self: False,
+    )
     engine = ExecutionEngine(use_sandbox=False)
     assert engine.available_tools() == []

@@ -81,6 +81,22 @@ jobs:
   backend-tests:
     name: Backend Tests (pytest)
     runs-on: ubuntu-latest
+    # Route, sharing and settings tests write real rows; the workflow-level
+    # DATABASE_URL points at this service.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_pass
+          POSTGRES_DB: ci_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_user"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -95,6 +111,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-cov
+
+      - name: Create schema
+        run: python -m alembic upgrade head
 
       - name: Run unit test suite
         run: |
