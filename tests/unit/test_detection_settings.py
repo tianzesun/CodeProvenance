@@ -42,19 +42,6 @@ SETTINGS_PAGE = (
 )
 
 
-def _snapshot_runtime_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Freeze every runtime-mapped settings attribute so this test cannot leak.
-
-    ``_apply_runtime_settings_from_record`` merges the stored record over
-    ``USER_EDITABLE_SETTINGS_DEFAULTS`` and writes *every* mapped attribute, so
-    exercising it with a partial record would otherwise reset unrelated settings
-    for the rest of the session.
-    """
-    for attr in server.SETTINGS_ATTR_MAP.values():
-        if attr and hasattr(settings, attr):
-            monkeypatch.setattr(settings, attr, getattr(settings, attr))
-
-
 def _frontend_source() -> str:
     """Return the raw source of the settings page."""
     return SETTINGS_PAGE.read_text(encoding="utf-8")
@@ -87,24 +74,22 @@ class TestDetectionSettingsPersist:
 
 
 class TestDetectionSettingsApplyToRuntime:
-    """Saved values must reach the live settings object without a restart."""
+    """Saved values reach the workspace's requests without a restart."""
 
-    def test_all_detection_keys_are_applied(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        _snapshot_runtime_attrs(monkeypatch)
+    def test_all_detection_keys_are_applied(self) -> None:
+        from src.backend.config.settings import workspace_overrides
 
-        server._apply_runtime_settings_from_record(
-            {
-                "default_threshold": 0.61,
-                "max_file_size_mb": 42,
-                "max_files_per_job": 123,
-                "batch_size": 64,
-            }
-        )
-
-        assert settings.DEFAULT_THRESHOLD == pytest.approx(0.61)
-        assert settings.MAX_FILE_SIZE_MB == 42
-        assert settings.MAX_FILES_PER_JOB == 123
-        assert settings.BATCH_SIZE == 64
+        record = {
+            "default_threshold": 0.61,
+            "max_file_size_mb": 42,
+            "max_files_per_job": 123,
+            "batch_size": 64,
+        }
+        with workspace_overrides(server._workspace_setting_overrides(record)):
+            assert settings.DEFAULT_THRESHOLD == pytest.approx(0.61)
+            assert settings.MAX_FILE_SIZE_MB == 42
+            assert settings.MAX_FILES_PER_JOB == 123
+            assert settings.BATCH_SIZE == 64
 
     def test_every_detection_key_maps_to_a_real_attribute(self) -> None:
         for key, attr in DETECTION_ATTRS.items():

@@ -1,14 +1,16 @@
-"""Regression tests for runtime application of persisted professor settings.
+"""Regression tests for applying a workspace's saved settings at runtime.
 
-Covers ``_apply_runtime_settings_from_record``: saved settings must actually
-take effect on the running backend (no restart), secrets must be mirrored into
-the process environment, and the professor sensitivity presets must map to the
-same thresholds on the backend as the settings UI advertises.
+Covers ``_workspace_setting_overrides``: saved settings take effect for the
+workspace's own requests and jobs (no restart), without touching the shared
+start-up configuration or the process environment, and the professor
+sensitivity presets map to the same thresholds as the settings UI advertises.
 """
 
 import asyncio
+import contextvars
 import os
 import re
+import threading
 from pathlib import Path
 
 import pytest
@@ -16,6 +18,7 @@ import pytest
 from src.backend.api import server
 from src.backend.config.settings import DEFAULT_ENGINE_WEIGHTS
 from src.backend.config.settings import settings as app_settings
+from src.backend.config.settings import workspace_overrides
 from src.backend.engines.scoring.professor_profiles import apply_professor_profile
 
 SETTINGS_PAGE = (
@@ -28,123 +31,103 @@ SETTINGS_PAGE = (
 )
 
 
-class TestApplyRuntimeSettingsFromRecord:
-    """Persisted tenant settings must mutate the live settings object."""
+def _as_workspace(record: dict):
+    return workspace_overrides(server._workspace_setting_overrides(record))
 
-    def test_non_secret_settings_are_applied_to_runtime(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # monkeypatch snapshots these attributes and restores them afterwards,
-        # so the runtime object is not polluted for other tests.
-        for attr in (
-            "DEFAULT_THRESHOLD",
-            "WEBHOOK_URL",
-            "SOURCE_SCAN_ENABLED",
-            "DEBUG_MODE",
-            "AUDIT_LOG_LEVEL",
-            "EMBEDDING_BATCH_SIZE",
-            "ENGINE_WEIGHTS",
-        ):
-            monkeypatch.setattr(app_settings, attr, getattr(app_settings, attr))
 
-        server._apply_runtime_settings_from_record(
+class TestWorkspaceSettingOverrides:
+    """A workspace's saved settings apply to its own requests only."""
+
+    def test_non_secret_settings_take_effect(self) -> None:
+        with _as_workspace(
             {
                 "default_threshold": 0.66,
                 "webhook_url": "https://example.com/hook",
                 "source_scan_enabled": True,
-                "debug_mode": True,
-                "audit_log_level": "DEBUG",
                 "embedding_batch_size": 8,
                 "engine_weights": {"token": 3.0, "ast": 1.0},
             }
-        )
+        ):
+            assert app_settings.DEFAULT_THRESHOLD == pytest.approx(0.66)
+            assert app_settings.WEBHOOK_URL == "https://example.com/hook"
+            assert app_settings.SOURCE_SCAN_ENABLED is True
+            assert app_settings.EMBEDDING_BATCH_SIZE == 8
+            # _normalize_engine_weights canonicalizes keys and backfills
+            # defaults for unmentioned engines; it does not rescale.
+            assert app_settings.ENGINE_WEIGHTS["token"] == pytest.approx(3.0)
+            assert app_settings.ENGINE_WEIGHTS["ast"] == pytest.approx(1.0)
+            assert (
+                app_settings.ENGINE_WEIGHTS["winnowing"]
+                == DEFAULT_ENGINE_WEIGHTS["winnowing"]
+            )
 
-        assert app_settings.DEFAULT_THRESHOLD == pytest.approx(0.66)
-        assert app_settings.WEBHOOK_URL == "https://example.com/hook"
-        assert app_settings.SOURCE_SCAN_ENABLED is True
-        assert app_settings.DEBUG_MODE is True
-        assert app_settings.AUDIT_LOG_LEVEL == "DEBUG"
-        assert app_settings.EMBEDDING_BATCH_SIZE == 8
-        # _normalize_engine_weights canonicalizes keys and backfills defaults
-        # for unmentioned engines; it does not rescale provided values.
-        assert app_settings.ENGINE_WEIGHTS["token"] == pytest.approx(3.0)
-        assert app_settings.ENGINE_WEIGHTS["ast"] == pytest.approx(1.0)
-        assert (
-            app_settings.ENGINE_WEIGHTS["winnowing"]
-            == DEFAULT_ENGINE_WEIGHTS["winnowing"]
-        )
-
-    def test_settings_apply_while_model_is_frozen(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The runtime applier must work under the production ``frozen=True`` config.
-
-        The autouse ``_mutable_settings`` fixture unfreezes the model for the whole
-        suite, which hid a real bug: plain ``setattr`` raises ``ValidationError`` on a
-        frozen model and the applier's ``except`` swallowed it, so every saved setting
-        (including provider API keys) was silently dropped in production. Re-freezing
-        here reproduces the production configuration.
-        """
-        from src.backend.config.settings import AppSettings
-
-        monkeypatch.setattr(
-            app_settings, "DEFAULT_THRESHOLD", app_settings.DEFAULT_THRESHOLD
-        )
-        AppSettings.model_config["frozen"] = True
-        try:
-            server._apply_runtime_settings_from_record({"default_threshold": 0.71})
+    def test_the_start_up_configuration_is_untouched(self) -> None:
+        before = app_settings.DEFAULT_THRESHOLD
+        with _as_workspace({"default_threshold": 0.71}):
             assert app_settings.DEFAULT_THRESHOLD == pytest.approx(0.71)
-        finally:
-            AppSettings.model_config["frozen"] = False
+        assert app_settings.DEFAULT_THRESHOLD == before
 
-    def test_secret_settings_mirror_to_process_env(
+    def test_concurrent_workspaces_each_see_their_own(self) -> None:
+        """Two workspaces' requests running at once never see each other's values."""
+        seen: dict[str, list[float]] = {"a": [], "b": []}
+        barrier = threading.Barrier(2)
+
+        def run(name: str, threshold: float) -> None:
+            with _as_workspace({"default_threshold": threshold}):
+                for _ in range(50):
+                    barrier.wait()
+                    seen[name].append(app_settings.DEFAULT_THRESHOLD)
+
+        threads = [
+            threading.Thread(target=contextvars.copy_context().run, args=(run, n, t))
+            for n, t in (("a", 0.6), ("b", 0.9))
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert set(seen["a"]) == {0.6}
+        assert set(seen["b"]) == {0.9}
+
+    def test_methods_see_the_workspace_values(self) -> None:
+        with _as_workspace({"llm_api_keys": {"groq": "gk-workspace"}}):
+            assert app_settings.llm_api_key("groq") == "gk-workspace"
+
+    def test_a_workspace_key_overrides_without_touching_the_environment(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("OPENAI_API_KEY", "")
-        # _apply_runtime_settings_from_record writes through object.__setattr__
-        # (bypassing monkeypatch tracking), so snapshot the settings value or
-        # it leaks "sk-runtime-test" into every test running after this one.
-        monkeypatch.setattr(app_settings, "OPENAI_API_KEY", "")
-        server._apply_runtime_settings_from_record(
-            {"openai_api_key": "sk-runtime-test"}
-        )
-        assert os.environ.get("OPENAI_API_KEY") == "sk-runtime-test"
-        assert app_settings.OPENAI_API_KEY == "sk-runtime-test"
+        monkeypatch.setenv("OPENAI_API_KEY", "server-key")
+        with _as_workspace({"openai_api_key": "sk-runtime-test"}):
+            assert app_settings.OPENAI_API_KEY == "sk-runtime-test"
+        assert os.environ["OPENAI_API_KEY"] == "server-key"
 
-    def test_empty_secret_does_not_wipe_existing_value(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "keep-me")
-        server._apply_runtime_settings_from_record({"anthropic_api_key": ""})
-        assert os.environ.get("ANTHROPIC_API_KEY") == "keep-me"
+    def test_empty_secret_keeps_the_server_key(self) -> None:
+        before = app_settings.ANTHROPIC_API_KEY
+        with _as_workspace({"anthropic_api_key": ""}):
+            assert app_settings.ANTHROPIC_API_KEY == before
+
+    def test_a_workspace_cannot_switch_on_debug_mode(self) -> None:
+        before = app_settings.DEBUG_MODE
+        with _as_workspace({"debug_mode": not before}):
+            assert app_settings.DEBUG_MODE == before
 
     def test_unknown_or_meta_keys_are_ignored(self) -> None:
         # v1_* keys are stored per-tenant but have no runtime attribute;
         # unknown keys must not raise.
-        server._apply_runtime_settings_from_record(
-            {"v1_scoring": {"review_threshold": 0.9}, "not_a_setting": 1}
+        assert (
+            server._workspace_setting_overrides(
+                {"v1_scoring": {"review_threshold": 0.9}, "not_a_setting": 1}
+            )
+            == {}
         )
 
 
 class TestOutboundServiceSettings:
-    """Email delivery and AI-detector settings must apply and stay masked."""
+    """Email delivery settings must apply and stay masked."""
 
-    def test_email_settings_apply_to_runtime(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        for attr in (
-            "EMAIL_BACKEND",
-            "EMAIL_HOST",
-            "EMAIL_PORT",
-            "EMAIL_USER",
-            "EMAIL_FROM",
-            "EMAIL_USE_TLS",
-            "EMAIL_PASSWORD",
-        ):
-            monkeypatch.setattr(app_settings, attr, getattr(app_settings, attr))
-        monkeypatch.setenv("EMAIL_PASSWORD", "")
-
-        server._apply_runtime_settings_from_record(
+    def test_email_settings_take_effect(self) -> None:
+        with _as_workspace(
             {
                 "email_backend": "smtp",
                 "email_host": "smtp.example.edu",
@@ -154,38 +137,14 @@ class TestOutboundServiceSettings:
                 "email_use_tls": False,
                 "email_password": "s3cret",
             }
-        )
-
-        assert app_settings.EMAIL_BACKEND == "smtp"
-        assert app_settings.EMAIL_HOST == "smtp.example.edu"
-        assert app_settings.EMAIL_PORT == 2525
-        assert app_settings.EMAIL_USER == "mailer@example.edu"
-        assert app_settings.EMAIL_FROM == "integrity@example.edu"
-        assert app_settings.EMAIL_USE_TLS is False
-        # Email password is secret-like: applied to settings and mirrored to env.
-        assert app_settings.EMAIL_PASSWORD == "s3cret"
-        assert os.environ.get("EMAIL_PASSWORD") == "s3cret"
-
-    def test_ai_detector_keys_mirror_to_process_env(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("GPTZERO_API_KEY", "")
-        monkeypatch.setenv("GRAMMARLY_API_KEY", "")
-        monkeypatch.setattr(
-            app_settings, "GPTZERO_API_KEY", app_settings.GPTZERO_API_KEY
-        )
-        monkeypatch.setattr(
-            app_settings, "GRAMMARLY_API_KEY", app_settings.GRAMMARLY_API_KEY
-        )
-
-        server._apply_runtime_settings_from_record(
-            {"gptzero_api_key": "gz-live", "grammarly_api_key": "gm-live"}
-        )
-
-        assert app_settings.GPTZERO_API_KEY == "gz-live"
-        assert app_settings.GRAMMARLY_API_KEY == "gm-live"
-        assert os.environ.get("GPTZERO_API_KEY") == "gz-live"
-        assert os.environ.get("GRAMMARLY_API_KEY") == "gm-live"
+        ):
+            assert app_settings.EMAIL_BACKEND == "smtp"
+            assert app_settings.EMAIL_HOST == "smtp.example.edu"
+            assert app_settings.EMAIL_PORT == 2525
+            assert app_settings.EMAIL_USER == "mailer@example.edu"
+            assert app_settings.EMAIL_FROM == "integrity@example.edu"
+            assert app_settings.EMAIL_USE_TLS is False
+            assert app_settings.EMAIL_PASSWORD == "s3cret"
 
     def test_secret_settings_are_masked_in_payload(self) -> None:
         # No tenant_id means the database is never touched.
@@ -197,8 +156,6 @@ class TestOutboundServiceSettings:
 
     def test_new_settings_are_wired_into_attr_map(self) -> None:
         expected = {
-            "gptzero_api_key": "GPTZERO_API_KEY",
-            "grammarly_api_key": "GRAMMARLY_API_KEY",
             "email_backend": "EMAIL_BACKEND",
             "email_host": "EMAIL_HOST",
             "email_port": "EMAIL_PORT",
@@ -215,8 +172,6 @@ class TestOutboundServiceSettings:
     def test_frontend_save_payload_includes_new_settings(self) -> None:
         source = SETTINGS_PAGE.read_text(encoding="utf-8")
         for key in (
-            "gptzero_api_key",
-            "grammarly_api_key",
             "email_backend",
             "email_host",
             "email_port",

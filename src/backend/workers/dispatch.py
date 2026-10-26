@@ -117,7 +117,9 @@ def broker_available(timeout: float = 1.0) -> bool:
     return True
 
 
-def _current_user_summary(current_user: dict[str, Any] | None) -> tuple[str | None, str | None]:
+def _current_user_summary(
+    current_user: dict[str, Any] | None
+) -> tuple[str | None, str | None]:
     """Extract the broker-safe ownership fields from a user dict.
 
     The full user dict can carry non-JSON values (datetimes, secrets);
@@ -144,8 +146,12 @@ def dispatch_analysis(
     engine_keys_raw: str = "",
     tool_ids_raw: str = "",
     starter_sources: list[str] | None = None,
+    job_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Enqueue analysis on Celery, falling back to in-process execution.
+
+    ``job_overrides`` carries the upload's own choices to a Celery worker,
+    which has no copy of this process's job dict (inline runs share it).
 
     Returns:
         Mapping with ``mode`` (``"celery"`` or ``"inline"``) and, for the
@@ -167,9 +173,13 @@ def dispatch_analysis(
                 threshold=threshold,
                 owner_user_id=owner_user_id,
                 tenant_id=tenant_id,
+                # Without this the worker rebuilt a guest as a normal user and
+                # its tenant-less job was filed under the first tenant.
+                is_guest=bool(current_user and current_user.get("is_guest")),
                 engine_keys_raw=engine_keys_raw,
                 tool_ids_raw=tool_ids_raw,
                 starter_sources=starter_sources,
+                job_overrides=job_overrides or None,
             )
             logger.info("Enqueued analysis job %s as Celery task %s", job_id, task.id)
             return {"mode": "celery", "task_id": task.id}

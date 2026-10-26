@@ -95,19 +95,31 @@ class CaseService:
         result = self.db.execute(query)
         return list(result.scalars())
 
-    def assign_reviewer(self, case_id: uuid.UUID, reviewer_id: uuid.UUID) -> Case:
-        """Assign a reviewer to a case."""
+    def assign_reviewer(
+        self,
+        case_id: uuid.UUID,
+        reviewer_id: uuid.UUID,
+        assigned_by: uuid.UUID | None = None,
+    ) -> Case:
+        """Assign a reviewer to a case.
+
+        Only an OPEN case moves to UNDER_REVIEW: assigning used to force that
+        status, so it silently reopened a closed (dismissed) case and undid a
+        CLOSED status sent in the same update.
+        """
         case = self.get_case(case_id)
         if case:
             case.investigator_id = reviewer_id
-            case.status = CaseStatus.UNDER_REVIEW
+            if case.status == CaseStatus.OPEN:
+                case.status = CaseStatus.UNDER_REVIEW
             case.updated_at = datetime.utcnow()
             self.db.commit()
             self.db.refresh(case)
 
             self.timeline.create_event(
                 case_id=case_id,
-                user_id=reviewer_id,
+                # The actor is whoever assigned, not the reviewer assigned.
+                user_id=assigned_by or reviewer_id,
                 event_type="reviewer_assigned",
                 title="Reviewer Assigned",
                 description=f"Assigned to {reviewer_id}",
@@ -115,7 +127,23 @@ class CaseService:
         return case
 
     def link_result(self, case_id: uuid.UUID, result_id: uuid.UUID) -> CaseResultLink:
-        """Link a similarity result to a case."""
+        """Link a similarity result to a case (idempotent).
+
+        Linking the same result again returns the existing link: the database
+        lacks the model's unique constraint, so duplicates were stored.
+        """
+        existing = (
+            self.db.execute(
+                select(CaseResultLink).where(
+                    CaseResultLink.case_id == case_id,
+                    CaseResultLink.similarity_result_id == result_id,
+                )
+            )
+            .scalars()
+            .first()
+        )  # .first(): rows duplicated before this fix exist
+        if existing is not None:
+            return existing
         link = CaseResultLink(
             id=uuid.uuid4(),
             case_id=case_id,
@@ -176,6 +204,8 @@ class CaseService:
             case.updated_at = datetime.utcnow()
             if status == CaseStatus.CLOSED:
                 case.closed_at = datetime.utcnow()
+            else:
+                case.closed_at = None  # a reopened case is no longer closed
             self.db.commit()
             self.db.refresh(case)
 

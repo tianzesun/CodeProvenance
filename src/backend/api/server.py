@@ -57,7 +57,7 @@ from fastapi.responses import (
 )
 from jose import JWTError, jwt
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
 
@@ -72,7 +72,13 @@ from src.backend.application.services.batch_detection_service import (
     ComparisonResult,
     _risk_level,
 )
-from src.backend.config.settings import DEFAULT_ENGINE_WEIGHTS, settings
+from src.backend.config.settings import (
+    DEFAULT_ENGINE_WEIGHTS,
+    settings,
+    workspace_overrides,
+)
+from src.backend.application.services import previous_term
+from src.backend.infrastructure import secret_box
 from src.backend.infrastructure.security import (
     hash_password as _hash_password,
 )
@@ -86,7 +92,7 @@ from src.backend.infrastructure.security import (
 os.environ.setdefault("DATABASE_URL", settings.DATABASE_URL)
 if settings.MOSS_USER_ID:
     os.environ.setdefault("MOSS_USER_ID", settings.MOSS_USER_ID)
-from src.backend.application.services import academic_access
+from src.backend.application.services import academic_access, sharing
 from src.backend.application.services.similarity_cohort import (
     COHORT_DISCLOSURE,
     CohortContext,
@@ -714,8 +720,30 @@ def _infer_language_from_filename(filename: str) -> str:
         ".kt": "kotlin",
         ".swift": "swift",
         ".scala": "scala",
+        ".r": "r",
+        ".sql": "sql",
+        ".sh": "shell",
+        ".bash": "shell",
+        ".zsh": "shell",
+        ".ps1": "powershell",
+        ".lua": "lua",
+        ".pl": "perl",
+        ".pm": "perl",
+        ".ex": "elixir",
+        ".exs": "elixir",
+        ".dart": "dart",
+        ".clj": "clojure",
+        ".hs": "haskell",
+        ".ml": "ocaml",
+        ".fs": "fsharp",
+        ".erl": "erlang",
+        ".vue": "vue",
+        ".svelte": "svelte",
     }
-    return language_map.get(suffix, "python")
+    # Unmapped (e.g. ".m": MATLAB or Objective-C) is "unknown", not "python":
+    # Python-only analysis was applied to it and the web scan searched only
+    # Python repositories for its source.
+    return language_map.get(suffix, "unknown")
 
 
 def _infer_pmd_language_from_filename(filename: str) -> str:
@@ -2037,6 +2065,8 @@ def _get_setting_secret(key: str) -> str:
     attr = SETTINGS_ATTR_MAP.get(key)
     if attr:
         value = getattr(settings, attr, None)
+        if hasattr(value, "get_secret_value"):
+            value = value.get_secret_value()
         if value:
             return str(value)
         return os.environ.get(attr, "")
@@ -2455,6 +2485,8 @@ def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> list[str]:
             if member.endswith("/"):
                 continue
             member_path = PathLib(member)
+            if _is_archive_junk(member_path):
+                continue
             if _is_code_file(member_path.name):
                 # Reject on the declared size and on the file count BEFORE
                 # decompressing: the per-file limit used to be checked only after
@@ -2493,6 +2525,15 @@ def _extract_zip(zip_path: PathLib, target_dir: PathLib) -> list[str]:
     return extracted
 
 
+def _is_archive_junk(member_path: PathLib) -> bool:
+    """macOS Finder metadata: ``__MACOSX/`` copies and ``._name`` resource forks.
+
+    They carry code extensions, so they used to become extra binary
+    "submissions" paired against every student.
+    """
+    return "__MACOSX" in member_path.parts or member_path.name.startswith("._")
+
+
 def _unique_child_path(root_dir: PathLib, relative_path: PathLib) -> PathLib:
     """Return a child path under root_dir without overwriting existing uploads."""
     target = root_dir / relative_path
@@ -2512,20 +2553,23 @@ def _unique_child_path(root_dir: PathLib, relative_path: PathLib) -> PathLib:
 
 def _read_files_from_dir(directory: PathLib) -> dict[str, str]:
     submissions = {}
-    for ext in ALLOWED_EXTENSIONS:
-        for f in directory.rglob(f"*{ext}"):
-            try:
-                # Reserved "starter" subdirectory holds instructor-provided
-                # templates; those files must never be read back as student
-                # submissions (they would inflate pair results).
-                rel_parts = f.relative_to(directory).parts
-                if "starter" in rel_parts:
-                    continue
-                content = f.read_text(encoding="utf-8", errors="ignore")
-                if len(content.strip()) > 10:
-                    submissions[_normalize_submission_name(f, directory)] = content
-            except Exception as e:
-                logger.warning(f"Skipping {f.name}: {e}")
+    # One walk filtered by _is_code_file: globbing "*{ext}" per extension was
+    # case-sensitive, so "Alice.PY" passed the upload check and was then dropped.
+    for f in sorted(directory.rglob("*")):
+        if not f.is_file() or not _is_code_file(f.name):
+            continue
+        # Reserved "starter" subdirectory holds instructor-provided templates;
+        # those files must never be read back as student submissions (they
+        # would inflate pair results).
+        if "starter" in f.relative_to(directory).parts:
+            continue
+        try:
+            content = f.read_text(encoding="utf-8", errors="ignore")
+        except Exception as e:
+            logger.warning(f"Skipping {f.name}: {e}")
+            continue
+        if len(content.strip()) > 10:
+            submissions[_normalize_submission_name(f, directory)] = content
     return submissions
 
 
@@ -3851,7 +3895,7 @@ def _normalize_result(result: dict[str, Any]) -> dict[str, Any]:
     for name, value in (result.get("contributions") or {}).items():
         contributions[name] = round(_coerce_float(value), 3)
 
-    return {
+    normalized = {
         "file_a": result.get("file_a", ""),
         "file_b": result.get("file_b", ""),
         "score": round(_coerce_float(result.get("score")), 3),
@@ -3864,6 +3908,15 @@ def _normalize_result(result: dict[str, Any]) -> dict[str, Any]:
         "code_a": result.get("code_a"),
         "code_b": result.get("code_b"),
     }
+    # Pair review decisions. They were dropped here, and every read and write
+    # of a job passes through this function, so a decision vanished from the
+    # job (and job.json) as soon as it was saved; the results page then showed
+    # the job-level status on every pair.
+    if result.get("review_status") in REVIEW_STATUSES:
+        normalized["review_status"] = result["review_status"]
+    if isinstance(result.get("review_notes"), str):
+        normalized["review_notes"] = result["review_notes"]
+    return normalized
 
 
 def _normalize_submission_ai_result(entry: dict[str, Any]) -> dict[str, Any]:
@@ -4271,6 +4324,7 @@ ANALYSIS_STAGE_LABELS: dict[str, str] = {
     "building_pairs": "Building comparison plan",
     "external_tools": "Running external tools",
     "comparing_submissions": "Comparing submissions",
+    "previous_terms": "Comparing with earlier offerings",
     "ai_detection": "Detecting AI-generated code",
     "external_scan": "Scanning external sources",
     "generating_reports": "Generating reports",
@@ -4285,6 +4339,7 @@ ANALYSIS_STAGE_PERCENT: dict[str, float] = {
     "building_pairs": 0.12,
     "external_tools": 0.18,
     "comparing_submissions": 0.20,
+    "previous_terms": 0.73,
     "ai_detection": 0.78,
     "external_scan": 0.86,
     "generating_reports": 0.94,
@@ -4675,7 +4730,15 @@ def _recover_job_from_report(job_id: str) -> dict[str, Any] | None:
     return recovered_job
 
 
-def _load_persisted_job(job_id: str) -> dict[str, Any] | None:
+def _load_persisted_job(
+    job_id: str, *, mark_interrupted: bool = True
+) -> dict[str, Any] | None:
+    """Load job.json into the cache.
+
+    ``mark_interrupted`` turns a stored "processing" status into "failed": right
+    for a cold load after a restart, wrong for the poll-time refresh of a job
+    that is still running here or in a worker, which it used to fail mid-run.
+    """
     metadata_path = _job_metadata_path(job_id)
     if metadata_path.exists():
         try:
@@ -4684,7 +4747,7 @@ def _load_persisted_job(job_id: str) -> dict[str, Any] | None:
             logger.exception(f"Failed to read persisted job metadata for {job_id}")
         else:
             stored_job["id"] = job_id
-            normalized = _normalize_job(stored_job, from_disk=True)
+            normalized = _normalize_job(stored_job, from_disk=mark_interrupted)
             _jobs[job_id] = normalized
             _persist_job(job_id)
             return normalized
@@ -4759,7 +4822,7 @@ def _get_job(job_id: str) -> dict[str, Any] | None:
     if job_id in _jobs:
         cached = _normalize_job(_jobs[job_id])
         if _job_status_rank(cached.get("status")) < _JOB_STATUS_RANK["completed"]:
-            refreshed = _load_persisted_job(job_id)
+            refreshed = _load_persisted_job(job_id, mark_interrupted=False)
             if refreshed is None and _job_status_rank(
                 _read_job_status_from_db(job_id)
             ) > _job_status_rank(cached.get("status")):
@@ -4900,19 +4963,9 @@ def _load_job_from_db(job_id: str) -> dict[str, Any] | None:
                             if r.similarity_score is not None
                             else 0.0
                         ),
-                        "risk_level": (
-                            "CRITICAL"
-                            if float(r.similarity_score or 0) >= 0.85
-                            else (
-                                "HIGH"
-                                if float(r.similarity_score or 0) >= 0.7
-                                else (
-                                    "MEDIUM"
-                                    if float(r.similarity_score or 0) >= 0.5
-                                    else "LOW"
-                                )
-                            )
-                        ),
+                        # The live bands (_risk_level); hard-coded 0.70/0.50
+                        # here relabelled pairs once a job was reloaded.
+                        "risk_level": _risk_level(float(r.similarity_score or 0)),
                         "confidence": (
                             float(r.confidence_level)
                             if r.confidence_level is not None
@@ -4979,6 +5032,16 @@ def _load_job_from_db(job_id: str) -> dict[str, Any] | None:
                 job_dict["similarity_context"] = annotate_results(
                     job_dict["results"], scores=cohort_scores
                 )
+                # Counts come from the whole cohort, not the 200-row page.
+                threshold = job_dict["threshold"]
+                flagged = sum(1 for score in cohort_scores if score >= threshold)
+                job_dict["summary"]["total_pairs"] = len(cohort_scores)
+                job_dict["summary"]["suspicious_pairs"] = flagged
+                job_dict["high_similarity_count"] = flagged
+            # Derived from the pairs' decisions; it was reset to "unreviewed".
+            job_dict["review_status"] = _derive_job_review_status(
+                job_dict["results"], job_dict["threshold"]
+            )
 
             # Compute actual review counts from DB
             if sim_results:
@@ -5754,14 +5817,29 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
         return cached[1]
 
     jobs_by_id: dict[str, dict[str, Any]] = {}
+    scope = sharing.AccessScope(None, None, None, False)
 
     # 1. DB-backed listing (primary source)
     try:
         with SessionLocal() as db:
+            scope = sharing.access_scope(db, current_user)
             tenant_id = current_user.get("tenant_id") if current_user else None
             q = db.query(Job)
-            if tenant_id:
-                q = q.filter(Job.tenant_id == tenant_id)
+            if not scope.is_platform_admin:
+                # Candidates only; _job_is_accessible decides. Shared jobs and
+                # jobs under a reachable course can sit in another tenant.
+                reachable = [Job.id.in_(scope.shared_job_ids)]
+                if tenant_id:
+                    reachable.append(Job.tenant_id == tenant_id)
+                if scope.course_ids:
+                    reachable.append(
+                        Job.assignment_id.in_(
+                            db.query(Assignment.id).filter(
+                                Assignment.course_id.in_(scope.course_ids)
+                            )
+                        )
+                    )
+                q = q.filter(or_(*reachable))
             db_jobs = q.order_by(Job.created_at.desc()).limit(500).all()
             assignment_ids = [row.assignment_id for row in db_jobs if row.assignment_id]
             assignment_courses = {}
@@ -5774,7 +5852,7 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             for db_job in db_jobs:
                 loaded = _get_job(db_job.id)
-                if loaded and _job_is_accessible(loaded, current_user):
+                if loaded and _job_is_accessible(loaded, current_user, scope):
                     loaded["assignment_id"] = (
                         str(db_job.assignment_id) if db_job.assignment_id else None
                     )
@@ -5789,7 +5867,7 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
     for job_id, job in _jobs.items():
         if job_id not in jobs_by_id:
             normalized = _normalize_job(job)
-            if _job_is_accessible(normalized, current_user):
+            if _job_is_accessible(normalized, current_user, scope):
                 jobs_by_id[job_id] = normalized
 
     # 3. Filesystem fallback (legacy jobs without DB rows)
@@ -5799,7 +5877,7 @@ def _list_all_jobs(current_user: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             if report_dir.name not in jobs_by_id:
                 job = _get_job(report_dir.name)
-                if job and _job_is_accessible(job, current_user):
+                if job and _job_is_accessible(job, current_user, scope):
                     jobs_by_id[report_dir.name] = job
 
     result = sorted(
@@ -7759,6 +7837,31 @@ def apply_semantic_transforms(code: str, language: str) -> str:
     return code
 
 
+#: Per-upload choices that outrank workspace settings for one job.
+UPLOAD_CHOICE_KEYS = ("source_scan_enabled_override", "previous_term_override")
+
+
+def _upload_choices(job_id: str) -> dict[str, Any]:
+    job = _jobs.get(job_id) or {}
+    return {key: job[key] for key in UPLOAD_CHOICE_KEYS if key in job}
+
+
+def _previous_term_override(value: str | None) -> str | JSONResponse | None:
+    """Validate an upload's previous-term choice (None = workspace setting)."""
+    if value in (None, ""):
+        return None
+    choice = str(value).strip().lower()
+    if choice not in ("off", *previous_term.MODES):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "previous_term_matching must be off, same_course_only "
+                "or all_historical_courses"
+            },
+        )
+    return choice
+
+
 def _discard_upload(job_id: str, job_dir: PathLib) -> None:
     """Drop a rejected upload's directory AND its in-memory job entry.
 
@@ -7767,6 +7870,36 @@ def _discard_upload(job_id: str, job_dir: PathLib) -> None:
     """
     shutil.rmtree(job_dir, ignore_errors=True)
     _jobs.pop(job_id, None)
+
+
+def _assignment_access_error(
+    current_user: dict[str, Any] | None, assignment_id: str | None
+) -> JSONResponse | None:
+    """403/400 response when the uploader may not file a job under ``assignment_id``.
+
+    The id was used unchecked, so an upload could be attached to another
+    workspace's assignment: its settings applied, its roster used to link
+    submissions to students, and the job counted in its course analytics.
+    """
+    if not assignment_id:
+        return None
+    try:
+        with SessionLocal() as db:
+            course_id = academic_access.course_id_for_assignment(db, assignment_id)
+            if not course_id or not academic_access.can_read_course(
+                db, current_user, course_id
+            ):
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "The selected assignment is not available."},
+                )
+    except SQLAlchemyError:
+        logger.warning("Could not verify assignment %s", assignment_id, exc_info=True)
+        return JSONResponse(
+            status_code=400,
+            content={"error": "The selected assignment could not be loaded."},
+        )
+    return None
 
 
 async def _save_starter_files(
@@ -7815,7 +7948,11 @@ async def upload_files(
     threshold: float = Form(default=0.5, ge=0.0, le=1.0),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
-    source_scan_enabled: bool = Form(default=True),
+    # None = not sent: the workspace/assignment setting decides (a True default
+    # here switched the scan on for API clients whose workspace turned it off).
+    source_scan_enabled: bool | None = Form(default=None),
+    # None = the workspace's Previous Term Matching setting decides.
+    previous_term_matching: str | None = Form(default=None),
 ):
     # Anonymous callers only reach this when ALLOW_ANONYMOUS_ANALYSIS is set.
     current_user = getattr(request.state, "user", None)
@@ -7824,9 +7961,24 @@ async def upload_files(
         # Overflow quota on anonymous requests. This override outranks the
         # tenant and assignment settings, so forcing it here sticks.
         source_scan_enabled = False
+    access_error = _assignment_access_error(current_user, assignment_id)
+    if access_error:
+        return access_error
+    previous_term_override = _previous_term_override(previous_term_matching)
+    if isinstance(previous_term_override, JSONResponse):
+        return previous_term_override
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
-        "source_scan_enabled_override": source_scan_enabled,
+        **(
+            {"source_scan_enabled_override": source_scan_enabled}
+            if source_scan_enabled is not None
+            else {}
+        ),
+        **(
+            {"previous_term_override": previous_term_override}
+            if previous_term_override
+            else {}
+        ),
         "status": "processing",
         "progress": _new_job_progress(),
         # Ownership is stamped at creation, not only when the background
@@ -7886,6 +8038,7 @@ async def upload_files(
         engine_keys_raw=engine_keys,
         tool_ids_raw=tool_ids,
         starter_sources=starter_sources,
+        job_overrides=_upload_choices(job_id),
     )
     return JSONResponse(content={"job_id": job_id, "status": "processing"})
 
@@ -7902,21 +8055,40 @@ async def upload_zip(
     threshold: float = Form(default=0.5, ge=0.0, le=1.0),
     engine_keys: str = Form(default=""),
     tool_ids: str = Form(default=""),
-    source_scan_enabled: bool = Form(default=True),
+    # None = not sent: the workspace/assignment setting decides (a True default
+    # here switched the scan on for API clients whose workspace turned it off).
+    source_scan_enabled: bool | None = Form(default=None),
+    # None = the workspace's Previous Term Matching setting decides.
+    previous_term_matching: str | None = Form(default=None),
 ):
     # Anonymous callers only reach this when ALLOW_ANONYMOUS_ANALYSIS is set.
     current_user = getattr(request.state, "user", None)
     if _is_guest_principal(current_user):
         # See upload_files: a demo session never spends external API quota.
         source_scan_enabled = False
+    access_error = _assignment_access_error(current_user, assignment_id)
+    if access_error:
+        return access_error
     if not file.filename or not file.filename.lower().endswith(".zip"):
         return JSONResponse(
             status_code=400, content={"error": "Please upload a .zip file"}
         )
 
+    previous_term_override = _previous_term_override(previous_term_matching)
+    if isinstance(previous_term_override, JSONResponse):
+        return previous_term_override
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {
-        "source_scan_enabled_override": source_scan_enabled,
+        **(
+            {"source_scan_enabled_override": source_scan_enabled}
+            if source_scan_enabled is not None
+            else {}
+        ),
+        **(
+            {"previous_term_override": previous_term_override}
+            if previous_term_override
+            else {}
+        ),
         "status": "processing",
         "progress": _new_job_progress(),
         # Ownership is stamped at creation, not only when the background
@@ -7985,6 +8157,7 @@ async def upload_zip(
         engine_keys_raw=engine_keys,
         tool_ids_raw=tool_ids,
         starter_sources=starter_sources,
+        job_overrides=_upload_choices(job_id),
     )
     return JSONResponse(content={"job_id": job_id, "status": "processing"})
 
@@ -8093,14 +8266,12 @@ async def detect_ai_generated_code(
                 course = (
                     db.query(Course).filter(Course.id == assignment.course_id).first()
                 )
-                if (
-                    current_user
-                    and current_user.get("organization_id")
-                    and (
-                        course is None
-                        or str(course.organization_id)
-                        != str(current_user["organization_id"])
-                    )
+                # Same rule as the Plagiarism Checker upload: the caller must be
+                # able to read the course. Only an organization mismatch was
+                # checked, so a user without an organization passed for any
+                # assignment and a professor for any course in their org.
+                if course is None or not academic_access.can_read_course(
+                    db, current_user, str(course.id)
                 ):
                     return JSONResponse(
                         status_code=403,
@@ -8691,6 +8862,19 @@ def _processing_batch_workers() -> int:
     return max(1, min(workers, _MAX_PROCESSING_BATCH_WORKERS))
 
 
+def _profile_result_limit(profile: dict[str, Any]) -> int | None:
+    """How many pairs the results page lists by default (None = all)."""
+    from src.backend.engines.scoring.professor_profiles import (
+        professor_profile_catalog,
+    )
+
+    choice = profile.get("result_volume", "top_25")
+    for option in professor_profile_catalog().get("result_volume", []):
+        if option.get("id") == choice:
+            return option.get("limit")
+    return 25
+
+
 def _run_analysis_engines(
     selected_tool_ids,
     submissions,
@@ -8700,6 +8884,7 @@ def _run_analysis_engines(
     fusion_weights,
     starter_sources,
     progress_callback: Callable[[int, int, str, str], None] | None = None,
+    infer_common_code: bool = True,
 ):
     """Run the selected comparison engines and build the report.
 
@@ -8715,6 +8900,8 @@ def _run_analysis_engines(
         threshold: Similarity threshold used for risk classification.
         fusion_weights: Engine weights for the fusion scorer.
         starter_sources: Optional instructor starter code to strip first.
+        infer_common_code: Also strip code most of the class shares
+            (the workspace's starter-code handling setting).
         progress_callback: Optional ``callback(completed, total, file_a, file_b)``
             forwarded to the batch service so the upload page can show which
             pair is being compared right now.
@@ -8724,7 +8911,7 @@ def _run_analysis_engines(
             threshold=threshold,
             weights=fusion_weights or None,
             starter_sources=starter_sources,
-            infer_common_code=True,
+            infer_common_code=infer_common_code,
             min_evidence_tokens=MIN_EVIDENCE_TOKENS,
         )
         results = service.compare_all_pairs(
@@ -8744,6 +8931,145 @@ def _run_analysis_engines(
 
 
 async def _run_analysis(
+    job_id,
+    job_dir,
+    course_name,
+    assignment_name,
+    assignment_id: str | None = None,
+    assignment_mode: str = "",
+    threshold: float = 0.5,
+    current_user: dict[str, Any] | None = None,
+    engine_keys_raw: str = "",
+    tool_ids_raw: str = "",
+    starter_sources: list[str] | None = None,
+):
+    """Run one analysis job with its uploader's workspace settings in force.
+
+    Jobs run on a worker thread or a Celery worker, outside the request that
+    queued them, so the workspace's settings are looked up again here.
+    """
+    tenant_id = (current_user or {}).get("tenant_id")
+    with await run_in_threadpool(_workspace_settings_scope, tenant_id):
+        response = await _run_analysis_in_workspace(
+            job_id,
+            job_dir,
+            course_name,
+            assignment_name,
+            assignment_id,
+            assignment_mode,
+            threshold,
+            current_user,
+            engine_keys_raw,
+            tool_ids_raw,
+            starter_sources,
+        )
+        await run_in_threadpool(_notify_job_finished, job_id, tenant_id)
+        return response
+
+
+def _compare_with_previous_terms(
+    job_id: str,
+    mode: str,
+    current_user: dict[str, Any] | None,
+    submissions: dict[str, str],
+    starter_sources: list[str] | None,
+    threshold: float,
+    fusion_weights: dict[str, float],
+    infer_common_code: bool,
+) -> tuple[list[Any], dict[str, str]]:
+    """Compare a class with earlier offerings; returns (results, archived sources used).
+
+    Records what was compared in ``_jobs[job_id]["previous_term"]`` for the
+    results page. Never fails the job: problems are logged and skipped.
+    """
+
+    def read_job_files(other_job_id: str) -> dict[str, str]:
+        directory = UPLOADS_DIR / other_job_id
+        return _read_files_from_dir(directory) if directory.is_dir() else {}
+
+    info: dict[str, Any] = {"mode": mode, "offerings": [], "compared_pairs": 0}
+    _jobs[job_id]["previous_term"] = info
+    try:
+        _set_job_progress(
+            job_id,
+            "previous_terms",
+            detail="Looking for earlier offerings to compare with",
+        )
+        with SessionLocal() as db:
+            archive = previous_term.load_archive(
+                db,
+                mode=mode,
+                user=current_user,
+                assignment_id=_jobs[job_id].get("assignment_id"),
+                exclude_job_id=job_id,
+                read_job_files=read_job_files,
+            )
+        pairs = previous_term.candidate_pairs(
+            submissions, archive.sources, starter_sources=starter_sources or ()
+        )
+        info.update(
+            offerings=archive.offerings,
+            archived_submissions=len(archive.sources),
+            compared_pairs=len(pairs),
+            note=archive.note,
+        )
+        if not pairs:
+            return [], {}
+        used = {name: archive.sources[name] for _, name in pairs}
+        _set_job_progress(
+            job_id,
+            "previous_terms",
+            detail=(
+                f"Comparing with {len(used)} submissions from "
+                f"{len(archive.offerings)} earlier offering(s)"
+            ),
+            completed_units=0,
+            total_units=len(pairs),
+            unit="pairs",
+        )
+        service = BatchDetectionService(
+            threshold=threshold,
+            weights=fusion_weights or None,
+            starter_sources=starter_sources,
+            infer_common_code=infer_common_code,
+            min_evidence_tokens=MIN_EVIDENCE_TOKENS,
+        )
+        results = service.compare_all_pairs(
+            {**submissions, **used},
+            pairs=pairs,
+            cohort=submissions.values(),
+            max_workers=_processing_batch_workers(),
+        )
+        info["matches"] = sum(1 for r in results if r.score >= threshold)
+        return results, used
+    except Exception:
+        logger.warning(
+            "Previous-term comparison skipped for job %s", job_id, exc_info=True
+        )
+        info["note"] = "Earlier offerings could not be compared this time."
+        return [], {}
+
+
+def _notify_job_finished(job_id: str, tenant_id: str | None) -> None:
+    """Webhook and (if the workspace asked) owner email for a finished job."""
+    from src.backend.application.services.job_notifications import (
+        notify_job_finished,
+    )
+
+    job = _jobs.get(job_id)
+    if not job:
+        return
+    try:
+        record = _load_tenant_settings_record(tenant_id)
+        notify_job_finished(
+            dict(job, id=job_id),
+            email_owner=bool(record.get("notify_email_on_finish")),
+        )
+    except Exception:
+        logger.warning("Finish notifications failed for job %s", job_id, exc_info=True)
+
+
+async def _run_analysis_in_workspace(
     job_id,
     job_dir,
     course_name,
@@ -8847,6 +9173,7 @@ async def _run_analysis(
     # Preserve the per-submission source-scan override set by the upload
     # endpoint. `_jobs[job_id]` is fully rebuilt below, so capture it first.
     _source_scan_override = _jobs.get(job_id, {}).get("source_scan_enabled_override")
+    _previous_term_choice = _jobs.get(job_id, {}).get("previous_term_override")
     # Guest flags are set by the upload endpoint and must survive this rebuild,
     # otherwise the job would quietly become a persisted, workspace-less job.
     _guest_flags = _guest_job_flags(current_user)
@@ -8897,6 +9224,8 @@ async def _run_analysis(
     }
     if _source_scan_override is not None:
         _jobs[job_id]["source_scan_enabled_override"] = bool(_source_scan_override)
+    if _previous_term_choice:
+        _jobs[job_id]["previous_term_override"] = _previous_term_choice
     _persist_job(job_id)
 
     try:
@@ -8943,11 +9272,21 @@ async def _run_analysis(
         )
         submissions = _read_files_from_dir(job_dir)
         if len(submissions) < 2:
-            del _jobs[job_id]
-            return JSONResponse(
-                status_code=400,
-                content={"error": "At least 2 valid code files required"},
+            # Fail the job visibly. Deleting it from the cache left job.json at
+            # "processing", which later read as "the backend restarted".
+            message = (
+                "At least 2 code files with content are required; "
+                f"{len(submissions)} could be read from the upload."
             )
+            _jobs[job_id]["status"] = "failed"
+            _jobs[job_id]["error"] = message
+            _set_job_progress(job_id, "failed", detail=message)
+            _persist_job(job_id)
+            try:
+                _update_job_status_in_db(job_id, "failed", message)
+            except SQLAlchemyError:
+                logger.warning("Could not mark job %s failed in DB", job_id)
+            return JSONResponse(status_code=400, content={"error": message})
 
         _jobs[job_id]["file_count"] = len(submissions)
         _jobs[job_id]["status"] = "analyzing"
@@ -9103,6 +9442,11 @@ async def _run_analysis(
         )
         # The engine work is CPU-bound and synchronous; offload it so the event
         # loop stays responsive to other requests while a job analyzes.
+        # The Review & Workflow profile used to be stored and never read.
+        profile = settings_payload.get("professor_profile") or {}
+        if _previous_term_choice:  # this upload's own choice wins
+            profile = {**profile, "previous_term_matching": _previous_term_choice}
+        starter_mode = profile.get("starter_code_handling", "student_written_only")
         results, report = await run_in_threadpool(
             _run_analysis_engines,
             selected_tool_ids,
@@ -9111,23 +9455,54 @@ async def _run_analysis(
             external_tool_results,
             threshold,
             fusion_weights,
-            starter_sources,
+            # "Compare everything" keeps uploaded starter code in the comparison.
+            [] if starter_mode == "include_starter_code" else starter_sources,
             _pair_progress_callback(job_id),
+            starter_mode == "student_written_only",
         )
+        _jobs[job_id]["result_limit"] = _profile_result_limit(profile)
+
+        # Previous-term matching: earlier offerings' submissions the uploader
+        # can access, prefiltered to the closest few per submission.
+        archive_sources: dict[str, str] = {}
+        if (
+            profile.get("previous_term_matching") in previous_term.MODES
+            and "integritydesk" in selected_tool_ids
+        ):
+            previous_results, archive_sources = await run_in_threadpool(
+                _compare_with_previous_terms,
+                job_id,
+                profile["previous_term_matching"],
+                current_user,
+                submissions,
+                [] if starter_mode == "include_starter_code" else starter_sources,
+                threshold,
+                fusion_weights,
+                starter_mode == "student_written_only",
+            )
+            results = sorted(
+                [*results, *previous_results], key=lambda r: r.score, reverse=True
+            )
 
         _jobs[job_id]["external_tool_results"] = external_tool_results
         _persist_job(job_id)
-        _set_job_progress(
-            job_id,
-            "ai_detection",
-            detail=f"Scoring {len(submissions)} submissions for AI authorship signals",
-            completed_units=0,
-            total_units=len(submissions),
-            unit="submissions",
-        )
         # AI detection is CPU-bound (and may load a local code LM); offload it
-        # like the engine work so the event loop stays responsive.
-        ai_detection = await run_in_threadpool(_build_ai_detection_summary, submissions)
+        # like the engine work so the event loop stays responsive. The workspace
+        # can switch it off for similarity-only checks.
+        if profile.get("ai_rewrite_detection") == "off":
+            ai_detection = {}
+        else:
+            _set_job_progress(
+                job_id,
+                "ai_detection",
+                detail=f"Scoring {len(submissions)} submissions for AI authorship signals",
+                completed_units=0,
+                total_units=len(submissions),
+                unit="submissions",
+            )
+            ai_detection = await run_in_threadpool(
+                _build_ai_detection_summary, submissions
+            )
 
         if settings_payload.get("source_scan_enabled"):
             _set_job_progress(
@@ -9154,6 +9529,7 @@ async def _run_analysis(
             detail="Writing HTML, JSON and committee reports",
         )
 
+        all_sources = {**submissions, **archive_sources}
         comparison_details = []
         for r in results:
             detail = type(
@@ -9165,8 +9541,8 @@ async def _run_analysis(
                     "score": r.score,
                     "risk": r.risk_level,
                     "features": r.features,
-                    "code_a": submissions.get(r.file_a, ""),
-                    "code_b": submissions.get(r.file_b, ""),
+                    "code_a": all_sources.get(r.file_a, ""),
+                    "code_b": all_sources.get(r.file_b, ""),
                 },
             )()
             comparison_details.append(detail)
@@ -9199,8 +9575,8 @@ async def _run_analysis(
                 "matching_blocks": r.matching_blocks or [],
                 "fusion_debug": _build_fusion_debug(r, threshold),
                 "ai_detection": pair_ai_details.get(_pair_key(r.file_a, r.file_b), {}),
-                "code_a": submissions.get(r.file_a, ""),
-                "code_b": submissions.get(r.file_b, ""),
+                "code_a": all_sources.get(r.file_a, ""),
+                "code_b": all_sources.get(r.file_b, ""),
                 "external_evidence": _external_evidence_for_pair(
                     r.file_a, r.file_b, external_tool_results
                 ),
@@ -9287,6 +9663,7 @@ async def _run_analysis(
                         "matching_blocks": r.matching_blocks or [],
                         "code_a": r.code_a,
                         "code_b": r.code_b,
+                        "review_hold": getattr(r, "review_hold", None),
                     }
                     for r in results
                 ],
@@ -9392,27 +9769,37 @@ async def _run_analysis(
         # and without logging an error stack.
         logger.info("Analysis cancelled for job %s", job_id)
         return JSONResponse(content={"job_id": job_id, "status": "cancelled"})
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
+        # The exception text (SQL and parameters) stays in the log; the job
+        # payload served to the browser gets a generic warning.
         logger.exception(f"DB persistence failed for job {job_id}")
+        warning = (
+            "Results may not be saved to the database. "
+            f"The server has logged the details (reference {job_id})."
+        )
         if job_id in _jobs:
-            _jobs[job_id][
-                "persistence_warning"
-            ] = f"Results may not be saved to database: {e!s}"
+            _jobs[job_id]["persistence_warning"] = warning
             _persist_job(job_id)
         return JSONResponse(
             status_code=200,
             content={
                 "job_id": job_id,
                 "status": "completed",
-                "persistence_warning": f"Results may not be saved to database: {e!s}",
+                "persistence_warning": warning,
             },
         )
     except Exception as e:
         logger.exception(f"Analysis failed for job {job_id}")
         if job_id in _jobs:
+            # /api/jobs/{id} returns error and progress.detail, so they carry a
+            # generic message; the exception itself is in the log.
+            message = (
+                "Analysis failed. The server has logged the details "
+                f"(reference {job_id})."
+            )
             _jobs[job_id]["status"] = "failed"
-            _jobs[job_id]["error"] = str(e)
-            _set_job_progress(job_id, "failed", detail=str(e)[:200])
+            _jobs[job_id]["error"] = message
+            _set_job_progress(job_id, "failed", detail=message)
             _persist_job(job_id)
             try:
                 _update_job_status_in_db(job_id, "failed", str(e))
@@ -9764,6 +10151,132 @@ async def get_job_evidence_dossier(job_id: str, request: Request):
     )
 
 
+def _job_submission_names(job: dict[str, Any]) -> set[str]:
+    """Names of the students (submissions) in a job; empty when unknown."""
+    names = (
+        set(job.get("submissions") or {})
+        if isinstance(job.get("submissions"), dict)
+        else set()
+    )
+    for result in job.get("results") or []:
+        if isinstance(result, dict):
+            names.update(
+                str(result[key]) for key in ("file_a", "file_b") if result.get(key)
+            )
+    return names
+
+
+async def _read_sharing_request(request: Request) -> tuple[bool, list[str]]:
+    """Parse ``{"workspace": bool, "user_ids": [str, ...]}``."""
+    try:
+        payload = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid sharing payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid sharing payload")
+    workspace = payload.get("workspace", False)
+    user_ids = payload.get("user_ids", [])
+    if not isinstance(workspace, bool) or not (
+        isinstance(user_ids, list) and all(isinstance(u, str) for u in user_ids)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="workspace must be true/false and user_ids a list of ids",
+        )
+    return workspace, user_ids
+
+
+def _apply_sharing(
+    db: Any,
+    resource_type: str,
+    resource_id: str,
+    user: dict[str, Any],
+    workspace: bool,
+    user_ids: list[str],
+) -> dict[str, Any]:
+    try:
+        shares = sharing.set_sharing(
+            db,
+            resource_type,
+            resource_id,
+            sharer=user,
+            workspace=workspace,
+            user_ids=user_ids,
+        )
+    except sharing.SharingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {**shares, "can_manage": True}
+
+
+def _can_manage_job_sharing(db: Any, job: dict[str, Any], user: dict[str, Any]) -> bool:
+    """The uploader, or a primary instructor of the job's course."""
+    if str(job.get("owner_user_id") or "") == str(user.get("id") or ""):
+        return True
+    course_id = _assignment_course_id(job.get("assignment_id"))
+    return bool(course_id) and sharing.can_manage_course_sharing(db, user, course_id)
+
+
+@app.get("/api/courses/{course_id}/sharing")
+async def get_course_sharing(course_id: str, request: Request):
+    """Who a course is shared with, for anyone who can see the course."""
+    user = _require_non_guest(request)
+    with SessionLocal() as db:
+        if not academic_access.can_read_course(db, user, course_id):
+            raise HTTPException(status_code=404, detail="Course not found")
+        return {
+            **sharing.get_sharing(db, "course", course_id),
+            "can_manage": sharing.can_manage_course_sharing(db, user, course_id),
+        }
+
+
+@app.put("/api/courses/{course_id}/sharing")
+async def set_course_sharing(course_id: str, request: Request):
+    """Replace a course's shares (its primary instructors only)."""
+    user = _require_non_guest(request)
+    workspace, user_ids = await _read_sharing_request(request)
+    with SessionLocal() as db:
+        if not academic_access.can_read_course(db, user, course_id):
+            raise HTTPException(status_code=404, detail="Course not found")
+        if not sharing.can_manage_course_sharing(db, user, course_id):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the course's primary instructors can change sharing",
+            )
+        result = _apply_sharing(db, "course", course_id, user, workspace, user_ids)
+    _JOB_LIST_CACHE.clear()  # the course's jobs move in or out of job lists
+    return result
+
+
+@app.get("/api/job/{job_id}/sharing")
+async def get_job_sharing(job_id: str, request: Request):
+    """Who an analysis is shared with (beyond its course's audience)."""
+    user = _require_non_guest(request)
+    job = _require_job_access(job_id, request)
+    with SessionLocal() as db:
+        return {
+            **sharing.get_sharing(db, "job", job_id),
+            "can_manage": _can_manage_job_sharing(db, job, user),
+        }
+
+
+@app.put("/api/job/{job_id}/sharing")
+async def set_job_sharing(job_id: str, request: Request):
+    """Replace an analysis's shares (its uploader or course instructors)."""
+    user = _require_non_guest(request)
+    job = _require_job_access(job_id, request)
+    workspace, user_ids = await _read_sharing_request(request)
+    with SessionLocal() as db:
+        if not _can_manage_job_sharing(db, job, user):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the uploader or the course's primary instructors "
+                "can change sharing",
+            )
+        result = _apply_sharing(db, "job", job_id, user, workspace, user_ids)
+    _JOB_LIST_CACHE.clear()  # shared users' job lists change
+    return result
+
+
 @app.put("/api/job/{job_id}/viva")
 async def record_viva_outcome(job_id: str, request: Request):
     """Record (upsert) the viva outcome for one student submission.
@@ -9772,9 +10285,12 @@ async def record_viva_outcome(job_id: str, request: Request):
     instructor records the conclusion. Re-recording overwrites the previous
     outcome for the same (job, submission).
     """
-    _require_job_access(job_id, request)
+    job = _require_job_access(job_id, request)
 
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except ValueError:  # malformed JSON was a 500
+        raise HTTPException(status_code=400, detail="Invalid viva payload")
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid viva payload")
 
@@ -9782,6 +10298,15 @@ async def record_viva_outcome(job_id: str, request: Request):
     outcome = str(payload.get("outcome") or "").strip()
     if not submission_name:
         raise HTTPException(status_code=400, detail="submission_name is required")
+    # An unknown student was stored as an orphan the dossier never shows (and a
+    # name over the 500-character column was a 500).
+    known_students = _job_submission_names(job)
+    if known_students and submission_name not in known_students:
+        raise HTTPException(
+            status_code=400, detail="submission_name is not a student in this job"
+        )
+    if len(submission_name) > 500:
+        raise HTTPException(status_code=400, detail="submission_name is too long")
     if outcome not in VIVA_OUTCOMES:
         raise HTTPException(
             status_code=400,
@@ -9802,6 +10327,11 @@ async def record_viva_outcome(job_id: str, request: Request):
         except ValueError:
             raise HTTPException(
                 status_code=400, detail="conducted_at must be an ISO timestamp"
+            )
+        if conducted_at.tzinfo is None:
+            # A naive time was stored as server-local time.
+            raise HTTPException(
+                status_code=400, detail="conducted_at must include a timezone"
             )
 
     saved_notes = (notes or "").strip() or None
@@ -9837,19 +10367,13 @@ async def record_viva_outcome(job_id: str, request: Request):
 async def download_dossier_pdf(job_id: str, request: Request):
     """Generate and return a PDF version of the evidence dossier.
 
-    Checks the reports table for a cached PDF first. If not found, builds the
-    dossier from live job data, renders print-ready HTML, converts to PDF,
-    saves to disk, tracks in DB, and serves.
+    Always built from live job data: the dossier carries viva outcomes and
+    review decisions recorded after any earlier download, and serving the
+    first PDF from the reports table left every later outcome out of the
+    document used at hearings. The file is overwritten and catalogued once.
     """
     _require_job_access(job_id, request)
-
-    cached = _resolve_cached_report(job_id, "dossier", "pdf")
-    if cached:
-        return FileResponse(
-            str(cached),
-            media_type="application/pdf",
-            filename=f"integritydesk_dossier_{job_id}.pdf",
-        )
+    already_catalogued = _resolve_cached_report(job_id, "dossier", "pdf") is not None
 
     job = _get_job(job_id)
     if not job:
@@ -9893,7 +10417,10 @@ async def download_dossier_pdf(job_id: str, request: Request):
         )
     else:
         try:
-            _persist_report_record(job_id, "dossier", "pdf", str(pdf_path))
+            if not already_catalogued:
+                _persist_report_record(
+                    job_id, "dossier", "pdf", str(pdf_path), job.get("tenant_id")
+                )
         except SQLAlchemyError:
             logger.warning(
                 "Failed to cache dossier PDF report record for job %s", job_id
@@ -9905,6 +10432,58 @@ async def download_dossier_pdf(job_id: str, request: Request):
     )
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+def _validated_pair_reviews(raw: Any) -> dict[str, dict[str, str]]:
+    """Normalise ``pair_reviews`` to ``{key: {"status"?, "notes"?}}``.
+
+    Accepts the legacy ``review_status`` / ``review_notes`` keys. An unknown
+    status or non-string note is a 400; it used to be stored as given, or to
+    500 on ``.strip()``.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="pair_reviews must be an object")
+    cleaned: dict[str, dict[str, str]] = {}
+    for key, data in raw.items():
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="Invalid pair review")
+        entry: dict[str, str] = {}
+        status_value = data.get("status", data.get("review_status"))
+        if status_value is not None:
+            if status_value not in REVIEW_STATUSES:
+                raise HTTPException(status_code=400, detail="Invalid review status")
+            entry["status"] = status_value
+        notes_value = data.get("notes", data.get("review_notes"))
+        if notes_value is not None:
+            if not isinstance(notes_value, str):
+                raise HTTPException(
+                    status_code=400, detail="Review notes must be a string"
+                )
+            entry["notes"] = notes_value.strip()
+        cleaned[str(key)] = entry
+    return cleaned
+
+
+def _derive_job_review_status(results: list[dict[str, Any]], threshold: float) -> str:
+    """Job-level review status from its flagged pairs' decisions.
+
+    The most serious decision wins (escalated, then confirmed). Otherwise the
+    job needs review while any flagged pair is undecided or marked for review,
+    and is dismissed only once every flagged pair has been dismissed.
+    """
+    flagged = [r for r in results if _coerce_float(r.get("score"), 0.0) >= threshold]
+    statuses = [r.get("review_status") or "unreviewed" for r in flagged]
+    if "escalated" in statuses:
+        return "escalated"
+    if "confirmed" in statuses:
+        return "confirmed"
+    if not statuses or all(status == "unreviewed" for status in statuses):
+        return "unreviewed"
+    if all(status == "dismissed" for status in statuses):
+        return "dismissed"
+    return "needs_review"
 
 
 @app.patch("/api/job/{job_id}/review")
@@ -9924,7 +10503,13 @@ async def update_job_review(job_id: str, request: Request):
     ):
         raise HTTPException(status_code=400, detail="No review updates provided")
 
-    if "review_status" in payload:
+    pair_reviews = _validated_pair_reviews(payload.get("pair_reviews"))
+
+    # With pair decisions the job status is derived from them (below). The
+    # results page also sent the pair's status as ``review_status``, so the
+    # last pair touched set the whole job: dismissing one harmless pair made
+    # an assignment with confirmed pairs read "dismissed" on the dashboard.
+    if "review_status" in payload and not pair_reviews:
         review_status = payload.get("review_status")
         if review_status not in REVIEW_STATUSES:
             raise HTTPException(status_code=400, detail="Invalid review status")
@@ -9937,11 +10522,9 @@ async def update_job_review(job_id: str, request: Request):
         job["review_notes"] = review_notes.strip()
 
     # Per-pair review persistence to database (SimilarityResult rows)
-    if "pair_reviews" in payload and isinstance(payload.get("pair_reviews"), dict):
+    if pair_reviews:
         with SessionLocal() as db:
-            for pair_key, review_data in payload["pair_reviews"].items():
-                if not isinstance(review_data, dict):
-                    continue
+            for pair_key, review_data in pair_reviews.items():
                 parts = (
                     str(pair_key).split("::")
                     if "::" in str(pair_key)
@@ -9959,32 +10542,25 @@ async def update_job_review(job_id: str, request: Request):
                         .first()
                     )
                     if sim:
-                        if "status" in review_data or "review_status" in review_data:
-                            sim.review_status = review_data.get(
-                                "status"
-                            ) or review_data.get("review_status")
-                        if "notes" in review_data or "review_notes" in review_data:
-                            sim.review_notes = (
-                                review_data.get("notes")
-                                or review_data.get("review_notes")
-                                or ""
-                            ).strip() or None
+                        if "status" in review_data:
+                            sim.review_status = review_data["status"]
+                        if "notes" in review_data:
+                            sim.review_notes = review_data["notes"] or None
             db.commit()
 
     # Also reflect in in-memory results if present
-    if (
-        "results" in job
-        and isinstance(job["results"], list)
-        and "pair_reviews" in payload
-    ):
+    if pair_reviews and isinstance(job.get("results"), list):
         for r in job["results"]:
-            k = f"{r.get('file_a')}::{r.get('file_b')}"
-            if k in payload["pair_reviews"]:
-                rd = payload["pair_reviews"][k]
-                if "status" in rd or "review_status" in rd:
-                    r["review_status"] = rd.get("status") or rd.get("review_status")
-                if "notes" in rd or "review_notes" in rd:
-                    r["review_notes"] = rd.get("notes") or rd.get("review_notes")
+            rd = pair_reviews.get(f"{r.get('file_a')}::{r.get('file_b')}")
+            if rd is None:
+                continue
+            if "status" in rd:
+                r["review_status"] = rd["status"]
+            if "notes" in rd:
+                r["review_notes"] = rd["notes"]
+        job["review_status"] = _derive_job_review_status(
+            job["results"], _coerce_float(job.get("threshold"), 0.5)
+        )
 
     job["review_updated_at"] = datetime.now().isoformat()
     _jobs[job_id] = job
@@ -13672,13 +14248,10 @@ USER_EDITABLE_SETTINGS_DEFAULTS: dict[str, Any] = {
     "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
     "max_files_per_job": settings.MAX_FILES_PER_JOB,
     "webhook_url": "",
-    "audit_log_level": "INFO",
-    "audit_retention_days": 365,
+    "notify_email_on_finish": False,
     "debug_mode": False,
     "source_scan_enabled": False,
     "source_scan_sites": ["https://github.com"],
-    "gptzero_api_key": settings.GPTZERO_API_KEY or "",
-    "grammarly_api_key": settings.GRAMMARLY_API_KEY or "",
     "email_backend": settings.EMAIL_BACKEND,
     "email_host": settings.EMAIL_HOST,
     "email_port": settings.EMAIL_PORT,
@@ -13691,113 +14264,9 @@ USER_EDITABLE_SETTINGS_DEFAULTS: dict[str, Any] = {
         "assignment_type": "auto_detect",
         "sensitivity": "balanced",
         "starter_code_handling": "student_written_only",
-        "previous_term_matching": "same_course_only",
+        "previous_term_matching": "off",
         "ai_rewrite_detection": "balanced",
         "result_volume": "top_25",
-    },
-    "v1_review_rules": {
-        "automated_flagging_enabled": True,
-        "require_multiple_signals": True,
-        "minimum_agreeing_methods": 2,
-        "auto_flag_critical_matches": True,
-        "short_match_suppression": True,
-        "default_review_state": "needs_review",
-        "manual_review_for_critical": True,
-        "second_review_required": True,
-        "second_review_threshold": 0.85,
-        "allow_reviewer_dismissal": True,
-        "require_dismissal_note": True,
-        "show_side_by_side": True,
-        "show_explanation_summary": True,
-        "show_method_contributions": True,
-        "show_confidence_labels": True,
-        "show_transformed_match_notes": True,
-        "report_sort_order": "risk_desc",
-        "hide_low_confidence_by_default": True,
-        "downloadable_reports_enabled": True,
-        "include_reviewer_notes_in_exports": True,
-    },
-    "v1_ai_models": {
-        "openai_enabled": True,
-        "anthropic_enabled": False,
-        "default_provider": "openai",
-        "fallback_provider": "anthropic",
-        "provider_status_alerts": True,
-        "explanation_model": settings.OPENAI_MODEL,
-        "cross_language_model": settings.OPENAI_MODEL,
-        "model_version_pinning": True,
-        "minimum_ai_confidence": 0.60,
-        "minimum_explanation_confidence": 0.65,
-        "require_deterministic_support": True,
-        "semantic_similarity_enabled": True,
-        "ai_explanations_enabled": True,
-        "cross_language_analysis_enabled": False,
-        "ai_influences_final_score": True,
-        "explanation_verbosity": "standard",
-        "max_ai_requests_per_check": 20,
-        "max_tokens_per_request": 4000,
-        "ai_timeout_seconds": 30,
-        "disable_ai_when_limits_reached": True,
-    },
-    "v1_detection_methods": {
-        "apply_all_enabled_by_default": True,
-        "method_selection_by_language": False,
-        "disable_unsupported_methods_automatically": True,
-        "minimum_token_match_length": 8,
-        "ngram_size": 5,
-        "winnowing_window_size": 4,
-        "minimum_ast_similarity": 0.30,
-        "minimum_embedding_similarity": 0.55,
-    },
-    "v1_scoring": {
-        "active_formula": "weighted_v1",
-        "formula_version": "v1",
-        "weighted_score_calculation": True,
-        "normalize_by_file_size": True,
-        "penalize_short_matches": True,
-        "boost_cross_method_agreement": True,
-        "suspicion_threshold": 0.45,
-        "review_threshold": settings.DEFAULT_THRESHOLD,
-        "critical_threshold": 0.85,
-        "short_match_threshold": 0.30,
-        "ai_only_threshold": 0.75,
-        "ignore_threshold": 0.25,
-        "high_risk_threshold": 0.75,
-        "require_second_review_above_critical": True,
-        "require_non_ai_confirmation_below_ai_only": True,
-        "auto_hide_ignored_matches": True,
-        "auto_prioritize_high_risk_matches": True,
-        "active_profile": "balanced",
-        "custom_profile_name": "",
-        "calibration_mode_enabled": False,
-        "compare_current_vs_previous": True,
-        "save_manual_adjustments_as_version": True,
-        "require_approval_before_production_update": True,
-        "calibration_notes": "",
-        "primary_evaluation_metric": "f1",
-        "track_precision": True,
-        "track_recall": True,
-        "track_f1": True,
-        "track_false_positive_rate": True,
-        "track_custom_metrics": False,
-    },
-    "v1_system_limits": {
-        "max_archive_size_mb": 100,
-        "allowed_file_types": ".py,.java,.js,.ts,.cpp,.c,.cs,.go,.rs,.zip",
-        "max_submissions_per_batch": 500,
-        "max_check_runtime_seconds": 900,
-        "max_method_runtime_seconds": 120,
-        "ai_timeout_per_task_seconds": 30,
-        "retry_failed_jobs": True,
-        "max_retry_attempts": 2,
-        "max_parallel_checks": 4,
-        "background_worker_limit": 2,
-        "queue_size_limit": 100,
-        "ai_request_concurrency": 4,
-        "report_retention_days": 365,
-        "temporary_upload_retention_days": 7,
-        "audit_log_retention_days": 365,
-        "automatic_cleanup_schedule": "daily",
     },
 }
 
@@ -13826,13 +14295,10 @@ SETTINGS_ATTR_MAP = {
     "max_file_size_mb": "MAX_FILE_SIZE_MB",
     "max_files_per_job": "MAX_FILES_PER_JOB",
     "webhook_url": "WEBHOOK_URL",
-    "audit_log_level": "AUDIT_LOG_LEVEL",
-    "audit_retention_days": "AUDIT_RETENTION_DAYS",
+    "notify_email_on_finish": None,
     "debug_mode": "DEBUG_MODE",
     "source_scan_enabled": "SOURCE_SCAN_ENABLED",
     "source_scan_sites": "SOURCE_SCAN_SITES",
-    "gptzero_api_key": "GPTZERO_API_KEY",
-    "grammarly_api_key": "GRAMMARLY_API_KEY",
     "email_backend": "EMAIL_BACKEND",
     "email_host": "EMAIL_HOST",
     "email_port": "EMAIL_PORT",
@@ -13841,22 +14307,17 @@ SETTINGS_ATTR_MAP = {
     "email_from": "EMAIL_FROM",
     "email_use_tls": "EMAIL_USE_TLS",
     "sendgrid_api_key": "SENDGRID_API_KEY",
-    "v1_review_rules": None,
-    "v1_ai_models": None,
-    "v1_detection_methods": None,
-    "v1_scoring": None,
-    "v1_system_limits": None,
 }
 
-SECRET_SETTING_KEYS = {
-    "openai_api_key",
-    "anthropic_api_key",
-    "moss_user_id",
-    "gptzero_api_key",
-    "grammarly_api_key",
-    "email_password",
-    "sendgrid_api_key",
-}
+#: Server-wide switches a workspace admin may not change: debug_mode relaxes the
+#: password policy and authentication for every workspace in the process.
+PLATFORM_ONLY_SETTING_KEYS = frozenset({"debug_mode"})
+
+#: Credentials: sealed at rest (infrastructure/secret_box) and never sent back
+#: to the browser.
+SECRET_SETTING_KEYS = set(secret_box.WORKSPACE_SECRET_FIELDS)
+#: Single-vendor key settings mirrored in the per-provider ``llm_api_keys`` map.
+LEGACY_KEY_PROVIDERS = {"openai_api_key": "openai", "anthropic_api_key": "anthropic"}
 ENGINE_DISPLAY_LABELS = {
     "token": "Token",
     "ast": "AST",
@@ -13920,6 +14381,10 @@ UPLOAD_ENGINE_KEYS = (
 def _load_tenant_settings_record(tenant_id: str | None) -> dict[str, Any]:
     if not tenant_id:
         return {}
+    try:
+        uuid.UUID(str(tenant_id))
+    except ValueError:
+        return {}  # not a workspace row (e.g. a test or service principal)
 
     with SessionLocal() as db:
         tenant = db.get(Tenant, tenant_id)
@@ -13930,7 +14395,12 @@ def _load_tenant_settings_record(tenant_id: str | None) -> dict[str, Any]:
 
 def _build_settings_payload(tenant_id: str | None) -> dict[str, Any]:
     stored = _load_tenant_settings_record(tenant_id)
-    payload = {**USER_EDITABLE_SETTINGS_DEFAULTS, **stored}
+    # Only known settings go back to the browser: a retired key still in an
+    # old record (e.g. gptzero_api_key) would otherwise be sent unmasked.
+    payload = {
+        **USER_EDITABLE_SETTINGS_DEFAULTS,
+        **{k: v for k, v in stored.items() if k in USER_EDITABLE_SETTINGS_DEFAULTS},
+    }
     payload["engine_weights"] = _normalize_engine_weights(payload.get("engine_weights"))
     payload["source_scan_sites"] = _normalize_source_scan_sites(
         payload.get("source_scan_sites")
@@ -13981,50 +14451,70 @@ def _build_settings_payload(tenant_id: str | None) -> dict[str, Any]:
     return payload
 
 
-def _apply_runtime_settings_from_record(record: dict[str, Any]) -> None:
-    """Push persisted tenant settings onto the live runtime configuration.
+def _workspace_setting_overrides(
+    record: dict[str, Any] | None, tenant_id: str | None = None
+) -> dict[str, Any]:
+    """A workspace's saved settings as ``AppSettings`` attribute overrides.
 
-    Non-secret values are assigned onto the pydantic settings object so every
-    consumer reading ``settings.<ATTR>`` sees the tenant's saved choice without
-    a restart. Secret-like values (API keys, MOSS id) are additionally mirrored
-    into the process environment because some provider clients read
-    ``os.environ`` directly. Called after settings are saved and on every
-    authenticated dashboard request.
+    Used with ``workspace_overrides()`` for the length of one request or job,
+    so ``settings.<ATTR>`` reads the workspace's choice over the start-up
+    value. These used to be assigned onto the one process-wide settings object
+    (and API keys into ``os.environ``) on every request, so a workspace briefly
+    ran with whichever workspace had made the previous request.
 
-    ``AppSettings`` is ``frozen``, so the assignments go through
-    ``object.__setattr__``: this is the one sanctioned place where a saved
-    tenant setting is meant to override the start-up value. Plain ``setattr``
-    raises ``ValidationError`` here, which the ``except`` below would swallow —
-    silently dropping every saved setting (including provider API keys).
+    A secret overrides only when the workspace saved a non-empty value of its
+    own; otherwise the server's start-up key stays in force. Server-wide
+    switches (``debug_mode``) are never taken from a workspace. Stored
+    credentials are decrypted with ``tenant_id`` (they are sealed to it).
     """
-    merged = {**USER_EDITABLE_SETTINGS_DEFAULTS, **(record or {})}
-    merged["engine_weights"] = _normalize_engine_weights(merged.get("engine_weights"))
+    record = secret_box.open_record(record or {}, tenant_id)
+    overrides: dict[str, Any] = {}
     for key, attr in SETTINGS_ATTR_MAP.items():
-        if attr is None or key not in merged:
+        if attr is None or key not in record or key in PLATFORM_ONLY_SETTING_KEYS:
             continue
-        value = merged[key]
-
-        # Secret-like settings: mirror into env (and the settings object) only
-        # when a non-empty value was provided; empty means "leave unchanged".
+        value = record[key]
         if key in SECRET_SETTING_KEYS:
-            if value:
-                os.environ[attr] = str(value)
-                try:
-                    object.__setattr__(settings, attr, str(value))
-                except Exception:
-                    logger.warning(
-                        "Failed to apply secret setting %s", key, exc_info=True
-                    )
-            continue
+            if not (value and isinstance(value, str)):
+                continue
+        elif key == "engine_weights":
+            value = _normalize_engine_weights(value)
+        elif key == "llm_api_keys":
+            if not isinstance(value, dict):
+                continue
+            value = {str(name): str(val) for name, val in value.items() if val}
+            if not value:
+                continue
+        elif key in ("llm_model_overrides", "llm_base_urls"):
+            if not isinstance(value, dict):
+                continue
+        overrides[attr] = value
+    return overrides
 
-        if not hasattr(settings, attr):
-            continue
-        try:
-            object.__setattr__(settings, attr, value)
-        except (TypeError, ValueError):
-            logger.warning(
-                "Failed to apply setting %s -> %s=%r", key, attr, value, exc_info=True
-            )
+
+def _new_credential_keys(data: dict[str, Any]) -> list[str]:
+    """Settings keys in a save request that carry a new credential value."""
+    keys = [
+        key
+        for key in SECRET_SETTING_KEYS
+        if isinstance(data.get(key), str) and data[key].strip()
+    ]
+    provider_keys = data.get("llm_api_keys")
+    if isinstance(provider_keys, dict) and any(
+        isinstance(v, str) and v.strip() for v in provider_keys.values()
+    ):
+        keys.append("llm_api_keys")
+    return keys
+
+
+def _saves_new_credential(data: dict[str, Any]) -> bool:
+    return bool(_new_credential_keys(data))
+
+
+def _workspace_settings_scope(tenant_id: str | None):
+    """Read ``settings`` as this workspace sees it (a context manager)."""
+    return workspace_overrides(
+        _workspace_setting_overrides(_load_tenant_settings_record(tenant_id), tenant_id)
+    )
 
 
 def _normalize_source_scan_sites(value: Any) -> list[str]:
@@ -14448,7 +14938,11 @@ def _require_non_guest(request: Request) -> dict[str, Any]:
     return user
 
 
-def _job_is_accessible(job: dict[str, Any], user: dict[str, Any] | None) -> bool:
+def _job_is_accessible(
+    job: dict[str, Any],
+    user: dict[str, Any] | None,
+    scope: sharing.AccessScope | None = None,
+) -> bool:
     # Deny access if no user is authenticated (except for guest jobs)
     if user is None:
         # Guest access applies to unowned jobs. Jobs persisted to the DB always
@@ -14465,18 +14959,45 @@ def _job_is_accessible(job: dict[str, Any], user: dict[str, Any] | None) -> bool
             return False
         return str(job.get("owner_user_id") or "") == str(user.get("id") or "")
 
-    if user.get("role") == "admin":
-        return True
-
     owner_user_id = str(job.get("owner_user_id") or "")
-    if owner_user_id and owner_user_id == user.get("id"):
+    if owner_user_id and owner_user_id == str(user.get("id") or ""):
         return True
 
+    if scope is None:
+        with SessionLocal() as db:
+            scope = sharing.access_scope(db, user)
+    return _job_in_scope(job, scope)
+
+
+def _job_in_scope(job: dict[str, Any], scope: sharing.AccessScope) -> bool:
+    """Non-owner access: shared with the caller, or under a course they reach.
+
+    Same-tenant users used to see every job, and admins every job in every
+    organization. Professors now see their own and shared work; admins see
+    their own organization's (application/services/sharing).
+    """
+    if str(job.get("id") or "") in scope.shared_job_ids:
+        return True
+    if scope.is_platform_admin:
+        return True
+    course_id = _assignment_course_id(job.get("assignment_id"))
+    if course_id and course_id in scope.course_ids:
+        return True
     tenant_id = str(job.get("tenant_id") or "")
-    if tenant_id and tenant_id == user.get("tenant_id"):
-        return True
+    return bool(scope.is_admin and tenant_id and tenant_id == scope.tenant_id)
 
-    return False
+
+@functools.lru_cache(maxsize=4096)
+def _assignment_course_id(assignment_id: str | None) -> str | None:
+    """Course of an assignment (assignments never move between courses)."""
+    if not assignment_id:
+        return None
+    try:
+        with SessionLocal() as db:
+            return academic_access.course_id_for_assignment(db, str(assignment_id))
+    except SQLAlchemyError:
+        logger.warning("Could not resolve course for assignment %s", assignment_id)
+        return None
 
 
 def _require_job_access(job_id: str, request: Request) -> dict[str, Any]:
@@ -14528,15 +15049,14 @@ async def dashboard_auth_middleware(request: Request, call_next):
             content={"detail": GUEST_WRITE_DENIED_DETAIL},
         )
 
-    if user.get("role") != "api":
-        # API-key principals have no dashboard user; tenant runtime settings
-        # are loaded for interactive sessions only.
-        await run_in_threadpool(
-            lambda: _apply_runtime_settings_from_record(
-                _load_tenant_settings_record(user.get("tenant_id"))
-            )
-        )
-    return await call_next(request)
+    # The workspace's saved settings apply to this request only (API-key
+    # principals included: they act for their workspace too).
+    record = await run_in_threadpool(
+        _load_tenant_settings_record, user.get("tenant_id")
+    )
+    overrides = _workspace_setting_overrides(record, user.get("tenant_id"))
+    with workspace_overrides(overrides):
+        return await call_next(request)
 
 
 @app.get("/report/{job_id}/download", response_class=HTMLResponse)
@@ -17301,8 +17821,111 @@ async def suggest_assignment_mode(request: Request) -> dict[str, Any]:
     )
 
 
+def _number_setting(minimum: float, maximum: float, integer: bool = True):
+    """Validator: a number in ``[minimum, maximum]`` (an int when ``integer``)."""
+
+    def check(value: Any) -> int | float:
+        if isinstance(value, bool):
+            raise ValueError("must be a number")
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("must be a number") from None
+        if integer and not number.is_integer():
+            raise ValueError("must be a whole number")
+        if not minimum <= number <= maximum:
+            raise ValueError(f"must be between {minimum:g} and {maximum:g}")
+        return int(number) if integer else number
+
+    return check
+
+
+def _choice_setting(*choices: str):
+    """Validator: one of ``choices`` (case-insensitive)."""
+
+    def check(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text not in choices:
+            raise ValueError(f"must be one of: {', '.join(choices)}")
+        return text
+
+    return check
+
+
+def _url_setting(value: Any) -> str:
+    """Validator: empty, or an http(s) URL."""
+    text = str(value or "").strip()
+    if text and urlparse(text).scheme not in ("http", "https"):
+        raise ValueError("must be an http:// or https:// URL")
+    return text.rstrip("/") if text else ""
+
+
+def _webhook_url_setting(value: Any) -> str:
+    """Validator: empty, or a public https URL (the server POSTs to it)."""
+    from src.backend.api.routes.jobs import validate_webhook_url
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return (validate_webhook_url(text) or "").rstrip("/")
+    except HTTPException as exc:
+        raise ValueError(
+            "must be a public https:// URL without a username or password"
+        ) from exc
+
+
+def _device_setting(value: Any) -> str:
+    """Same rule as AppSettings.EMBEDDING_DEVICE: auto, cpu, mps, cuda or cuda:N."""
+    text = str(value or "").strip().lower()
+    if not re.fullmatch(r"auto|cpu|mps|cuda(:\d+)?", text):
+        raise ValueError("must be auto, cpu, mps, cuda or cuda:N")
+    return text
+
+
+def _bool_setting(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError("must be true or false")
+
+
+def _email_setting(value: Any) -> str:
+    text = str(value or "").strip()
+    if text and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text):
+        raise ValueError("must be an email address")
+    return text
+
+
+#: Server-side checks for workspace settings (PATCH /api/settings).
+SETTINGS_VALIDATORS: dict[str, Callable[[Any], Any]] = {
+    "default_threshold": _number_setting(0.05, 0.99, integer=False),
+    "max_file_size_mb": _number_setting(1, 4096),
+    "max_files_per_job": _number_setting(2, 100000),
+    "batch_size": _number_setting(1, 10000),
+    "embedding_batch_size": _number_setting(1, 4096),
+    "embedding_server_port": _number_setting(1, 65535),
+    "email_port": _number_setting(1, 65535),
+    "embedding_device": _device_setting,
+    "embedding_runtime": _choice_setting(
+        "local_unixcoder", "local", "unixcoder", "remote_openai_compatible", "none"
+    ),
+    "email_backend": _choice_setting("console", "smtp", "sendgrid"),
+    "email_use_tls": _bool_setting,
+    "email_from": _email_setting,
+    "source_scan_enabled": _bool_setting,
+    "webhook_url": _webhook_url_setting,
+    "notify_email_on_finish": _bool_setting,
+    "openai_base_url": _url_setting,
+    "embedding_server_url": _url_setting,
+}
+
+
 @app.patch("/api/settings")
 async def update_settings(request: Request):
+    from src.backend.engines.scoring.fusion_policy import (
+        evaluate_weight_change_governance,
+    )
+
     current_user = _require_current_user(request, admin_only=True)
     data = await _read_json_object(request)
     tenant_id = current_user.get("tenant_id")
@@ -17310,6 +17933,23 @@ async def update_settings(request: Request):
         raise HTTPException(
             status_code=400,
             detail="Admin account is not attached to a workspace tenant",
+        )
+    # Validate before anything is stored: values such as a -5 threshold, 0
+    # files per job or port "abc" used to be saved and then broke analysis.
+    errors: dict[str, str] = {}
+    for key in list(data):
+        if key in PLATFORM_ONLY_SETTING_KEYS:
+            errors[key] = "is a server-wide setting and cannot be changed here"
+            continue
+        if key in SETTINGS_VALIDATORS:
+            try:
+                data[key] = SETTINGS_VALIDATORS[key](data[key])
+            except ValueError as exc:
+                errors[key] = str(exc)
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Some settings are invalid", "fields": errors},
         )
 
     with SessionLocal() as db:
@@ -17320,15 +17960,44 @@ async def update_settings(request: Request):
         stored_settings = dict(tenant.settings or {})
         applied = {}
         ignored: dict[str, str] = {}
-        env_updates: dict[str, Any] = {}
+        governance_result = None
+        weight_audit = None
 
         for key, value in data.items():
             if key not in SETTINGS_ATTR_MAP and key != "professor_profile":
                 continue
             if key in SECRET_SETTING_KEYS and value == "":
                 continue
+            # null removes a saved credential, so the workspace falls back to
+            # the server's own key (blank above means "keep it").
+            if key in SECRET_SETTING_KEYS and value is None:
+                stored_settings.pop(key, None)
+                provider_name = LEGACY_KEY_PROVIDERS.get(key)
+                if provider_name:
+                    provider_keys = dict(stored_settings.get("llm_api_keys") or {})
+                    provider_keys.pop(provider_name, None)
+                    stored_settings["llm_api_keys"] = provider_keys
+                applied[key] = False
+                continue
             if key == "engine_weights":
                 value = _normalize_engine_weights(value)
+                # These are the weights this workspace's analyses use, so the
+                # validation-evidence rule applies here (it used to guard only
+                # the shared engine config, while these were saved anyway).
+                previous_weights = _normalize_engine_weights(
+                    stored_settings.get("engine_weights")
+                    or USER_EDITABLE_SETTINGS_DEFAULTS["engine_weights"]
+                )
+                governance_result = evaluate_weight_change_governance(
+                    previous_weights, value, data.get("weight_governance_evidence")
+                )
+                weight_audit = (previous_weights, value, governance_result.allowed)
+                if (
+                    governance_result.requires_validation
+                    and not governance_result.allowed
+                ):
+                    ignored[key] = "changed weights need validation evidence"
+                    continue
             if key == "source_scan_sites":
                 value = _normalize_source_scan_sites(value)
             if key in ("llm_provider", "llm_fallback_provider"):
@@ -17354,7 +18023,12 @@ async def update_settings(request: Request):
                 merged_keys = dict(stored_settings.get("llm_api_keys") or {})
                 for provider_name, key_value in value.items():
                     provider_key = str(provider_name).strip().lower()
-                    if provider_key and key_value:
+                    if provider_key and key_value is None:
+                        merged_keys.pop(provider_key, None)
+                        for legacy, legacy_provider in LEGACY_KEY_PROVIDERS.items():
+                            if legacy_provider == provider_key:
+                                stored_settings.pop(legacy, None)
+                    elif provider_key and key_value:
                         merged_keys[provider_key] = str(key_value)
                 value = merged_keys
             if key == "llm_model_overrides":
@@ -17387,8 +18061,6 @@ async def update_settings(request: Request):
                 applied[key] = bool(value) if key in SECRET_SETTING_KEYS else value
             if key == "professor_profile":
                 continue
-            if key in SECRET_SETTING_KEYS and value:
-                env_updates[SETTINGS_ATTR_MAP[key]] = value
 
         # When only a professor profile is sent (no explicit engine weights),
         # derive and persist the profile-based weights so the advanced sliders
@@ -17406,71 +18078,52 @@ async def update_settings(request: Request):
 
         # Keep the generic per-provider key map in sync with the legacy
         # single-vendor fields so both entry points stay equivalent.
-        for legacy_key, provider_name in (
-            ("openai_api_key", "openai"),
-            ("anthropic_api_key", "anthropic"),
-        ):
+        for legacy_key, provider_name in LEGACY_KEY_PROVIDERS.items():
             legacy_value = data.get(legacy_key)
             if legacy_value:
                 synced_keys = dict(stored_settings.get("llm_api_keys") or {})
                 synced_keys[provider_name] = str(legacy_value)
                 stored_settings["llm_api_keys"] = synced_keys
 
+        # Credentials are sealed with AES-256-GCM before they are stored.
+        if secret_box.is_available():
+            stored_settings = secret_box.seal_record(stored_settings, str(tenant_id))
+        elif _saves_new_credential(data):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "API keys and passwords can't be saved yet",
+                    "fields": {
+                        key: "can't be stored until the server's encryption key is "
+                        "configured (ask your platform administrator)"
+                        for key in _new_credential_keys(data)
+                    },
+                },
+            )
         tenant.settings = stored_settings
         db.add(tenant)
         db.commit()
 
-    if env_updates:
-        _persist_env_settings(env_updates)
+    # Secrets are not written to src/backend/.env.local any more: that one file
+    # is every workspace's start-up config, so the last admin's keys became all
+    # workspaces' defaults. Each request reads its own workspace's record.
 
-    _apply_runtime_settings_from_record(stored_settings)
-
-    # Persist engine weights and calibration config to yaml file
-    from src.backend.engines.scoring.fusion_engine import FusionEngine
-    from src.backend.engines.scoring.fusion_policy import (
-        evaluate_weight_change_governance,
-    )
-
-    engine_config = FusionEngine.get_current_config()
-    governance_result = None
-
-    if "engine_weights" in data:
-        proposed_weights = _normalize_engine_weights(data["engine_weights"])
-        previous_weights = dict(engine_config.get("weights", {}))
-        governance_result = evaluate_weight_change_governance(
-            engine_config.get("weights", {}),
-            proposed_weights,
-            data.get("weight_governance_evidence"),
-        )
-        engine_config["weights"] = proposed_weights
-        if governance_result.requires_validation and not governance_result.allowed:
-            engine_config.setdefault("advanced", {})["weights_need_validation"] = True
+    # Weights and profiles are kept per workspace (above) and are what its
+    # analyses use. They used to be written into the shared engine config too,
+    # so one workspace's save changed the defaults for every other workspace;
+    # that file is platform calibration, edited via PUT engine-config.
+    if weight_audit is not None:
         submitted_evidence = data.get("weight_governance_evidence")
         _record_weight_audit(
             "weights_updated",
             actor_user_id=current_user.get("id"),
-            weights_before=previous_weights,
-            weights_after=proposed_weights,
+            weights_before=weight_audit[0],
+            weights_after=weight_audit[1],
             evidence=(
                 submitted_evidence if isinstance(submitted_evidence, dict) else None
             ),
-            allowed=governance_result.allowed,
+            allowed=weight_audit[2],
         )
-    elif "professor_profile" in data:
-        from src.backend.engines.scoring.professor_profiles import (
-            apply_professor_profile,
-            professor_profile_to_engine_weights,
-        )
-
-        applied_profile = apply_professor_profile(data.get("professor_profile"))
-        engine_config["weights"] = professor_profile_to_engine_weights(applied_profile)
-        engine_config.setdefault("professor_profile", {})[
-            "applied"
-        ] = applied_profile.to_dict()
-    if "baseline_correction" in data:
-        engine_config["baseline_correction"] = data["baseline_correction"]
-
-    FusionEngine.update_config(engine_config)
 
     response: dict[str, Any] = {
         "status": "ok",
@@ -17650,6 +18303,33 @@ async def test_email_delivery(request: Request) -> dict[str, Any]:
             f"Test email accepted by the '{backend}' backend."
             if ok
             else "Delivery failed. Check the backend configuration and credentials."
+        ),
+    }
+
+
+@app.post("/api/settings/webhook/test")
+async def test_webhook_delivery(request: Request) -> dict[str, Any]:
+    """POST a signed test event to the workspace's saved webhook URL."""
+    _require_current_user(request, admin_only=True)
+    from src.backend.application.services.job_notifications import post_webhook
+
+    raw = settings.WEBHOOK_URL
+    url = (raw.get_secret_value() if hasattr(raw, "get_secret_value") else raw) or ""
+    if not url.strip():
+        return {"ok": False, "message": "Save a webhook URL first."}
+    payload = {
+        "event": "test",
+        "message": "IntegrityDesk webhook test",
+        "sent_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ok = await run_in_threadpool(post_webhook, url.strip(), payload)
+    return {
+        "ok": bool(ok),
+        "message": (
+            "The receiver accepted the test event."
+            if ok
+            else "The test event was not accepted. Check that the URL is a public "
+            "https address and that the receiver answers with a 2xx status."
         ),
     }
 

@@ -14,6 +14,7 @@ interface WebAnalysisSubmission {
   match_count?: number;
 }
 import { ButtonLink, Card, Modal } from '@/components/saas/SaaSPrimitives';
+import ShareDialog from '@/components/ShareDialog';
 import {
   AlertCircle,
   CheckCircle2,
@@ -345,6 +346,7 @@ export default function ResultsPage() {
   // the review PATCH is rejected server-side, so the controls stay read-only
   // here rather than showing an optimistic status that was never saved.
   const isGuest = user?.role === 'guest';
+  const [shareOpen, setShareOpen] = useState(false);
   const leftRef = useRef(null);
   const rightRef = useRef(null);
   const syncingRef = useRef(false);
@@ -459,10 +461,10 @@ export default function ResultsPage() {
     setPairStatuses((prev) => ({ ...prev, [key]: newStatus }));
 
     try {
-      // review_status is the job-level status the backend still expects ("backward compat"). Note it
-      // overwrites the whole job's status with this pair's, so the backend should treat it as legacy.
+      // Only the pair's decision: the backend derives the job's review status
+      // from all its flagged pairs (sending this pair's status as the job's
+      // made the last pair touched decide the whole assignment).
       await updateReview({
-        review_status: newStatus,
         pair_reviews: { [key]: { status: newStatus } },
       });
       setSavedFlash(true);
@@ -510,6 +512,10 @@ export default function ResultsPage() {
   // reviewing one pair (which also writes the job-level status) made every other pair look reviewed after a reload.
   const legacyJobStatus = results.some((r) => 'review_status' in r) ? null : job?.review_status || null;
   const statusOf = (r) => pairStatuses[pairKey(r)] || r.review_status || legacyJobStatus || 'unreviewed';
+
+  // The workspace's "pairs shown" setting, stamped on the job at analysis time.
+  const resultLimit = Number(job?.result_limit) > 0 ? Number(job.result_limit) : null;
+  const [showAllPairs, setShowAllPairs] = useState(false);
 
   // === New ranked + filterable table data (client-side, no new API) ===
   const tableData = useMemo(() => {
@@ -563,9 +569,19 @@ export default function ResultsPage() {
       return b._score - a._score;
     });
 
+    // Keep the N highest-scoring matching pairs (in the chosen sort order)
+    // unless the reviewer asked for all of them.
+    const matching = rows.length;
+    if (resultLimit && !showAllPairs && rows.length > resultLimit) {
+      const top = new Set(
+        [...rows].sort((a, b) => b._score - a._score).slice(0, resultLimit).map((row) => row._key),
+      );
+      rows = rows.filter((row) => top.has(row._key));
+    }
     // Re-assign dense rank after filter
-    return rows.map((row, i) => ({ ...row, _denseRank: i + 1 }));
-  }, [results, searchTerm, minSimilarity, statusFilter, sortMode, pairStatuses, legacyJobStatus]);
+    return Object.assign(rows.map((row, i) => ({ ...row, _denseRank: i + 1 })), { matching });
+  }, [results, searchTerm, minSimilarity, statusFilter, sortMode, pairStatuses, legacyJobStatus, resultLimit, showAllPairs]);
+  const hiddenPairs = Math.max(0, (tableData.matching ?? tableData.length) - tableData.length);
 
   // Active result for the detail view (falls back to the first row of the filtered table)
   const activeResult = useMemo(
@@ -589,6 +605,30 @@ export default function ResultsPage() {
   const confidencePct = hasConfidence ? Math.round(activeResult._confidence * 100) : 0;
   const evidenceTypes = getEvidenceTypes(activeResult);
   const evidenceSignals = buildEvidenceSignals(activeResult).filter((s) => s.fired);
+  // One plain-language paragraph: the score against the threshold, the strongest
+  // evidence, and what was left out before comparing.
+  const plainSummary = (() => {
+    if (!activeResult) return '';
+    const cutoff = Math.round(getThreshold(job) * 100);
+    const parts = [
+      `This pair scored ${similarityDisplay}% overall, ${similarityDisplay >= cutoff ? 'at or above' : 'below'} the ${cutoff}% flag threshold.`,
+    ];
+    if (activeResult.review_hold === 'short_files') {
+      parts.push('The score is held at 50% because at least one file is very short: a few lines are too little evidence to rank a pair higher, however alike they look.');
+    } else if (activeResult.review_hold === 'shared_code') {
+      parts.push('The score is held at 50% because most of the overlap is starter or boilerplate code, which is expected to match.');
+    }
+    const strongest = [...buildEvidenceSignals(activeResult)].sort((a, b) => b.score - a.score).slice(0, 2);
+    if (strongest.length > 0) {
+      parts.push(`Strongest evidence: ${strongest.map((signal) => `${signal.name.toLowerCase()} (${Math.round(signal.score * 100)}%)`).join(' and ')}.`);
+    }
+    const earlier = [activeResult.file_a, activeResult.file_b].find((name) => typeof name === 'string' && name.startsWith('[') && job?.previous_term);
+    if (earlier) parts.push(`One file comes from an earlier offering (${earlier.slice(1, earlier.indexOf(']'))}).`);
+    const commonLines = Number(job?.summary?.common_code_lines) || 0;
+    if (commonLines > 0) parts.push(`${commonLines} line${commonLines === 1 ? '' : 's'} most of the class shares (likely handout code) ${commonLines === 1 ? 'was' : 'were'} left out first, so ${commonLines === 1 ? 'it does' : 'they do'} not count toward this score.`);
+    parts.push('A high score is a reason to look closely, not proof of misconduct.');
+    return parts.join(' ');
+  })();
 
   // External / Public source matches for this specific pair (for side-by-side integration)
   const externalA = job?.web_analysis?.submissions?.find((s: WebAnalysisSubmission) => s.name === activeResult?.file_a);
@@ -648,6 +688,13 @@ export default function ResultsPage() {
   const commonCodeLines = Number(job?.summary?.common_code_lines) || 0;
   const commonCodeNote = commonCodeLines > 0
     ? `${commonCodeLines} line${commonCodeLines === 1 ? '' : 's'} shared by at least half of the submissions (likely starter or handout code) ${commonCodeLines === 1 ? 'was' : 'were'} left out of every comparison.`
+    : null;
+  // Previous-term matching: what this check was also compared against.
+  const previousTerm = job?.previous_term;
+  const previousTermNote = previousTerm
+    ? (previousTerm.offerings || []).length > 0
+      ? `Also compared with ${previousTerm.archived_submissions || 0} submission${previousTerm.archived_submissions === 1 ? '' : 's'} from ${(previousTerm.offerings || []).join(', ')}: ${previousTerm.matches || 0} match${previousTerm.matches === 1 ? '' : 'es'} at or above the threshold. Earlier submissions appear in pairs with their course and term in brackets.`
+      : previousTerm.note || null
     : null;
 
   // Keyboard navigation: J/K or ArrowLeft/ArrowRight when drawer is open
@@ -741,11 +788,27 @@ export default function ResultsPage() {
                 Omitted for the guest demo: /dossier is outside the demo's
                 route set, so the link would only bounce back to the checker. */}
             {!isGuest && (
-              <div className="shrink-0 sm:pt-1">
+              <div className="flex shrink-0 items-center gap-2 sm:pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShareOpen(true)}
+                  className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold"
+                >
+                  Share
+                </button>
                 <ButtonLink href={`/dossier/${encId}`} variant="secondary">
                   Evidence Dossier &amp; Viva Questions
                 </ButtonLink>
               </div>
+            )}
+            {!isGuest && (
+              <ShareDialog
+                open={shareOpen}
+                onClose={() => setShareOpen(false)}
+                endpoint={`/api/job/${encId}/sharing`}
+                itemLabel="this analysis"
+                ownersNote="The uploader and the course’s instructors always have access, and so does anyone the course is shared with."
+              />
             )}
           </div>
 
@@ -788,6 +851,11 @@ export default function ResultsPage() {
           {commonCodeNote && (
             <div className="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:text-slate-400">
               {commonCodeNote}
+            </div>
+          )}
+          {previousTermNote && (
+            <div className="border-t border-slate-200 px-5 py-3 text-xs leading-relaxed text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              {previousTermNote}
             </div>
           )}
         </Card>
@@ -889,6 +957,24 @@ export default function ResultsPage() {
               <h2 className="text-sm font-semibold text-slate-950 dark:text-white">Suspicious Pairs — Ranked</h2>
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 {tableData.length} of {results.length} pairs shown
+                {hiddenPairs > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllPairs(true)}
+                    className="ml-2 font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Show {hiddenPairs} more
+                  </button>
+                )}
+                {showAllPairs && resultLimit && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllPairs(false)}
+                    className="ml-2 font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Show top {resultLimit} only
+                  </button>
+                )}
                 {tableData.length > 0 && (
                   <span className="ml-2 text-slate-400 dark:text-slate-600">· click to open · J/K to navigate</span>
                 )}
@@ -949,6 +1035,14 @@ export default function ResultsPage() {
                             <span className={`font-mono text-sm font-semibold ${row._score >= 0.75 ? 'text-red-600 dark:text-red-400' : row._score >= 0.45 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-600 dark:text-slate-400'}`}>
                               {Math.round((row._score || 0) * 100)}%
                             </span>
+                            {row.review_hold && (
+                              <span
+                                className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                                title={row.review_hold === 'short_files' ? 'Held at review: a file is too short to judge' : 'Held at review: the overlap is mostly starter or boilerplate code'}
+                              >
+                                Held
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <VerdictBadge verdict={row.verdict} />
@@ -1201,7 +1295,7 @@ export default function ResultsPage() {
                   <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
                     <TreePine size={16} className="text-blue-600 dark:text-blue-400" />
                     <div>
-                      <div className="text-sm font-semibold text-slate-950 dark:text-white">Why this pair was flagged</div>
+                      <div className="text-sm font-semibold text-slate-950 dark:text-white">How this score was reached</div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">
                         The signals below are the independent checks that support this verdict. A check is
                         marked as contributing when its score crosses the alert threshold.
@@ -1209,6 +1303,11 @@ export default function ResultsPage() {
                     </div>
                   </div>
                   <div className="px-5 py-4">
+                    {plainSummary && (
+                      <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2.5 text-sm leading-6 text-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+                        {plainSummary}
+                      </p>
+                    )}
                     {evidenceSignals.length > 0 ? (
                       <div className="space-y-3">
                         {evidenceSignals.map((signal) => (

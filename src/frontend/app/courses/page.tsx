@@ -5,7 +5,8 @@ import { useAuth } from '@/components/AuthProvider';
 import { Card, CardHeader, Modal, PageHeader, StatusBadge } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
 import { buildTermOptions, courseTermLabel, type Term } from '@/lib/terms';
-import { AlertTriangle, BookOpen, ChevronRight, Loader2, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { AlertTriangle, BookOpen, ChevronRight, Loader2, Pencil, Plus, Search, Share2, Trash2, X } from 'lucide-react';
+import ShareDialog from '@/components/ShareDialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 
@@ -216,6 +217,8 @@ export default function CoursesPage() {
   };
 
   // ── Course form ──────────────────────────────────────────────────────────────
+
+  const [sharingCourse, setSharingCourse] = useState<Course | null>(null);
 
   const openCreate = () => {
     setEditingId(null);
@@ -539,6 +542,7 @@ export default function CoursesPage() {
                     expanded={expandedId === c.id}
                     onToggle={() => setExpandedId((current) => (current === c.id ? null : c.id))}
                     onEdit={() => openEdit(c)}
+                    onShare={() => setSharingCourse(c)}
                     onDelete={() => {
                       setDeleteError('');
                       setPendingDelete({ kind: 'course', id: c.id, label: c.name, assignmentCount: c.assignment_count ?? 0 });
@@ -611,6 +615,14 @@ export default function CoursesPage() {
             </div>
           </div>
         </Modal>
+
+        <ShareDialog
+          open={sharingCourse !== null}
+          onClose={() => setSharingCourse(null)}
+          endpoint={`/api/courses/${encodeURIComponent(sharingCourse?.id ?? '')}/sharing`}
+          itemLabel={sharingCourse?.code || sharingCourse?.name || 'this course'}
+          ownersNote="The course’s instructors always have access. Sharing a course includes its assignments, analyses and cases."
+        />
       </div>
     </DashboardLayout>
   );
@@ -887,6 +899,7 @@ function CourseRow({
   expanded,
   onToggle,
   onEdit,
+  onShare,
   onDelete,
   children,
 }: {
@@ -895,6 +908,7 @@ function CourseRow({
   expanded: boolean;
   onToggle: () => void;
   onEdit: () => void;
+  onShare: () => void;
   onDelete: () => void;
   children: ReactNode;
 }) {
@@ -921,6 +935,17 @@ function CourseRow({
           <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{meta.join(' · ')}</div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {/* Anyone who sees the course may see who it is shared with; the
+              dialog only offers changes to its primary instructors. */}
+          <button
+            type="button"
+            onClick={onShare}
+            aria-label={`Share ${c.name}`}
+            title="Share course"
+            className="rounded-md p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
+          >
+            <Share2 size={15} aria-hidden="true" />
+          </button>
           {canManageCourses && (
             <>
               <button

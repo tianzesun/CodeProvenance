@@ -35,10 +35,12 @@ def _forget(*job_ids: str) -> None:
         server._jobs.pop(job_id, None)
 
 
-def _insert_row(job_id: str, status: str) -> None:
+def _insert_row(job_id: str, status: str, tenant_id: str) -> None:
     """Insert a jobs row as the worker process would leave it."""
     with SessionLocal() as db:
-        db.add(Job(id=job_id, name="poll refresh test", status=status))
+        db.add(
+            Job(id=job_id, tenant_id=tenant_id, name="poll refresh test", status=status)
+        )
         db.commit()
 
 
@@ -59,12 +61,14 @@ def _delete_row(job_id: str) -> None:
 class TestCachedJobFollowsTheWorker:
     """A cached open job re-reads its status from the shared stores."""
 
-    def test_cached_queued_job_sees_the_workers_db_completion(self) -> None:
+    def test_cached_queued_job_sees_the_workers_db_completion(
+        self, job_tenant_id
+    ) -> None:
         # The reported bug: guest run executed by the Celery worker, whose
         # only cross-process channel (no job.json for guests) is the row.
         job_id = f"poll-refresh-{uuid.uuid4().hex[:10]}"
         _seed(job_id, "queued")
-        _insert_row(job_id, "completed")
+        _insert_row(job_id, "completed", job_tenant_id)
         try:
             refreshed = server._get_job(job_id)
 
@@ -75,10 +79,12 @@ class TestCachedJobFollowsTheWorker:
             _forget(job_id)
             _delete_row(job_id)
 
-    def test_failure_in_the_worker_reaches_the_cached_copy(self) -> None:
+    def test_failure_in_the_worker_reaches_the_cached_copy(
+        self, job_tenant_id
+    ) -> None:
         job_id = f"poll-refresh-{uuid.uuid4().hex[:10]}"
         _seed(job_id, "queued")
-        _insert_row(job_id, "failed")
+        _insert_row(job_id, "failed", job_tenant_id)
         try:
             refreshed = server._get_job(job_id)
 
@@ -89,14 +95,14 @@ class TestCachedJobFollowsTheWorker:
             _delete_row(job_id)
 
     def test_unchanged_row_never_pays_for_a_full_reconstruction(
-        self, monkeypatch
+        self, monkeypatch, job_tenant_id
     ) -> None:
         # Guest mid-run: the probe reports the same rank, so the heavy
         # database reconstruction (submissions, sources, results) must not
         # run on every poll.
         job_id = f"poll-refresh-{uuid.uuid4().hex[:10]}"
         _seed(job_id, "queued")
-        _insert_row(job_id, "queued")
+        _insert_row(job_id, "queued", job_tenant_id)
 
         def _explode(_job_id: str) -> None:
             raise AssertionError("full DB load must not run while nothing changed")
@@ -147,7 +153,7 @@ class TestInlineRunProtection:
         monkeypatch.setattr(
             server,
             "_load_persisted_job",
-            lambda _j: {
+            lambda _j, **_kw: {
                 "id": job_id,
                 "status": "analyzing",
                 "progress": {
@@ -181,7 +187,7 @@ class TestInlineRunProtection:
         monkeypatch.setattr(
             server,
             "_load_persisted_job",
-            lambda _j: {
+            lambda _j, **_kw: {
                 "id": job_id,
                 "status": "analyzing",
                 "progress": {
@@ -218,7 +224,11 @@ class TestAdoptionPreservesIdentity:
             "_load_persisted_job",
             # The real recovery path stamps owner_user_id=None via
             # _normalize_job — an explicit empty, not a missing key.
-            lambda _j: {"id": job_id, "status": "completed", "owner_user_id": None},
+            lambda _j, **_kw: {
+                "id": job_id,
+                "status": "completed",
+                "owner_user_id": None,
+            },
         )
         try:
             refreshed = server._get_job(job_id)
@@ -227,5 +237,38 @@ class TestAdoptionPreservesIdentity:
             assert refreshed["status"] == "completed"
             assert refreshed["guest"] is True
             assert refreshed["owner_user_id"] == "guest-abc123"
+        finally:
+            _forget(job_id)
+
+
+class TestRefreshDoesNotFailARunningJob:
+    """Re-reading job.json mid-run must not apply the restart guard."""
+
+    def test_polling_a_running_job_keeps_it_running(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        monkeypatch.setattr(server, "REPORTS_DIR", tmp_path)
+        monkeypatch.setattr(server, "_read_job_status_from_db", lambda job_id: None)
+        job_id = f"poll-running-{uuid.uuid4()}"
+        _seed(job_id, "analyzing", server._new_job_progress())
+        server._persist_job(job_id)  # job.json says "analyzing", as mid-run
+        try:
+            job = server._get_job(job_id)
+
+            assert job["status"] == "analyzing"
+            assert not job.get("error")
+        finally:
+            _forget(job_id)
+
+    def test_cold_load_still_marks_an_interrupted_job_failed(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        monkeypatch.setattr(server, "REPORTS_DIR", tmp_path)
+        job_id = f"poll-cold-{uuid.uuid4()}"
+        _seed(job_id, "analyzing", server._new_job_progress())
+        server._persist_job(job_id)
+        _forget(job_id)  # a restart empties the cache
+        try:
+            assert server._get_job(job_id)["status"] == "failed"
         finally:
             _forget(job_id)

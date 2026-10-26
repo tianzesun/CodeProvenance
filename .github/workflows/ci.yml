@@ -16,6 +16,9 @@ env:
   # AppSettings also requires AUTH_JWT_SECRET, and CI has no .env.local to read it
   # from, so without this the settings import (and every test that touches it) dies.
   AUTH_JWT_SECRET: "ci-only-placeholder-never-used-at-runtime"
+  # Without this the production security policy (https FRONTEND_URL, secure
+  # cookies, real email backend) rejects the localhost values above.
+  DEBUG_MODE: "true"
 
 jobs:
   migrations:
@@ -57,6 +60,9 @@ jobs:
       - name: Full chain applies from scratch
         run: python -m alembic upgrade head
 
+      - name: Migrated schema matches the models
+        run: python scripts/check_schema_drift.py
+
       - name: Head revision rolls back and re-applies
         run: |
           python -m alembic downgrade -1
@@ -78,6 +84,22 @@ jobs:
   backend-tests:
     name: Backend Tests (pytest)
     runs-on: ubuntu-latest
+    # Route, sharing and settings tests write real rows; the workflow-level
+    # DATABASE_URL points at this service.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci_user
+          POSTGRES_PASSWORD: ci_pass
+          POSTGRES_DB: ci_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_user"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -92,6 +114,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio pytest-cov
+
+      - name: Create schema
+        run: python -m alembic upgrade head
 
       - name: Run unit test suite
         run: |
@@ -125,11 +150,13 @@ jobs:
   lint-format:
     name: Python Lint + Format (ruff/black)
     runs-on: ubuntu-latest
-    # TODO(phase-0 cleanup): clear the 935 pre-existing ruff findings across
-    # src/backend, then set continue-on-error to false to make this a merge gate.
-    continue-on-error: true
+    # src/backend has ~3,000 pre-existing ruff findings. Rather than wait for a
+    # cleanup, a pull request may not add findings to the files it changes; the
+    # full-tree checks below stay advisory until the backlog is cleared.
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -141,13 +168,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff black
 
-      - name: Run ruff
-        run: ruff check src/backend --output-format=concise
+      - name: No new ruff findings in changed files
+        if: github.event_name == 'pull_request'
+        run: |
+          base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          status=0
+          for f in $(git diff --name-only --diff-filter=ACMR "$base" HEAD -- 'src/backend/*.py'); do
+            now=$(ruff check --output-format=concise "$f" | grep -c "^$f:" || true)
+            before=$(git show "$base:$f" 2>/dev/null | ruff check --output-format=concise --stdin-filename "$f" - | grep -c "^$f:" || true)
+            if [ "$now" -gt "${before:-0}" ]; then
+              echo "::error file=$f::$now ruff findings, was ${before:-0}"
+              ruff check --output-format=concise "$f" || true
+              status=1
+            fi
+          done
+          exit $status
 
-      - name: Run ruff format check
+      - name: Run ruff (advisory)
+        continue-on-error: true
+        run: ruff check src/backend --output-format=concise --statistics
+
+      - name: Run ruff format check (advisory)
+        continue-on-error: true
         run: ruff format --check src/backend
 
-      - name: Run black check
+      - name: Run black check (advisory)
+        continue-on-error: true
         run: black --check src/backend
 
   frontend-lint:

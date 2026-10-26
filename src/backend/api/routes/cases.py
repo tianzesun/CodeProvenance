@@ -13,11 +13,19 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session, selectinload
 
+from src.backend.application.services import academic_access, sharing
 from src.backend.application.services.case_service import (
     CaseService,
 )
 from src.backend.config.database import get_db
-from src.backend.models.database import Assignment, Case, CaseComment, User
+from src.backend.models.database import (
+    Assignment,
+    Case,
+    CaseComment,
+    Job,
+    SimilarityResult,
+    User,
+)
 
 router = APIRouter()
 
@@ -303,14 +311,20 @@ def get_current_tenant(user: dict = Depends(get_current_user)) -> dict:
 # ==================== Tenant-scoping helpers ====================
 
 
-def _load_case_for_tenant(service: CaseService, case_id: uuid.UUID, tenant: dict):
-    """Fetch a case, requiring it to belong to the caller's organization.
+def _load_case_for_tenant(
+    service: CaseService, case_id: uuid.UUID, tenant: dict, user: dict
+):
+    """Fetch a case the caller may see (application/services/sharing).
 
-    A case in another organization is reported as 404, not 403, so ids from
-    other tenants cannot be probed.
+    It must be in the caller's organization and theirs, shared with them, or
+    under a course they teach; any professor in the organization used to
+    reach every case. Reported as 404, not 403, so ids cannot be probed.
     """
     case = service.get_case(case_id)
     if case is None or str(case.organization_id) != str(tenant["id"]):
+        raise HTTPException(status_code=404, detail="Case not found")
+    scope = sharing.access_scope(service.db, user)
+    if not sharing.case_in_scope(service.db, case, user, scope):
         raise HTTPException(status_code=404, detail="Case not found")
     return case
 
@@ -332,6 +346,34 @@ def _require_assignment_in_org(
         raise HTTPException(status_code=404, detail="Assignment not found")
 
 
+def _require_result_in_org(
+    db: Session, result_id: uuid.UUID, user: dict, tenant: dict
+) -> None:
+    """404 unless the similarity result belongs to the caller's workspace.
+
+    The result id was never checked: a case could be linked to another
+    tenant's result (which then showed in the case and its export), and an
+    unknown id was a 500 from the foreign key.
+    """
+    row = (
+        db.query(SimilarityResult, Job)
+        .join(Job, Job.id == SimilarityResult.job_id)
+        .filter(SimilarityResult.id == str(result_id))
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Result not found")
+    job = row[1]
+    same_tenant = bool(
+        job.tenant_id and str(job.tenant_id) == str(user.get("tenant_id") or "")
+    )
+    assignment = db.get(Assignment, job.assignment_id) if job.assignment_id else None
+    course = assignment.course if assignment is not None else None
+    same_org = course is not None and str(course.organization_id) == str(tenant["id"])
+    if not (same_tenant or same_org):
+        raise HTTPException(status_code=404, detail="Result not found")
+
+
 # ==================== Routes ====================
 
 
@@ -339,16 +381,24 @@ def _require_assignment_in_org(
 async def list_cases(
     status: str | None = Query(None, pattern="^(OPEN|UNDER_REVIEW|ESCALATED|CLOSED)$"),
     limit: int = Query(100, ge=1, le=1000),
+    user=Depends(get_current_user),
     tenant=Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    """List cases for the current tenant/organization."""
+    """List the organization's cases the caller may see."""
     service = CaseService(db)
-    cases = service.get_cases_by_organization(
-        organization_id=tenant["id"],
-        status=status,
-        limit=limit,
+    scope = sharing.access_scope(db, user)
+    # Fetch the organization's cases, then keep the caller's; a small limit
+    # applied before filtering could hide every case they can see.
+    candidates = service.get_cases_by_organization(
+        organization_id=tenant["id"], status=status, limit=1000
     )
+    courses = sharing.assignment_course_map(db, candidates)
+    cases = [
+        case
+        for case in candidates
+        if sharing.case_in_scope(db, case, user, scope, courses)
+    ][:limit]
     _preload_case_relations(db, cases)
     return [_serialize_case(c) for c in cases]
 
@@ -363,6 +413,11 @@ async def create_case(
     """Create a new investigation case."""
     if payload.assignment_id is not None:
         _require_assignment_in_org(db, payload.assignment_id, tenant)
+        course_id = academic_access.course_id_for_assignment(
+            db, str(payload.assignment_id)
+        )
+        if not academic_access.can_read_course(db, user, course_id):
+            raise HTTPException(status_code=404, detail="Assignment not found")
     service = CaseService(db)
     case = service.create_case(
         organization_id=tenant["id"],
@@ -383,7 +438,7 @@ async def get_case(
 ):
     """Get a case with all linked results and comments."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     case_data = service.get_case_with_results(case_id)
     if not case_data:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -400,7 +455,7 @@ async def update_case(
 ):
     """Update a case (title, priority, status and/or investigator)."""
     service = CaseService(db)
-    case = _load_case_for_tenant(service, case_id, tenant)
+    case = _load_case_for_tenant(service, case_id, tenant, user)
     if payload.investigator_id:
         _require_user_in_org(db, payload.investigator_id, tenant)
 
@@ -415,10 +470,11 @@ async def update_case(
     if changed:
         db.commit()
 
-    if payload.status and payload.status != case.status:
-        service.update_status(case_id, payload.status, user["id"])
+    # Assign first so an explicit status in the same update has the last word.
     if payload.investigator_id:
-        service.assign_reviewer(case_id, payload.investigator_id)
+        service.assign_reviewer(case_id, payload.investigator_id, user["id"])
+    if payload.status and payload.status != service.get_case(case_id).status:
+        service.update_status(case_id, payload.status, user["id"])
 
     # Re-read so the response reflects every change, and never serialize None.
     refreshed = service.get_case(case_id)
@@ -437,9 +493,9 @@ async def assign_reviewer(
 ):
     """Assign a reviewer to a case."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     _require_user_in_org(db, payload.reviewer_id, tenant)
-    case = service.assign_reviewer(case_id, payload.reviewer_id)
+    case = service.assign_reviewer(case_id, payload.reviewer_id, user["id"])
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
     return _serialize_case(case)
@@ -455,9 +511,74 @@ async def link_result(
 ):
     """Link a similarity result to a case."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
+    _require_result_in_org(db, payload.result_id, user, tenant)
     link = service.link_result(case_id, payload.result_id)
     return _serialize_result_link(link)
+
+
+class CaseSharing(BaseModel):
+    """Who a case is shared with beyond its owners and its course's audience."""
+
+    workspace: bool = False
+    user_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+def _can_manage_case_sharing(db: Session, case: Case, user: dict) -> bool:
+    """The case's creator, or a primary instructor of its course."""
+    if str(case.created_by_id or "") == str(user.get("id") or ""):
+        return True
+    course_id = (
+        academic_access.course_id_for_assignment(db, str(case.assignment_id))
+        if case.assignment_id
+        else None
+    )
+    return bool(course_id) and sharing.can_manage_course_sharing(db, user, course_id)
+
+
+@router.get("/cases/{case_id}/sharing", response_model=dict)
+async def get_case_sharing(
+    case_id: uuid.UUID,
+    user=Depends(get_current_user),
+    tenant=Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    """Who a case is shared with, for anyone who can see it."""
+    case = _load_case_for_tenant(CaseService(db), case_id, tenant, user)
+    return {
+        **sharing.get_sharing(db, "case", str(case_id)),
+        "can_manage": _can_manage_case_sharing(db, case, user),
+    }
+
+
+@router.put("/cases/{case_id}/sharing", response_model=dict)
+async def set_case_sharing(
+    case_id: uuid.UUID,
+    payload: CaseSharing,
+    user=Depends(get_current_user),
+    tenant=Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    """Replace a case's shares (its creator or course instructors)."""
+    case = _load_case_for_tenant(CaseService(db), case_id, tenant, user)
+    if not _can_manage_case_sharing(db, case, user):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the case's creator or the course's primary instructors "
+            "can change sharing",
+        )
+    try:
+        shares = sharing.set_sharing(
+            db,
+            "case",
+            str(case_id),
+            sharer=user,
+            workspace=payload.workspace,
+            user_ids=[str(uid) for uid in payload.user_ids],
+        )
+    except sharing.SharingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {**shares, "can_manage": True}
 
 
 @router.post("/cases/{case_id}/comments", response_model=dict, status_code=201)
@@ -470,7 +591,7 @@ async def add_comment(
 ):
     """Add a comment to a case."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     comment = service.add_comment(case_id, user["id"], payload.body)
     return _serialize_comment(comment)
 
@@ -484,7 +605,7 @@ async def get_timeline(
 ):
     """Get timeline events for a case."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     events = service.timeline.get_case_timeline(case_id)
     return [_serialize_orm_event(e) for e in events]
 
@@ -498,7 +619,7 @@ async def export_case(
 ):
     """Export case data as JSON for audit purposes."""
     service = CaseService(db)
-    _load_case_for_tenant(service, case_id, tenant)
+    _load_case_for_tenant(service, case_id, tenant, user)
     case_data = service.get_case_with_results(case_id)
     if not case_data:
         raise HTTPException(status_code=404, detail="Case not found")

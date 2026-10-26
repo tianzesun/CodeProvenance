@@ -1,0 +1,3 @@
+# Test-only placeholder (decodes to "test-only-key-do-not-use-in-prod"); since
+# replaced by a random per-run key in tests/conftest.py.
+0d3cb67f21b0729574976533cb2762c296368d35:tests/conftest.py:generic-api-key:20

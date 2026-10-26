@@ -45,6 +45,8 @@ def run_upload_analysis(
     engine_keys_raw: str = "",
     tool_ids_raw: str = "",
     starter_sources: list[str] | None = None,
+    is_guest: bool = False,
+    job_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one uploaded job's analysis pipeline inside a worker process.
 
@@ -62,6 +64,11 @@ def run_upload_analysis(
         engine_keys_raw: JSON-encoded list of engine keys to enable.
         tool_ids_raw: Comma-separated list of external tool IDs.
         starter_sources: Optional starter/template source strings.
+        job_overrides: The upload's own choices (source scanning, previous
+            terms). This process has no copy of the uploading process's job
+            dict, so they would otherwise be lost.
+        is_guest: The uploader is a guest demo session, so the job stays
+            ephemeral (no tenant, no database rows).
 
     Returns:
         Mapping with the job id and final status (``completed``).
@@ -72,8 +79,10 @@ def run_upload_analysis(
     from src.backend.api import server
 
     current_user: dict[str, Any] | None = None
-    if owner_user_id or tenant_id:
+    if owner_user_id or tenant_id or is_guest:
         current_user = {"id": owner_user_id, "tenant_id": tenant_id}
+        if is_guest:
+            current_user["is_guest"] = True
 
     # Cooperative cancellation: a job killed while queued (or redelivered
     # after a lost worker) must die here, before any heavy work. The flag
@@ -84,6 +93,9 @@ def run_upload_analysis(
             return {"job_id": job_id, "status": "cancelled", "cancelled": True}
     except Exception:
         logger.debug("Cancel-flag check failed for job %s", job_id, exc_info=True)
+
+    if job_overrides:
+        server._jobs.setdefault(job_id, {}).update(job_overrides)
 
     try:
         asyncio.run(

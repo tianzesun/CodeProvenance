@@ -116,6 +116,7 @@ export default function GlobalError({
 
               {/* A plain link on purpose. This page replaces the whole app shell, so a client-side <Link>
                   navigation can keep the broken state; a normal navigation starts clean. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
               <a
                 href="/"
                 className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-semibold"

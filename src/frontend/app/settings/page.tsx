@@ -38,7 +38,31 @@ type Settings = Record<string, unknown> & {
   source_scan_sites?: string[];
   source_scan_enabled?: boolean;
   webhook_url?: string;
+  notify_email_on_finish?: boolean;
+  llm_providers?: LlmProviderSpec[];
+  llm_provider?: string;
+  llm_fallback_provider?: string;
+  llm_api_keys?: Record<string, string | null>;
+  llm_api_keys_configured?: Record<string, boolean>;
+  llm_model_overrides?: Record<string, string>;
+  llm_base_urls?: Record<string, string>;
 };
+
+interface LlmProviderSpec {
+  key: string;
+  label: string;
+  requires_key?: boolean;
+  key_url?: string;
+  docs_url?: string;
+  base_url?: string;
+  note?: string;
+}
+
+interface ModelOption {
+  id: string;
+  label: string;
+  tier?: string;
+}
 
 interface WeightGovernanceState {
   needs_validation: boolean;
@@ -68,7 +92,14 @@ function describeError(error: unknown, fallback: string): string {
   );
 
   let message = fallback;
-  if (status === 401) {
+  // The server validates every setting and names each invalid field.
+  const fields = (error as { response?: { data?: { detail?: { fields?: Record<string, string> } } } })?.response?.data?.detail?.fields;
+  if (status === 400 && fields && typeof fields === 'object') {
+    const problems = Object.entries(fields).map(
+      ([key, problem]) => `${NUMBER_RULES[key]?.label ?? key.replace(/_/g, ' ')} ${problem}`,
+    );
+    if (problems.length) message = `Not saved. ${problems.join('; ')}.`;
+  } else if (status === 401) {
     message = 'Your session has expired. Please sign in again.';
   } else if (status === 403) {
     message = 'You don’t have permission to change these settings.';
@@ -85,8 +116,6 @@ function describeError(error: unknown, fallback: string): string {
 const SECRET_KEYS = [
   'openai_api_key',
   'anthropic_api_key',
-  'gptzero_api_key',
-  'grammarly_api_key',
   'moss_user_id',
   'email_password',
   'sendgrid_api_key',
@@ -111,15 +140,13 @@ const PLAIN_KEYS = [
   'batch_size',
   'max_file_size_mb',
   'max_files_per_job',
-  'audit_log_level',
-  'audit_retention_days',
-  'debug_mode',
   'email_backend',
   'email_host',
   'email_port',
   'email_user',
   'email_from',
   'email_use_tls',
+  'notify_email_on_finish',
 ];
 
 // Guard rails against typos and "0" (an empty number box used to be saved as 0). The server
@@ -131,7 +158,6 @@ const NUMBER_RULES: Record<string, { min: number; max: number; label: string }> 
   embedding_batch_size: { min: 1, max: 4096, label: 'Embedding batch size' },
   embedding_server_port: { min: 1, max: 65535, label: 'Embedding server port' },
   email_port: { min: 1, max: 65535, label: 'SMTP port' },
-  audit_retention_days: { min: 1, max: 36500, label: 'Audit retention' },
 };
 
 const FIELD_TABS: Record<string, string> = {
@@ -145,7 +171,6 @@ const FIELD_TABS: Record<string, string> = {
   email_from: 'system',
   email_host: 'system',
   email_port: 'system',
-  audit_retention_days: 'system',
   embedding_server_url: 'system',
   embedding_server_port: 'system',
   embedding_batch_size: 'system',
@@ -165,7 +190,6 @@ const FIELD_ACCORDIONS: Record<string, string> = {
   email_from: 'emailDelivery',
   email_host: 'emailDelivery',
   email_port: 'emailDelivery',
-  audit_retention_days: 'auditLogging',
   embedding_server_url: 'embeddingAdvanced',
   embedding_server_port: 'embeddingAdvanced',
   embedding_batch_size: 'embeddingAdvanced',
@@ -243,8 +267,8 @@ function validateSettings(
     }
   }
 
-  if (webhookUrl.trim() && !isHttpUrl(webhookUrl.trim())) {
-    errors.webhook_url = 'Enter a full http(s) URL, for example https://example.com/webhook.';
+  if (webhookUrl.trim() && !/^https:\/\//i.test(webhookUrl.trim())) {
+    errors.webhook_url = 'Enter a full https URL, for example https://example.com/webhook.';
   }
   const embeddingUrl = String(settings.embedding_server_url || '').trim();
   if (embeddingUrl && !isHttpUrl(embeddingUrl)) {
@@ -279,7 +303,7 @@ function validateSettings(
 
 /**
  * What a save sends. Credentials are included only when the admin typed a new value (blank means
- * "keep the stored one"); everything else is sent as shown. The page used to send every secret
+ * "keep the stored one") or removed the saved one (sent as null); everything else is sent as shown. The page used to send every secret
  * field it held on every save.
  */
 function buildPayload(
@@ -302,15 +326,18 @@ function buildPayload(
 
   for (const key of SECRET_KEYS) {
     const value = (s as Record<string, unknown>)[key];
-    if (edited[key] && typeof value === 'string' && value.trim()) {
+    if (edited[key] && value === null) {
+      payload[key] = null;
+    } else if (edited[key] && typeof value === 'string' && value.trim()) {
       payload[key] = value.trim();
     }
   }
 
   if (edited.llm_api_keys) {
-    const keys: Record<string, string> = {};
+    const keys: Record<string, string | null> = {};
     for (const [provider, value] of Object.entries((s.llm_api_keys || {}) as Record<string, unknown>)) {
-      if (typeof value === 'string' && value.trim()) keys[provider] = value.trim();
+      if (value === null) keys[provider] = null;
+      else if (typeof value === 'string' && value.trim()) keys[provider] = value.trim();
     }
     if (Object.keys(keys).length > 0) payload.llm_api_keys = keys;
   }
@@ -322,7 +349,7 @@ const DEFAULT_PROFILE = {
   assignment_type: 'auto_detect',
   sensitivity: 'balanced',
   starter_code_handling: 'student_written_only',
-  previous_term_matching: 'same_course_only',
+  previous_term_matching: 'off',
   ai_rewrite_detection: 'balanced',
   result_volume: 'top_25',
 };
@@ -368,7 +395,7 @@ const MAIN_TABS = [
     icon: Server,
     accent: '#d97706',
     description:
-      'Manage integration credentials, webhooks, email delivery, storage limits, and audit logging for this workspace.',
+      'Manage notifications, email delivery, service health and embedding resources for this workspace.',
   },
 ];
 
@@ -376,6 +403,38 @@ const SENSITIVITY_PRESETS = [
   { id: 'strict', label: 'Strict', hint: 'Flags more pairs, good for early triage' },
   { id: 'balanced', label: 'Balanced', hint: 'Recommended for most courses' },
   { id: 'conservative', label: 'Conservative', hint: 'Fewer flags, for formal cases' },
+] as const;
+
+/** One-click starting points for the Review & Workflow choices; each stays editable afterwards. */
+const QUICK_SETUPS = [
+  {
+    id: 'intro',
+    label: 'Intro course',
+    hint: 'Lots of starter code, assignments reused each term',
+    sensitivity: 'balanced',
+    profile: { starter_code_handling: 'student_written_only', previous_term_matching: 'same_course_only', ai_rewrite_detection: 'balanced', result_volume: 'top_25' },
+  },
+  {
+    id: 'upper',
+    label: 'Upper-year course',
+    hint: 'Open-ended work, fewer but stronger flags',
+    sensitivity: 'conservative',
+    profile: { starter_code_handling: 'ignore_starter_code', previous_term_matching: 'off', ai_rewrite_detection: 'balanced', result_volume: 'top_10' },
+  },
+  {
+    id: 'triage',
+    label: 'Early triage',
+    hint: 'Cast a wide net, then review',
+    sensitivity: 'strict',
+    profile: { starter_code_handling: 'student_written_only', previous_term_matching: 'all_historical_courses', ai_rewrite_detection: 'balanced', result_volume: 'top_50' },
+  },
+  {
+    id: 'similarity',
+    label: 'Similarity only',
+    hint: 'No AI-authorship scores, no past terms',
+    sensitivity: 'balanced',
+    profile: { starter_code_handling: 'student_written_only', previous_term_matching: 'off', ai_rewrite_detection: 'off', result_volume: 'top_25' },
+  },
 ] as const;
 
 // Calibration findings from the last read-only benchmark run.
@@ -592,14 +651,12 @@ export default function SettingsPage() {
     publicSources: true,
     legacyTools: false,
     webhooks: true,
-    auditLogging: true,
     embeddingAdvanced: false,
     configValidation: false,
     starterCodeHandling: false,
     previousTermMatching: false,
     aiRewriteDetection: false,
     reviewQueueSize: false,
-    aiDetectors: false,
     emailDelivery: true,
   });
 
@@ -644,7 +701,7 @@ export default function SettingsPage() {
   }, []);
 
   // Merged with the defaults: a saved profile missing a key left that option with nothing selected.
-  const profile = { ...DEFAULT_PROFILE, ...(settings?.professor_profile || {}) } as Record<string, any>;
+  const profile = { ...DEFAULT_PROFILE, ...(settings?.professor_profile || {}) } as Record<string, string>;
   const catalog = settings?.professor_profile_catalog || {};
   const applied = settings?.applied_professor_profile || {};
   const activeTabInfo = MAIN_TABS.find((tab) => tab.id === activeTab);
@@ -715,6 +772,21 @@ export default function SettingsPage() {
 
   // Sends a diagnostic email through the backend's persisted settings. The
   // backend reads what was last saved, so unsaved edits are not used.
+  const [testingWebhook, setTestingWebhook] = useState(false);
+  const [testWebhookResult, setTestWebhookResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const sendTestWebhook = async () => {
+    setTestingWebhook(true);
+    setTestWebhookResult(null);
+    try {
+      const res = await apiClient.post('/api/settings/webhook/test', {});
+      setTestWebhookResult({ ok: Boolean(res.data?.ok), message: res.data?.message || 'Test completed.' });
+    } catch (err: unknown) {
+      setTestWebhookResult({ ok: false, message: describeError(err, 'The test event could not be sent.') });
+    } finally {
+      setTestingWebhook(false);
+    }
+  };
+
   const sendTestEmail = async () => {
     setTestingEmail(true);
     setTestEmailResult(null);
@@ -738,6 +810,17 @@ export default function SettingsPage() {
     const preset = SENSITIVITY_THRESHOLDS[value];
     if (preset !== undefined) updateSetting('default_threshold', preset);
   };
+
+  const applyQuickSetup = (setup: (typeof QUICK_SETUPS)[number]) => {
+    for (const [key, value] of Object.entries(setup.profile)) updateProfile(key, value);
+    updateSensitivity(setup.sensitivity);
+  };
+  const activeQuickSetup = QUICK_SETUPS.find(
+    (setup) =>
+      setup.sensitivity === profile.sensitivity &&
+      Math.abs(threshold - SENSITIVITY_THRESHOLDS[setup.sensitivity]) <= 0.005 &&
+      Object.entries(setup.profile).every(([key, value]) => profile[key] === value),
+  );
 
   // Live provider connection test so the Connected badge reflects a verified
   // API call rather than merely the presence of a stored key.
@@ -772,18 +855,18 @@ export default function SettingsPage() {
   // Vendor catalog + live model listings. The catalog comes with /api/settings
   // (settings.llm_providers); model lists are fetched per provider so the UI
   // always offers the vendor's newest models instead of a hardcoded list.
-  const providers: any[] = Array.isArray((settings as any)?.llm_providers) ? (settings as any).llm_providers : [];
+  const providers: LlmProviderSpec[] = Array.isArray(settings?.llm_providers) ? settings.llm_providers : [];
   const [selectedProvider, setSelectedProvider] = useState<string>('');
-  const [modelOptions, setModelOptions] = useState<Record<string, any[]>>({});
+  const [modelOptions, setModelOptions] = useState<Record<string, ModelOption[]>>({});
   const [modelSource, setModelSource] = useState<Record<string, string>>({});
   const [modelMessage, setModelMessage] = useState<Record<string, string>>({});
   const [modelsLoading, setModelsLoading] = useState<Record<string, boolean>>({});
 
-  const activeProvider = selectedProvider || String((settings as any)?.llm_provider || providers[0]?.key || 'openai');
+  const activeProvider = selectedProvider || String(settings?.llm_provider || providers[0]?.key || 'openai');
   const activeSpec = providers.find((p) => p.key === activeProvider) || providers[0] || null;
-  const configuredMap: Record<string, boolean> = (settings as any)?.llm_api_keys_configured || {};
-  const overridesMap: Record<string, string> = (settings as any)?.llm_model_overrides || {};
-  const baseUrlsMap: Record<string, string> = (settings as any)?.llm_base_urls || {};
+  const configuredMap: Record<string, boolean> = settings?.llm_api_keys_configured || {};
+  const overridesMap: Record<string, string> = settings?.llm_model_overrides || {};
+  const baseUrlsMap: Record<string, string> = settings?.llm_base_urls || {};
 
   // Status-pill truth: keyed vendors are configured once a key is stored;
   // keyless local runtimes (Ollama) need a saved model instead, and any
@@ -823,8 +906,8 @@ export default function SettingsPage() {
     }
   };
 
-  const setProviderKey = (provider: string, value: string) => {
-    const keys = { ...((settings as any)?.llm_api_keys || {}), [provider]: value };
+  const setProviderKey = (provider: string, value: string | null) => {
+    const keys = { ...(settings?.llm_api_keys || {}), [provider]: value };
     updateSetting('llm_api_keys', keys);
     // Keep the legacy single-vendor fields in sync so old consumers still work.
     if (provider === 'openai') updateSetting('openai_api_key', value);
@@ -845,7 +928,7 @@ export default function SettingsPage() {
   const testProvider = async (provider: string) => {
     setProviderTest((current) => ({ ...current, [provider]: { testing: true, message: 'Testing connection\u2026', ok: false } }));
     try {
-      const keyMap: Record<string, string> = (settings as any)?.llm_api_keys || {};
+      const keyMap = settings?.llm_api_keys || {};
       const legacy = provider === 'openai' ? settings?.openai_api_key : settings?.anthropic_api_key;
       const key = String(keyMap[provider] || legacy || '').trim();
       const res = await apiClient.post('/api/settings/ai-provider/test', {
@@ -1404,7 +1487,7 @@ export default function SettingsPage() {
                 </div>
                 {/* Provider picker: choose which vendor to configure */}
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                  {providers.map((spec: any) => {
+                  {providers.map((spec) => {
                     const connected = providerStatus(spec).configured;
                     const isActive = activeProvider === spec.key;
                     return (
@@ -1450,11 +1533,10 @@ export default function SettingsPage() {
                     </div>
                     <div className="mt-3 space-y-3">
                       {activeSpec.requires_key ? (
-                        <TextInput
+                        <SecretInput
                           label="API Key"
-                          type="password"
-                          autoComplete="new-password"
-                          value={(settings as any)?.llm_api_keys?.[activeProvider] ?? ''}
+                          value={settings?.llm_api_keys?.[activeProvider]}
+                          configured={Boolean(configuredMap[activeProvider])}
                           placeholder={configuredMap[activeProvider] ? 'Leave blank to keep current key' : `Enter ${activeSpec.label} API key`}
                           onChange={(value) => setProviderKey(activeProvider, value)}
                         />
@@ -1481,10 +1563,10 @@ export default function SettingsPage() {
                               className="min-w-0 flex-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                             >
                               <option value="">Auto — always the newest recommended model</option>
-                              {overridesMap[activeProvider] && !(modelOptions[activeProvider] || []).some((model: any) => model.id === overridesMap[activeProvider]) && (
+                              {overridesMap[activeProvider] && !(modelOptions[activeProvider] || []).some((model) => model.id === overridesMap[activeProvider]) && (
                                 <option value={overridesMap[activeProvider]}>{overridesMap[activeProvider]} (saved)</option>
                               )}
-                              {(modelOptions[activeProvider] || []).map((model: any) => (
+                              {(modelOptions[activeProvider] || []).map((model) => (
                                 <option key={model.id} value={model.id}>
                                   {model.label}{model.tier && model.tier !== 'standard' ? ` — ${model.tier}` : ''}
                                 </option>
@@ -1535,17 +1617,17 @@ export default function SettingsPage() {
                     )}
                   </div>
                 )}
-                {/* Default + fallback provider routing */}
+                {/* Default provider, and the one AI summaries fall back to when it fails. */}
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Default provider</label>
                     <select
-                      value={String((settings as any)?.llm_provider || 'openai')}
+                      value={String(settings?.llm_provider || 'openai')}
                       onChange={(event) => updateSetting('llm_provider', event.target.value)}
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                       {providers.length === 0 && <option value="openai">OpenAI</option>}
-                      {providers.map((spec: any) => (
+                      {providers.map((spec) => (
                         <option key={spec.key} value={spec.key}>{spec.label}</option>
                       ))}
                     </select>
@@ -1553,24 +1635,22 @@ export default function SettingsPage() {
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Fallback provider</label>
                     <select
-                      value={String((settings as any)?.llm_fallback_provider || '')}
+                      value={String(settings?.llm_fallback_provider || '')}
                       onChange={(event) => updateSetting('llm_fallback_provider', event.target.value)}
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                       <option value="">None</option>
-                      {providers.map((spec: any) => (
-                        <option key={spec.key} value={spec.key}>{spec.label}</option>
-                      ))}
+                      {providers
+                        .filter((spec) => spec.key !== String(settings?.llm_provider || 'openai'))
+                        .map((spec) => (
+                          <option key={spec.key} value={spec.key}>{spec.label}</option>
+                        ))}
                     </select>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Used for AI summaries when the default provider fails or has no key.</p>
                   </div>
                 </div>
-                {(settings as any)?.llm_fallback_provider && (settings as any)?.llm_fallback_provider === ((settings as any)?.llm_provider || 'openai') && (
-                  <p role="status" className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                    The fallback provider is the same as the default, so it adds no redundancy.
-                  </p>
-                )}
                 <div className="mt-3 rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-xs leading-5 text-blue-700 dark:text-blue-300">
-                  <strong className="font-semibold">Note:</strong> API keys are stored encrypted and never exposed to the frontend. Leave the field blank to keep an already-configured key.
+                  <strong className="font-semibold">Note:</strong> API keys are stored encrypted on the server and never shown again. Leave the field blank to keep an already-configured key.
                 </div>
               </section>
 
@@ -1638,77 +1718,65 @@ export default function SettingsPage() {
                       {settings.moss_user_id_configured ? 'MOSS configured' : 'MOSS not configured'}
                     </span>
                   </div>
-                  <TextInput label="MOSS User ID" type="password" autoComplete="new-password" value={settings.moss_user_id} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
+                  <SecretInput label="MOSS User ID" value={settings.moss_user_id} configured={Boolean(settings.moss_user_id_configured)} placeholder={settings.moss_user_id_configured ? 'Leave blank to keep current MOSS user ID' : 'Enter MOSS user ID'} onChange={(value) => updateSetting('moss_user_id', value)} />
                 </div>
               </Accordion>
 
-              {/* AI Detectors (GPTZero / Grammarly) */}
-              <Accordion
-                title="AI Detectors"
-                description="Connect third-party AI-writing detectors used to score essay and report submissions."
-                isOpen={accordions.aiDetectors}
-                onToggle={() => setAccordions(prev => ({ ...prev, aiDetectors: !prev.aiDetectors }))}
-              >
-                <div className="space-y-4">
-                  {([
-                    ['gptzero_api_key', 'GPTZero', 'GPTZero estimates AI-generation probability and returns per-sentence scores.'],
-                    ['grammarly_api_key', 'Grammarly', 'Grammarly adds tone, grammar, and writing-assistance signals for textual submissions.'],
-                  ] as [string, string, string][]).map(([key, name, help]) => (
-                    <div key={key} className="rounded-xl border border-slate-200 dark:border-slate-800 p-4">
-                      <div className="flex items-center gap-3">
-                        <div className={`h-2.5 w-2.5 rounded-full ${settings[`${key}_configured`] ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`} />
-                        <span className={`text-xs font-semibold ${settings[`${key}_configured`] ? 'text-emerald-700 dark:text-emerald-300' : 'text-slate-500 dark:text-slate-400'}`}>
-                          {settings[`${key}_configured`] ? `${name} configured` : `${name} not configured`}
-                        </span>
-                      </div>
-                      <div className="mt-3">
-                        <TextInput
-                          label={`${name} API Key`}
-                          type="password"
-                          autoComplete="new-password"
-                          value={(settings[key] as string) || ''}
-                          placeholder={settings[`${key}_configured`] ? `Leave blank to keep the current ${name} key` : `Enter your ${name} API key`}
-                          onChange={(value) => updateSetting(key, value)}
-                        />
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">{help}</p>
-                    </div>
-                  ))}
-                  <div className="rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-xs leading-5 text-blue-700 dark:text-blue-300">
-                    <strong className="font-semibold">Note:</strong> Keys are stored server-side and never returned to the browser. Leave a field blank to keep an already-configured key.
-                  </div>
-                </div>
-              </Accordion>
             </div>
           )}
 
           {/* REVIEW & WORKFLOW */}
           {activeTab === 'workflow' && (
             <div className="space-y-6">
-              {/* Sensitivity & Detection Profile */}
               <SettingsGroup
-                title="Sensitivity & Threshold"
-                description="How aggressively should the system flag submissions? Conservative has fewer false positives; Strict catches more cases."
+                title="Quick setup"
+                description="Start from the setup closest to your course, then adjust anything below. Nothing is saved until you click Save changes."
                 icon={Target}
               >
-                <SegmentedOptions
-                  label="Sensitivity"
-                  options={catalog.sensitivities || catalog.review_modes || []}
-                  value={profile.sensitivity}
-                  onChange={updateSensitivity}
-                />
-                <div className="mt-4 rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-sm text-blue-700 dark:text-blue-300">
-                  <span className="font-semibold">Preset cutoff: </span>
-                  {profile.sensitivity === 'conservative' && '\u226584% similarity - best for formal investigations'}
-                  {profile.sensitivity === 'balanced' && '\u226575% similarity - recommended default'}
-                  {profile.sensitivity === 'strict' && '\u226564% similarity - shows more cases for early triage'}
-                  <span className="block mt-1">This sets the default cutoff for new jobs. Fine-tune the exact value with the threshold slider.</span>
-                  {SENSITIVITY_THRESHOLDS[profile.sensitivity] !== undefined
-                    && Math.abs(Number(settings.default_threshold ?? FALLBACK_THRESHOLD) - SENSITIVITY_THRESHOLDS[profile.sensitivity]) > 0.005 && (
-                    <span className="block mt-1 font-semibold">
-                      The current cutoff is {formatPct(settings.default_threshold)} (a custom value, not the preset).
-                    </span>
-                  )}
+                <div role="group" aria-label="Quick setup" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  {QUICK_SETUPS.map((setup) => {
+                    const selected = activeQuickSetup?.id === setup.id;
+                    return (
+                      <button
+                        key={setup.id}
+                        type="button"
+                        onClick={() => applyQuickSetup(setup)}
+                        aria-pressed={selected}
+                        className={`rounded-xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${selected
+                          ? 'border-blue-600 bg-blue-50 dark:border-blue-500 dark:bg-blue-500/10'
+                          : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-900'
+                          }`}
+                      >
+                        <span className="block text-sm font-semibold text-slate-900 dark:text-white">{setup.label}</span>
+                        <span className="mt-0.5 block text-xs leading-5 text-slate-500 dark:text-slate-400">{setup.hint}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  {activeQuickSetup ? `Current choices match ${activeQuickSetup.label}.` : 'Current choices are a custom mix.'}
+                </p>
+              </SettingsGroup>
+
+              {/* The threshold and its presets live on the Detection tab only;
+                  two editable copies used to disagree. */}
+              <SettingsGroup
+                title="Sensitivity & Threshold"
+                description="Pairs at or above the flag threshold are marked for review."
+                icon={Target}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-blue-50 dark:bg-blue-500/10 p-3 text-sm text-blue-700 dark:text-blue-300">
+                  <span>
+                    <span className="font-semibold">Flag threshold: {formatPct(settings.default_threshold ?? FALLBACK_THRESHOLD)}</span>
+                    {' '}({activePreset ? `${activePreset.label} preset` : 'custom value'}). Each upload can still set its own.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('detection')}
+                    className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 dark:border-blue-500/30 dark:bg-slate-950 dark:text-blue-300"
+                  >
+                    Change on the Detection tab
+                  </button>
                 </div>
               </SettingsGroup>
 
@@ -1726,9 +1794,7 @@ export default function SettingsPage() {
                   onChange={(value) => updateProfile('starter_code_handling', value)}
                 />
                 <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                  {profile.starter_code_handling === 'ignore_starter_code' && 'Starter code is completely excluded from all comparisons. Best for large shared codebases.'}
-                  {profile.starter_code_handling === 'student_written_only' && 'Only the student-written portions are compared. Shared starter code segments are discounted. Recommended default.'}
-                  {profile.starter_code_handling === 'include_starter_code' && 'Full submission including starter code is compared. May increase false positives from template code.'}
+                  {(catalog.starter_code_handling || []).find((o) => o.id === profile.starter_code_handling)?.description}
                 </div>
               </Accordion>
 
@@ -1740,42 +1806,39 @@ export default function SettingsPage() {
                 onToggle={() => setAccordions(prev => ({ ...prev, previousTermMatching: !prev.previousTermMatching }))}
               >
                 <SegmentedOptions
-                  label="Previous term matching"
+                  label="Compare with earlier terms"
                   options={catalog.previous_term_matching || []}
-                  value={profile.previous_term_matching}
+                  value={profile.previous_term_matching || 'off'}
                   onChange={(value) => updateProfile('previous_term_matching', value)}
                 />
                 <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                  {profile.previous_term_matching === 'off' && 'No cross-term comparison will be performed. Past submissions are ignored.'}
-                  {profile.previous_term_matching === 'same_course_only' && 'Compares against submissions from the same course in previous terms only. Recommended default.'}
-                  {profile.previous_term_matching === 'all_historical_courses' && 'Compares against all historical submissions across all courses. Most comprehensive but may increase review volume.'}
+                  {(catalog.previous_term_matching || []).find((o) => o.id === (profile.previous_term_matching || 'off'))?.description}
+                  {' '}Only the closest few earlier submissions for each student are fully compared, so checks stay fast. Matches appear in the results labelled with their course and term.
                 </div>
               </Accordion>
 
               {/* AI Rewrite Detection */}
               <Accordion
-                title="AI Rewrite Detection"
-                description="Detect AI-assisted code rewrites, paraphrasing, and structural reorganization."
+                title="AI Authorship Checks"
+                description="Score each Plagiarism Checker submission for AI-generated code signals, alongside similarity."
                 isOpen={accordions.aiRewriteDetection}
                 onToggle={() => setAccordions(prev => ({ ...prev, aiRewriteDetection: !prev.aiRewriteDetection }))}
               >
                 <SegmentedOptions
                   label="AI rewrite detection"
                   options={catalog.ai_rewrite_detection || []}
-                  value={profile.ai_rewrite_detection}
+                  value={profile.ai_rewrite_detection === 'off' ? 'off' : 'balanced'}
                   onChange={(value) => updateProfile('ai_rewrite_detection', value)}
                 />
                 <div className="mt-4 rounded-lg bg-slate-50 dark:bg-slate-900 p-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                  {profile.ai_rewrite_detection === 'off' && 'AI-assisted rewrite detection is disabled. Only direct similarity is checked.'}
-                  {profile.ai_rewrite_detection === 'balanced' && 'Detects obvious AI rewrites while keeping false positives low. Recommended default.'}
-                  {profile.ai_rewrite_detection === 'aggressive' && 'Maximum detection sensitivity for AI rewrites. Uses AST/CFG analysis to catch paraphrased logic. May increase false positives.'}
+                  {(catalog.ai_rewrite_detection || []).find((o) => o.id === (profile.ai_rewrite_detection === 'off' ? 'off' : 'balanced'))?.description}
                 </div>
               </Accordion>
 
               {/* Review Queue Size */}
               <Accordion
-                title="Review Queue Size"
-                description="How many results should appear in your review list. Top 25 works well for most assignments."
+                title="Pairs Shown on the Results Page"
+                description="How many of the highest-scoring pairs the results page lists first. Reviewers can always show the rest."
                 isOpen={accordions.reviewQueueSize}
                 onToggle={() => setAccordions(prev => ({ ...prev, reviewQueueSize: !prev.reviewQueueSize }))}
               >
@@ -1806,7 +1869,7 @@ export default function SettingsPage() {
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div className="rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-2.5">
                           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Flag threshold</span>
-                          <div className="font-semibold text-slate-900 dark:text-white">{formatPct(applied.threshold)} similar</div>
+                          <div className="font-semibold text-slate-900 dark:text-white">{formatPct(settings.default_threshold ?? applied.threshold)} similar</div>
                         </div>
                         <div className="rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-2.5">
                           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Reviews shown</span>
@@ -1824,14 +1887,20 @@ export default function SettingsPage() {
                 </div>
 
                 <aside className="space-y-6">
+                  {/* What these choices do on every check. This box used to list
+                      features the pipeline did not have. */}
                   <section className="rounded-xl border border-blue-200 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/10 p-5">
-                    <div className="text-sm font-semibold text-blue-950 dark:text-blue-200">System handles automatically</div>
-                    <div className="mt-3 space-y-2 text-sm leading-6 text-blue-800 dark:text-blue-300">
-                      <div>{'\u2022'} Starter code is excluded from comparisons</div>
-                      <div>{'\u2022'} Previous-term submissions are matched when available</div>
-                      <div>{'\u2022'} Runtime behaviour and identical wrong answers are compared</div>
-                      <div>{'\u2022'} Thresholds are automatically adjusted</div>
-                    </div>
+                    <div className="text-sm font-semibold text-blue-950 dark:text-blue-200">On every check</div>
+                    <ul className="mt-3 space-y-2 text-sm leading-6 text-blue-800 dark:text-blue-300">
+                      <li>{'\u2022'} {profile.starter_code_handling === 'include_starter_code' ? 'All code is compared, including starter code' : profile.starter_code_handling === 'ignore_starter_code' ? 'Uploaded starter code is removed before comparing' : 'Uploaded starter code and code most of the class shares are removed'}</li>
+                      <li>{'\u2022'} {profile.ai_rewrite_detection === 'off' ? 'AI-authorship checks are off' : 'Each submission is also scored for AI-authorship signals'}</li>
+                      {profile.previous_term_matching && profile.previous_term_matching !== 'off' && (
+                        <li>{'\u2022'} {profile.previous_term_matching === 'same_course_only' ? 'Submissions are also checked against earlier offerings of the course' : 'Submissions are also checked against your earlier courses'}</li>
+                      )}
+                      <li>{'\u2022'} Pairs at or above {formatPct(settings.default_threshold ?? applied.threshold)} similarity are flagged (adjustable per upload)</li>
+                      <li>{'\u2022'} Files too short to judge (a few lines) are never ranked above review</li>
+                      <li>{'\u2022'} Public source scanning is {settings.source_scan_enabled ? 'on' : 'off'}</li>
+                    </ul>
                   </section>
 
                   <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5 shadow-sm">
@@ -1842,16 +1911,16 @@ export default function SettingsPage() {
                         <span className="font-semibold text-slate-900 dark:text-white">{profile.sensitivity?.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-600 dark:text-slate-300">AI Rewrite Detection</span>
-                        <span className="font-semibold text-slate-900 dark:text-white">{profile.ai_rewrite_detection?.replace(/\b\w/g, (l: string) => l.toUpperCase()) || 'Balanced'}</span>
+                        <span className="text-slate-600 dark:text-slate-300">AI Authorship Checks</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">{profile.ai_rewrite_detection === 'off' ? 'Off' : 'On'}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600 dark:text-slate-300">Starter Code</span>
-                        <span className="font-semibold text-slate-900 dark:text-white text-right max-w-[180px]">{profile.starter_code_handling?.replace(/_/g, ' ') || 'Student-written only'}</span>
+                        <span className="font-semibold text-slate-900 dark:text-white text-right max-w-[180px]">{(catalog.starter_code_handling || []).find((o) => o.id === profile.starter_code_handling)?.label || profile.starter_code_handling?.replace(/_/g, ' ') || 'Student-written only'}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600 dark:text-slate-300">Previous Terms</span>
-                        <span className="font-semibold text-slate-900 dark:text-white text-right max-w-[180px]">{profile.previous_term_matching?.replace(/_/g, ' ') || 'Same course only'}</span>
+                        <span className="font-semibold text-slate-900 dark:text-white text-right max-w-[180px]">{(catalog.previous_term_matching || []).find((o) => o.id === (profile.previous_term_matching || 'off'))?.label || 'Off'}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-600 dark:text-slate-300">Results Per Job</span>
@@ -2085,14 +2154,59 @@ export default function SettingsPage() {
                 )}
               </section>
 
-              {/* Webhooks */}
+              {/* Notifications */}
               <Accordion
-                title="Webhooks"
-                description="Configure webhooks for real-time notifications when jobs complete or flag high-risk submissions."
+                title="Notifications"
+                description="Hear when an analysis finishes, by email or at a webhook URL."
                 isOpen={accordions.webhooks}
                 onToggle={() => setAccordions(prev => ({ ...prev, webhooks: !prev.webhooks }))}
               >
-                <TextInput label="Webhook URL" value={webhookUrl} onChange={setWebhookUrl} placeholder="https://example.com/webhook" autoComplete="off" error={fieldErrors.webhook_url} hint={webhookUrl.trim().startsWith('http://') ? 'This URL is not encrypted (http). Use https for anything outside a trusted network.' : undefined} />
+                <div className="space-y-4">
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(settings.notify_email_on_finish)}
+                      onChange={(event) => updateSetting('notify_email_on_finish', event.target.checked)}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 dark:border-slate-700 text-blue-600 dark:text-blue-400"
+                    />
+                    <span className="text-sm leading-6 text-slate-600 dark:text-slate-300">
+                      <span className="font-medium text-slate-900 dark:text-white">Email the uploader when an analysis finishes</span>
+                      <br />
+                      Sends the number of submissions and flagged pairs with a link to the results, using the email delivery settings below. No student names or code are included.
+                    </span>
+                  </label>
+                  <TextInput
+                    label="Webhook URL (optional)"
+                    value={webhookUrl}
+                    onChange={setWebhookUrl}
+                    placeholder="https://example.com/webhook"
+                    autoComplete="off"
+                    error={fieldErrors.webhook_url}
+                  />
+                  <p className="-mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                    Receives a signed JSON POST when an analysis finishes or fails, and an alert when one is stuck in the queue. Must be a public https address.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={sendTestWebhook}
+                      disabled={testingWebhook || dirty || !(settings.webhook_url || '').trim()}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                    >
+                      {testingWebhook ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                      {testingWebhook ? 'Sending...' : 'Send test event'}
+                    </button>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      {dirty ? 'Save first: the test uses the saved URL.' : 'Uses the saved URL.'}
+                    </span>
+                  </div>
+                  {testWebhookResult && (
+                    <div role={testWebhookResult.ok ? 'status' : 'alert'} className={`flex items-start gap-2 rounded-lg border p-3 text-sm ${testWebhookResult.ok ? 'border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300'}`}>
+                      {testWebhookResult.ok ? <CheckCircle size={16} className="mt-0.5 shrink-0" /> : <XCircle size={16} className="mt-0.5 shrink-0" />}
+                      <span>{testWebhookResult.message}</span>
+                    </div>
+                  )}
+                </div>
               </Accordion>
 
               {/* Email Delivery */}
@@ -2126,7 +2240,7 @@ export default function SettingsPage() {
                         <TextInput label="SMTP host" value={(settings.email_host as string) || ''} placeholder="smtp.your-university.edu" autoComplete="off" error={fieldErrors.email_host} onChange={(value) => updateSetting('email_host', value)} />
                         <TextInput label="SMTP port" type="number" value={(settings.email_port as number) ?? 587} onChange={(value) => updateNumber('email_port', value)} {...numberProps('email_port')} />
                         <TextInput label="SMTP username" value={(settings.email_user as string) || ''} placeholder="mailer@your-university.edu" autoComplete="off" onChange={(value) => updateSetting('email_user', value)} />
-                        <TextInput label="SMTP password" type="password" autoComplete="new-password" value={(settings.email_password as string) || ''} placeholder={settings.email_password_configured ? 'Leave blank to keep the current password' : 'Enter the SMTP password'} onChange={(value) => updateSetting('email_password', value)} />
+                        <SecretInput label="SMTP password" value={settings.email_password as string | null} configured={Boolean(settings.email_password_configured)} placeholder={settings.email_password_configured ? 'Leave blank to keep the current password' : 'Enter the SMTP password'} onChange={(value) => updateSetting('email_password', value)} />
                       </div>
                       <label className="flex items-start gap-3">
                         <input
@@ -2147,11 +2261,10 @@ export default function SettingsPage() {
 
                   {settings.email_backend === 'sendgrid' && (
                     <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4">
-                      <TextInput
+                      <SecretInput
                         label="SendGrid API key"
-                        type="password"
-                        autoComplete="new-password"
-                        value={(settings.sendgrid_api_key as string) || ''}
+                        value={settings.sendgrid_api_key as string | null}
+                        configured={Boolean(settings.sendgrid_api_key_configured)}
                         placeholder={settings.sendgrid_api_key_configured ? 'Leave blank to keep the current SendGrid key' : 'Enter your SendGrid API key'}
                         onChange={(value) => updateSetting('sendgrid_api_key', value)}
                       />
@@ -2187,22 +2300,6 @@ export default function SettingsPage() {
                       <span>{testEmailResult.message}</span>
                     </div>
                   )}
-                </div>
-              </Accordion>
-
-              {/* Audit & Logging */}
-              <Accordion
-                title="Audit & Logging"
-                description="Configure audit log level and retention policy for compliance and debugging."
-                isOpen={accordions.auditLogging}
-                onToggle={() => setAccordions(prev => ({ ...prev, auditLogging: !prev.auditLogging }))}
-              >
-                <div className="grid gap-4 md:grid-cols-2">
-                  <SelectInput label="Audit Log Level" value={settings.audit_log_level || 'INFO'} options={[['DEBUG', 'Debug'], ['INFO', 'Info'], ['WARNING', 'Warning'], ['ERROR', 'Error']]} onChange={(value) => updateSetting('audit_log_level', value)} />
-                  <TextInput label="Audit Retention (days)" type="number" value={settings.audit_retention_days ?? 365} onChange={(value) => updateNumber('audit_retention_days', value)} {...numberProps('audit_retention_days')} hint={typeof settings.audit_retention_days === 'number' && settings.audit_retention_days < 90 ? 'Below the 90-day compliance minimum recommended here.' : undefined} />
-                </div>
-                <div className="mt-4 rounded-lg bg-amber-50 dark:bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
-                  Audit logs older than the retention period may be automatically pruned. Keep a minimum of 90 days for compliance.
                 </div>
               </Accordion>
 
@@ -2587,6 +2684,36 @@ function TextInput({ label, value, onChange, type = 'text', placeholder = '', er
       />
       <FieldMessages id={messageId} error={error} hint={hint} />
     </label>
+  );
+}
+
+/**
+ * A credential box. Blank keeps the saved value; "Remove" clears it on save (sent as null), so the
+ * workspace falls back to the server's own key.
+ */
+function SecretInput({ label, value, configured, placeholder, onChange }: { label: string; value: string | null | undefined; configured: boolean; placeholder: string; onChange: (value: string | null) => void }) {
+  if (value === null) {
+    return (
+      <div className="block">
+        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{label}</span>
+        <div className="mt-1.5 flex items-center justify-between gap-3 rounded-lg border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
+          <span>Removed when you save. The server’s default is used instead, if it has one.</span>
+          <button type="button" onClick={() => onChange('')} className="shrink-0 font-semibold underline">
+            Undo
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <TextInput label={label} type="password" autoComplete="new-password" value={value || ''} placeholder={placeholder} onChange={onChange} />
+      {configured && !value && (
+        <button type="button" onClick={() => onChange(null)} className="mt-1 text-xs font-medium text-red-600 hover:underline dark:text-red-400">
+          Remove saved {label.replace(/^SMTP /, '')}
+        </button>
+      )}
+    </div>
   );
 }
 

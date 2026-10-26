@@ -88,7 +88,9 @@ class ProfessorProfile:
     assignment_type: str = "auto_detect"
     sensitivity: str = "balanced"
     starter_code_handling: str = "student_written_only"
-    previous_term_matching: str = "same_course_only"
+    # Cross-term matching is not built yet, so it is off (it defaulted to
+    # "same_course_only" and the settings page implied it ran).
+    previous_term_matching: str = "off"
     ai_rewrite_detection: str = "balanced"
     result_volume: str = "top_25"
 
@@ -190,22 +192,54 @@ def professor_profile_catalog() -> dict[str, Any]:
             },
         ],
         "starter_code_handling": [
-            {"id": "ignore_starter_code", "label": "Ignore starter code"},
+            {
+                "id": "ignore_starter_code",
+                "label": "Remove uploaded starter code",
+                "description": "Strips the starter files you upload with an assignment.",
+            },
             {
                 "id": "student_written_only",
-                "label": "Compare only student-written code",
+                "label": "Remove starter + shared class code",
+                "description": "Also ignores code at least half the class shares "
+                "(a handout you did not upload). Recommended.",
             },
-            {"id": "include_starter_code", "label": "Include starter code"},
+            {
+                "id": "include_starter_code",
+                "label": "Compare everything",
+                "description": "Nothing is removed; template code raises every score.",
+            },
         ],
         "previous_term_matching": [
-            {"id": "off", "label": "Off"},
-            {"id": "same_course_only", "label": "Same course only"},
-            {"id": "all_historical_courses", "label": "All historical courses"},
+            {
+                "id": "off",
+                "label": "Off",
+                "description": "Compare this class's submissions with each other only.",
+            },
+            {
+                "id": "same_course_only",
+                "label": "Earlier offerings of this course",
+                "description": "Also check each submission against past terms of the same "
+                "course code (courses you can open). Catches reused past solutions.",
+            },
+            {
+                "id": "all_historical_courses",
+                "label": "All my earlier courses",
+                "description": "Also check against every earlier course you can open. "
+                "Slower; useful when assignments move between courses.",
+            },
         ],
         "ai_rewrite_detection": [
-            {"id": "off", "label": "Off"},
-            {"id": "balanced", "label": "Balanced"},
-            {"id": "aggressive", "label": "Aggressive"},
+            {
+                "id": "off",
+                "label": "Off",
+                "description": "Similarity only; no AI-authorship scores.",
+            },
+            {
+                "id": "balanced",
+                "label": "On",
+                "description": "Scores each submission for AI-authorship signals. "
+                "Recommended.",
+            },
         ],
         "result_volume": [
             {"id": "top_10", "label": "Show top 10", "limit": 10},
@@ -243,12 +277,14 @@ def apply_professor_profile(raw: dict[str, Any] | None) -> AppliedProfessorProfi
         previous_term_matching=_valid(
             raw.get("previous_term_matching"),
             {"off": 1, "same_course_only": 1, "all_historical_courses": 1},
-            "same_course_only",
+            "off",
             notes,
             "previous_term_matching",
         ),
         ai_rewrite_detection=_valid(
             raw.get("ai_rewrite_detection"),
+            # "aggressive" behaved exactly like "balanced"; it is kept as an
+            # accepted alias for saved profiles.
             {"off": 1, "balanced": 1, "aggressive": 1},
             "balanced",
             notes,
@@ -304,8 +340,6 @@ def apply_professor_profile(raw: dict[str, Any] | None) -> AppliedProfessorProfi
     warnings = list(notes)
     if profile.starter_code_handling == "include_starter_code":
         warnings.append("Including starter code can increase false positives.")
-    if profile.previous_term_matching == "off":
-        warnings.append("Previous-term reuse will not be checked.")
 
     return AppliedProfessorProfile(
         profile=profile,
@@ -329,7 +363,9 @@ def infer_assignment_profile(signals: AssignmentSignals | dict[str, Any]) -> str
 
     language = str(signals.language or "").strip().lower()
     file_count, class_count = _count(signals.file_count), _count(signals.class_count)
-    function_count, average_loc = _count(signals.function_count), _count(signals.average_lines_of_code)
+    function_count, average_loc = _count(signals.function_count), _count(
+        signals.average_lines_of_code
+    )
     if signals.notebook_present or language in {"ipynb", "notebook", "r"}:
         return "notebook_data_analysis"
     if file_count >= 6 or signals.test_files_present:

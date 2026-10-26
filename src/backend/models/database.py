@@ -1295,3 +1295,62 @@ class WeightAudit(Base):
     allowed = Column(Boolean, nullable=True)
     note = Column(Text, nullable=True)
     created_at = created_at_column()
+
+
+SHARE_RESOURCE_TYPES = ("course", "job", "case")
+
+
+class ResourceShare(Base):
+    """A course, job or case shared beyond its owners.
+
+    Exactly one audience per row: one faculty member (``shared_with_user_id``)
+    or everyone in a workspace (``shared_with_workspace``: the organization id,
+    or the tenant id for tenant-only workspaces). Nothing is shared by default,
+    so an item without rows is private to its owners. Shares only add access:
+    sharing a course reaches its assignments, jobs, cases, dossiers and vivas.
+    """
+
+    __tablename__ = "resource_shares"
+
+    __table_args__ = (
+        CheckConstraint(
+            _in("resource_type", SHARE_RESOURCE_TYPES),
+            name="ck_resource_shares_resource_type",
+        ),
+        CheckConstraint(
+            "(shared_with_user_id IS NULL) <> (shared_with_workspace IS NULL)",
+            name="ck_resource_shares_one_audience",
+        ),
+        Index("idx_resource_shares_resource", "resource_type", "resource_id"),
+        Index("idx_resource_shares_user", "shared_with_user_id"),
+        Index("idx_resource_shares_workspace", "shared_with_workspace"),
+        Index(
+            "uq_resource_shares_user",
+            "resource_type",
+            "resource_id",
+            "shared_with_user_id",
+            unique=True,
+            postgresql_where=text("shared_with_user_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_resource_shares_workspace",
+            "resource_type",
+            "resource_id",
+            "shared_with_workspace",
+            unique=True,
+            postgresql_where=text("shared_with_workspace IS NOT NULL"),
+        ),
+    )
+
+    id = uuid_pk()
+    resource_type = Column(String(20), nullable=False)
+    # String: job ids are varchar(36), course and case ids are UUIDs.
+    resource_id = Column(String(64), nullable=False)
+    shared_with_user_id = Column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    shared_with_workspace = Column(String(64), nullable=True)
+    granted_by_id = Column(
+        UUID(as_uuid=False), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = created_at_column()

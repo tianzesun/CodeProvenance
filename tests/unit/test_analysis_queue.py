@@ -132,6 +132,31 @@ class TestRunUploadAnalysisTask:
 
         assert calls[0]["args"][7] is None
 
+    def test_guest_upload_stays_a_guest_in_the_worker(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A guest rebuilt as a plain user was filed under the first tenant."""
+        from src.backend.api import server
+        from src.backend.workers.analysis_tasks import run_upload_analysis
+
+        calls: list[dict[str, Any]] = []
+
+        async def _fake_run_analysis(*args: Any, **kwargs: Any) -> None:
+            calls.append({"args": args, "kwargs": kwargs})
+
+        monkeypatch.setattr(server, "_run_analysis", _fake_run_analysis)
+
+        run_upload_analysis.run(
+            job_id="job-3",
+            job_dir=str(tmp_path),
+            owner_user_id="guest:abc",
+            is_guest=True,
+        )
+
+        user = calls[0]["args"][7]
+        assert user["is_guest"] is True
+        assert server._guest_job_flags(user)["guest"] is True
+
 
 class TestDispatchAnalysis:
     """Uploads must queue on Celery when possible, run inline otherwise."""
@@ -174,6 +199,31 @@ class TestDispatchAnalysis:
         assert enqueued[0]["job_id"] == "job-9"
         assert enqueued[0]["owner_user_id"] == "user-1"
         assert enqueued[0]["tenant_id"] == "tenant-1"
+        assert enqueued[0]["is_guest"] is False
+
+    def test_guest_flag_crosses_the_broker(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from src.backend.workers import analysis_tasks
+
+        monkeypatch.setattr(dispatch_module, "broker_available", lambda: True)
+        enqueued: list[dict[str, Any]] = []
+
+        class _Task:
+            id = "celery-task-2"
+
+        def _fake_delay(**kwargs: Any) -> Any:
+            enqueued.append(kwargs)
+            return _Task()
+
+        monkeypatch.setattr(analysis_tasks.run_upload_analysis, "delay", _fake_delay)
+        params = self._params(tmp_path)
+        params["current_user"] = {"id": "guest:abc", "is_guest": True}
+
+        dispatch_module.dispatch_analysis(**params)
+
+        assert enqueued[0]["is_guest"] is True
+        assert enqueued[0]["tenant_id"] is None
 
     def test_falls_back_inline_when_broker_is_down(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

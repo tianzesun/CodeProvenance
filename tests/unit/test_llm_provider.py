@@ -467,3 +467,75 @@ def await_provider(provider: LLMProvider) -> str:
     return pytest_unwrap(
         provider.complete("analyze this pair", system="be neutral", max_tokens=50)
     )
+
+
+class TestFallbackProvider:
+    """The workspace's fallback provider answers when the default one fails."""
+
+    def _both_providers(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/chat/completions"):
+                return httpx.Response(503, json={"error": "overloaded"})
+            return _anthropic_ok_handler(request)
+
+        return httpx.MockTransport(handler)
+
+    def test_a_failing_default_provider_falls_back(self) -> None:
+        from src.backend.config.settings import workspace_overrides
+
+        overrides = {
+            "LLM_PROVIDER": "openai",
+            "LLM_FALLBACK_PROVIDER": "anthropic",
+            "LLM_API_KEYS": {
+                "openai": "test-openai-key",
+                "anthropic": "test-anthropic-key",
+            },
+        }
+        with workspace_overrides(overrides):
+            result = pytest_unwrap(
+                summarize_pair_evidence(
+                    "a", "b", {"ast": 0.5}, transport=self._both_providers()
+                )
+            )
+
+        assert result["source"] == "llm"
+        assert result["provider"] == "anthropic"
+        assert result["fallback_reason"]
+
+    def test_no_fallback_when_a_provider_was_chosen(self) -> None:
+        from src.backend.config.settings import workspace_overrides
+
+        overrides = {
+            "LLM_FALLBACK_PROVIDER": "anthropic",
+            "LLM_API_KEYS": {"anthropic": "test-anthropic-key"},
+        }
+        with workspace_overrides(overrides):
+            result = pytest_unwrap(
+                summarize_pair_evidence(
+                    "a",
+                    "b",
+                    {"ast": 0.5},
+                    provider="openai",
+                    api_key_override="test-openai-key",
+                    transport=self._both_providers(),
+                )
+            )
+
+        assert result["source"] == "heuristic"
+
+    def test_without_a_fallback_the_heuristic_is_used(self) -> None:
+        from src.backend.config.settings import workspace_overrides
+
+        overrides = {
+            "LLM_PROVIDER": "openai",
+            "LLM_FALLBACK_PROVIDER": "",
+            "LLM_API_KEYS": {"openai": "test-openai-key"},
+        }
+        with workspace_overrides(overrides):
+            result = pytest_unwrap(
+                summarize_pair_evidence(
+                    "a", "b", {"ast": 0.5}, transport=self._both_providers()
+                )
+            )
+
+        assert result["source"] == "heuristic"

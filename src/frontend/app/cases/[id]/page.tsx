@@ -10,6 +10,7 @@ import {
   StatusBadge,
 } from '@/components/saas/SaaSPrimitives';
 import { apiClient } from '@/lib/apiClient';
+import ShareDialog from '@/components/ShareDialog';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -136,8 +137,15 @@ function parseCaseResponse(data: unknown): { caseData: CaseData; comments: CaseC
     throw new CaseShapeError('Unexpected case response');
   }
 
+  // The API returns result_ids beside `case`, not inside it, so the page always
+  // showed "Linked results: —". Deduplicate: older links could be stored twice.
+  const resultIds = payload?.case ? payload.result_ids : found.result_ids;
+  const caseData = Array.isArray(resultIds)
+    ? { ...found, result_ids: Array.from(new Set(resultIds.map(String))) }
+    : found;
+
   const comments = payload?.comments ?? found.comments ?? [];
-  return { caseData: found, comments: Array.isArray(comments) ? comments : [] };
+  return { caseData, comments: Array.isArray(comments) ? comments : [] };
 }
 
 function formatDateTime(value: string): string {
@@ -177,6 +185,7 @@ export default function CompareCasePage() {
   const [noteText, setNoteText] = useState('');
   const [pendingAction, setPendingAction] = useState<ActionName | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
@@ -447,6 +456,22 @@ export default function CompareCasePage() {
           eyebrowStyle="badge"
           title="Instructor Review Case"
           description={`${assignmentCourse} · ${assignmentTitle}`}
+          action={
+            <button
+              type="button"
+              onClick={() => setShareOpen(true)}
+              className="theme-button-secondary rounded-xl px-4 py-2 text-sm font-semibold"
+            >
+              Share
+            </button>
+          }
+        />
+        <ShareDialog
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          endpoint={`${casePath}/sharing`}
+          itemLabel="this case"
+          ownersNote="The case’s creator and the course’s instructors always have access, and so does anyone the course is shared with."
         />
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-600 dark:text-slate-400">

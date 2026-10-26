@@ -55,6 +55,13 @@ random `AUTH_JWT_SECRET` / `WEBHOOK_SECRET_KEY` values. See `deploy/README.md`.
 ## Security Best Practices
 
 - Rotate `AUTH_JWT_SECRET` periodically (especially after any suspected exposure).
+- Set `SETTINGS_ENCRYPTION_KEY` from your managed secret store. It encrypts (AES-256-GCM)
+  the API keys and SMTP passwords workspaces save in the database; without it, workspaces
+  cannot save credentials. It must be the base64 encoding of 32 random bytes.
+  To rotate: move the current key to `SETTINGS_ENCRYPTION_KEY_PREVIOUS`, set a new
+  `SETTINGS_ENCRYPTION_KEY`, restart, run `python -m src.backend.infrastructure.secret_box`,
+  then remove the previous key. Run the same command once after upgrading, to encrypt
+  credentials saved before encryption existed.
 - Never reuse the same JWT secret between development and production.
 - Keep `DATABASE_URL` credentials separate per environment.
 - Prefer managed Redis and databases over localhost connections in production.

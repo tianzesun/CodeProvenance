@@ -2,6 +2,7 @@
 Pytest configuration for IntegrityDesk tests.
 """
 
+import base64
 import os
 import sys
 from pathlib import Path
@@ -15,6 +16,10 @@ from fastapi.testclient import TestClient
 # takes hours (and its results depend on a model download being present).
 # Tests that specifically exercise Binoculars inject a fake instance instead.
 os.environ.setdefault("BINOCULARS_ENABLED", "0")
+# Workspace credentials are sealed at rest; tests use a throwaway key per run.
+os.environ.setdefault(
+    "SETTINGS_ENCRYPTION_KEY", base64.b64encode(os.urandom(32)).decode()
+)
 
 # Add backend to Python path
 backend_path = Path(__file__).parent.parent / "src" / "backend"
@@ -38,8 +43,27 @@ def client() -> Generator[TestClient, None, None]:
         yield test_client
 
 
-# Additional test fixtures would go here
-# For example: database fixtures, test clients, etc.
+@pytest.fixture(scope="session")
+def job_tenant_id() -> Generator[str, None, None]:
+    """A workspace for tests that write jobs rows (jobs.tenant_id is required)."""
+    import uuid
+
+    from src.backend.config.database import SessionLocal
+    from src.backend.models.database import Tenant
+
+    with SessionLocal() as db:
+        tenant = Tenant(
+            name="Unit test workspace", api_key_hash=f"test-hash-{uuid.uuid4().hex}"
+        )
+        db.add(tenant)
+        db.commit()
+        tenant_id = str(tenant.id)
+    try:
+        yield tenant_id
+    finally:
+        with SessionLocal() as db:
+            db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+            db.commit()
 
 
 @pytest.fixture(autouse=True)
@@ -79,9 +103,9 @@ def override_setting() -> Generator[Callable[[str, object], None], None, None]:
         """Set a settings field, remembering its previous value for restoration."""
         if name not in original:
             original[name] = getattr(settings, name)
-        object.__setattr__(settings, name, value)
+        setattr(settings, name, value)
 
     yield _override
 
     for name, value in original.items():
-        object.__setattr__(settings, name, value)
+        setattr(settings, name, value)

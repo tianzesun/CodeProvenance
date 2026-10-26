@@ -50,6 +50,10 @@ class EmbeddingSimilarity(BaseSimilarityAlgorithm):
         super().__init__("embedding")
         self.model_name = model_name
         self.base_url = base_url
+        # settings.OPENAI_API_KEY is a SecretStr; passed through as-is, the
+        # client would send its masked "**********" form.
+        if hasattr(api_key, "get_secret_value"):
+            api_key = api_key.get_secret_value()
         self.api_key = api_key
         # The cache key now includes the model name (it was the text hash alone, so
         # switching models served vectors from the previous one), and the store is

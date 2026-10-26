@@ -10,6 +10,8 @@ Conventions
 * List and dict settings are read from the environment as JSON, for example
   ``DEFAULT_DETECTION_MODES='["token","ast"]'``.
 * Settings are read-only after start-up (``frozen``), and are created lazily by ``get_settings()``.
+* A workspace's saved settings are layered over them per request or job with ``workspace_overrides()``;
+  ``settings`` reads through that layer, so one workspace's choices never reach another's.
 """
 
 import ipaddress
@@ -17,10 +19,12 @@ import logging
 import math
 import os
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
-from types import MappingProxyType
+from types import FunctionType, MappingProxyType, MethodType
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlsplit
 
@@ -269,6 +273,13 @@ class AppSettings(BaseSettings):
     ANTHROPIC_API_KEY: SecretStr | None = None
     ANTHROPIC_MODEL: str = ""
 
+    #: AES-256-GCM key (base64 of 32 random bytes) that encrypts the credentials workspaces save in the
+    #: database (their API keys, SMTP password). Inject it from the managed secret store; without it, workspaces
+    #: cannot save credentials. During a rotation, put the old key in SETTINGS_ENCRYPTION_KEY_PREVIOUS so stored
+    #: values still decrypt, then run ``python -m src.backend.infrastructure.secret_box`` to re-encrypt them.
+    SETTINGS_ENCRYPTION_KEY: SecretStr | None = None
+    SETTINGS_ENCRYPTION_KEY_PREVIOUS: SecretStr | None = None
+
     OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
 
     # Auth
@@ -428,6 +439,13 @@ class AppSettings(BaseSettings):
                 f"DETECTION_DOMAIN_PRESETS ({', '.join(self.DETECTION_DOMAIN_PRESETS)})"
             )
 
+        for name, key in (
+            ("SETTINGS_ENCRYPTION_KEY", self.SETTINGS_ENCRYPTION_KEY),
+            ("SETTINGS_ENCRYPTION_KEY_PREVIOUS", self.SETTINGS_ENCRYPTION_KEY_PREVIOUS),
+        ):
+            if key and not _is_aes256_key(key.get_secret_value()):
+                errors.append(f"{name} must be the base64 encoding of 32 random bytes")
+
         # Email: each backend needs its own settings, or the first password-reset email fails.
         if self.EMAIL_USE_TLS and self.EMAIL_USE_SSL:
             errors.append("EMAIL_USE_TLS (STARTTLS) and EMAIL_USE_SSL (implicit TLS) are mutually exclusive")
@@ -569,6 +587,16 @@ class AppSettings(BaseSettings):
         return dict(self.ENGINE_WEIGHTS)
 
 
+def _is_aes256_key(value: str) -> bool:
+    import base64
+    import binascii
+
+    try:
+        return len(base64.b64decode(value.strip(), validate=True)) == 32
+    except (binascii.Error, ValueError):
+        return False
+
+
 # ── Access ───────────────────────────────────────────────────────────────────
 
 
@@ -583,6 +611,61 @@ def get_settings() -> AppSettings:
     return loaded
 
 
+#: The current workspace's saved values, by ``AppSettings`` attribute name; None outside a workspace.
+_WORKSPACE_OVERRIDES: ContextVar[Mapping[str, object] | None] = ContextVar("workspace_setting_overrides", default=None)
+
+
+@contextmanager
+def workspace_overrides(overrides: Mapping[str, object] | None) -> Iterator[None]:
+    """Read ``settings`` with one workspace's saved values on top, for this request, task or job.
+
+    The values live in a context variable, so concurrent requests from different workspaces each see their own.
+    Worker threads do not inherit it: submit to a pool with ``contextvars.copy_context().run``.
+    """
+    token = _WORKSPACE_OVERRIDES.set(MappingProxyType(dict(overrides or {})))
+    try:
+        yield
+    finally:
+        _WORKSPACE_OVERRIDES.reset(token)
+
+
+class WorkspaceSettings:
+    """``AppSettings`` as the current workspace sees it: its saved values over the start-up configuration.
+
+    Saved workspace settings used to be written onto the one process-wide settings object on every request, so
+    a workspace briefly ran with whichever workspace had made the previous request (keys, provider, limits).
+    Methods and properties of ``AppSettings`` run against this view, so ``llm_api_key()`` sees overrides too.
+    Assigning an attribute changes the start-up configuration (tests patch settings this way).
+    """
+
+    __slots__ = ()
+
+    def __getattribute__(self, name: str):
+        if name.startswith("__"):
+            return object.__getattribute__(self, name)
+        overrides = _WORKSPACE_OVERRIDES.get()
+        if overrides is not None and name in overrides:
+            return overrides[name]
+        member = AppSettings.__dict__.get(name)
+        if isinstance(member, property):
+            return member.fget(self)
+        if isinstance(member, FunctionType):
+            return MethodType(member, self)
+        return getattr(get_settings(), name)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        object.__setattr__(get_settings(), name, value)
+
+    def __delattr__(self, name: str) -> None:
+        object.__delattr__(get_settings(), name)
+
+    def __repr__(self) -> str:
+        return f"WorkspaceSettings({get_settings()!r})"
+
+
+_WORKSPACE_SETTINGS = WorkspaceSettings()
+
+
 if TYPE_CHECKING:
     settings: AppSettings
 
@@ -591,5 +674,6 @@ def __getattr__(name: str):
     # `from config.settings import settings` keeps working, but the settings are now built when first imported by
     # name, not when the module is imported, so tools that only need DEFAULT_ENGINE_WEIGHTS don't need the full env.
     if name == "settings":
-        return get_settings()
+        get_settings()  # fail on a bad environment at import, as before
+        return _WORKSPACE_SETTINGS
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

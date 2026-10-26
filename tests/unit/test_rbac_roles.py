@@ -48,6 +48,11 @@ class _RecordingQuery:
         """Return the first row, or None when the query would match nothing."""
         return self._rows[0] if self._rows else None
 
+    def union(self, other):
+        """Record the unioned query and return self so calls can be chained."""
+        self.unioned = other
+        return self
+
 
 class _RecordingDb:
     """Session stand-in handing out a recorder per queried entity."""
@@ -194,17 +199,21 @@ def test_admin_without_organization_is_not_narrowed() -> None:
     assert db.queries[0].filters == []
 
 
-def test_professor_visibility_is_the_instructor_link_only() -> None:
-    """A professor sees only courses a course_instructors row ties them to.
+def test_professor_visibility_is_the_instructor_link_plus_shares() -> None:
+    """A professor sees courses they teach and courses shared with them.
 
     Regression: the listings OR'ed in "same organization", so a professor saw
-    the whole catalog instead of their own courses.
+    the whole catalog instead of their own courses. Sharing adds explicit
+    resource_shares rows, never the organization's whole catalog.
     """
     db = _RecordingDb()
     academic_access.visible_course_id_query(db, PROFESSOR_USER)
-    assert db.queried == [CourseInstructor.course_id]
+    assert db.queried[0] == CourseInstructor.course_id
     assert len(db.queries[0].filters) == 1
     assert "course_instructors.user_id" in str(db.queries[0].filters[0])
+    shared_filters = " ".join(str(f) for f in db.queries[1].filters)
+    assert "resource_shares.resource_type" in shared_filters
+    assert db.queries[0].unioned is db.queries[1]
 
 
 def test_identity_less_callers_see_nothing() -> None:
