@@ -571,54 +571,59 @@ fi
 # ----------------------------
 # DASHBOARD START
 # ----------------------------
-echo "Starting dashboard..."
-
-cd "$DASHBOARD_DIR"
-
-export PORT="$DASHBOARD_PORT"
-export HOST="127.0.0.1"
-export API_URL="$BACKEND_URL"
-export NEXT_PUBLIC_API_URL="$BACKEND_URL"
-
-if [ ! -d "node_modules" ]; then
-    echo "Installing frontend dependencies..."
-    npm install
+# SKIP_DASHBOARD=1 leaves a running dashboard alone (scripts/restart_backend.sh).
+if [ "${SKIP_DASHBOARD:-}" = "1" ]; then
+    echo "Skipping dashboard (SKIP_DASHBOARD=1)"
 else
-    # After React 19 upgrade, ensure we are not running on stale React 18 modules
-    REACT_VERSION=$(node -e "console.log(require('react/package.json').version)" 2>/dev/null || echo "0.0.0")
-    if [[ "$REACT_VERSION" == 18.* ]]; then
-        echo "⚠️  Detected React $REACT_VERSION in node_modules (expected 19.x after upgrade)"
-        echo "   Running clean install for React 19..."
-        rm -rf node_modules package-lock.json
+    echo "Starting dashboard..."
+
+    cd "$DASHBOARD_DIR"
+
+    export PORT="$DASHBOARD_PORT"
+    export HOST="127.0.0.1"
+    export API_URL="$BACKEND_URL"
+    export NEXT_PUBLIC_API_URL="$BACKEND_URL"
+
+    if [ ! -d "node_modules" ]; then
+        echo "Installing frontend dependencies..."
         npm install
+    else
+        # After React 19 upgrade, ensure we are not running on stale React 18 modules
+        REACT_VERSION=$(node -e "console.log(require('react/package.json').version)" 2>/dev/null || echo "0.0.0")
+        if [[ "$REACT_VERSION" == 18.* ]]; then
+            echo "⚠️  Detected React $REACT_VERSION in node_modules (expected 19.x after upgrade)"
+            echo "   Running clean install for React 19..."
+            rm -rf node_modules package-lock.json
+            npm install
+        fi
     fi
+
+    if [ "${DASHBOARD_MODE:-prod}" = "dev" ]; then
+        echo "Running Next.js in DEV mode (Next 16 + React 19)..."
+        nohup npx next dev --port "$DASHBOARD_PORT" --hostname 127.0.0.1 > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
+    else
+        echo "Building Next.js..."
+        npx next build
+
+        echo "Running Next.js in PROD mode..."
+        nohup npx next start --port "$DASHBOARD_PORT" --hostname 127.0.0.1 > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
+    fi
+
+    echo "Waiting for dashboard..."
+    for i in {1..30}; do
+        if curl -s "http://localhost:$DASHBOARD_PORT/" >/dev/null 2>&1; then
+            echo "✔ Dashboard ready"
+            break
+        fi
+        if [ $i -eq 30 ]; then
+            echo "❌ Dashboard failed to start"
+            echo "---- Last logs ----"
+            tail -n 30 "$PROJECT_DIR/logs/dashboard.log"
+            exit 1
+        fi
+        sleep 1
+    done
 fi
-
-if [ "${DASHBOARD_MODE:-prod}" = "dev" ]; then
-    echo "Running Next.js in DEV mode (Next 16 + React 19)..."
-    nohup npx next dev --port "$DASHBOARD_PORT" --hostname 127.0.0.1 > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
-else
-    echo "Building Next.js..."
-    npx next build
-
-    echo "Running Next.js in PROD mode..."
-    nohup npx next start --port "$DASHBOARD_PORT" --hostname 127.0.0.1 > "$PROJECT_DIR/logs/dashboard.log" 2>&1 &
-fi
-
-echo "Waiting for dashboard..."
-for i in {1..30}; do
-    if curl -s "http://localhost:$DASHBOARD_PORT/" >/dev/null 2>&1; then
-        echo "✔ Dashboard ready"
-        break
-    fi
-    if [ $i -eq 30 ]; then
-        echo "❌ Dashboard failed to start"
-        echo "---- Last logs ----"
-        tail -n 30 "$PROJECT_DIR/logs/dashboard.log"
-        exit 1
-    fi
-    sleep 1
-done
 
 # ----------------------------
 # FINAL CHECK
