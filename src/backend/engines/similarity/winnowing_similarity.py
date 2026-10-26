@@ -28,10 +28,13 @@ from .code_scan import scan
 
 #: Words tokenised as KEYWORD when scanning raw source (Python plus common C-like ones).
 _KEYWORDS = frozenset(keyword.kwlist) | frozenset(
-    "function func switch case default do throw throws catch new this super void static "
-    "public private protected final abstract interface enum extends implements int long "
-    "short char float double boolean byte string bool var let const typeof instanceof "
-    "namespace using struct union sizeof goto".split()
+    [
+        "function", "func", "switch", "case", "default", "do", "throw", "throws", "catch", "new",
+        "this", "super", "void", "static", "public", "private", "protected", "final", "abstract",
+        "interface", "enum", "extends", "implements", "int", "long", "short", "char", "float",
+        "double", "boolean", "byte", "string", "bool", "var", "let", "const", "typeof",
+        "instanceof", "namespace", "using", "struct", "union", "sizeof", "goto",
+    ]
 )  # fmt: skip
 _FUNCTION_WORDS = frozenset({"def", "function", "func", "fn"})
 _CACHE_SIZE = 128

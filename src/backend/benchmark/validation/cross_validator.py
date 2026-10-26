@@ -12,9 +12,10 @@ Key features:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
+
 import numpy as np
-from pathlib import Path
+
 
 @dataclass
 class FoldMetrics:
@@ -45,7 +46,7 @@ class FoldMetrics:
     fn: int
     n_samples: int
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "fold_id": self.fold_id,
@@ -82,19 +83,19 @@ class CrossValidationResult:
         fold_stability: Coefficient of variation for F1 (lower is better).
     """
     k: int
-    fold_results: List[FoldMetrics] = field(default_factory=list)
+    fold_results: list[FoldMetrics] = field(default_factory=list)
     mean_precision: float = 0.0
     std_precision: float = 0.0
     mean_recall: float = 0.0
     std_recall: float = 0.0
     mean_f1: float = 0.0
     std_f1: float = 0.0
-    ci_f1: Tuple[float, float] = (0.0, 0.0)
-    ci_precision: Tuple[float, float] = (0.0, 0.0)
-    ci_recall: Tuple[float, float] = (0.0, 0.0)
+    ci_f1: tuple[float, float] = (0.0, 0.0)
+    ci_precision: tuple[float, float] = (0.0, 0.0)
+    ci_recall: tuple[float, float] = (0.0, 0.0)
     fold_stability: float = 0.0
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "k": self.k,
@@ -127,8 +128,8 @@ class StratifiedKFoldSplitter:
     def split(
         self, 
         n_samples: int, 
-        labels: List[int],
-    ) -> List[Tuple[List[int], List[int]]]:
+        labels: list[int],
+    ) -> list[tuple[list[int], list[int]]]:
         """Generate stratified k-fold splits.
         
         Args:
@@ -150,7 +151,7 @@ class StratifiedKFoldSplitter:
             rng.shuffle(class_indices[c])
         
         # Distribute samples across folds
-        fold_indices: List[List[int]] = [[] for _ in range(self.k)]
+        fold_indices: list[list[int]] = [[] for _ in range(self.k)]
         for c in unique_classes:
             indices = class_indices[c]
             fold_size = len(indices) // self.k
@@ -189,8 +190,8 @@ class CrossValidator:
     
     def evaluate(
         self,
-        scores: List[float],
-        labels: List[int],
+        scores: list[float],
+        labels: list[int],
         threshold: float = 0.5,
         compute_auc: bool = True,
     ) -> CrossValidationResult:
@@ -211,7 +212,7 @@ class CrossValidator:
         # Generate stratified splits
         splits = self.splitter.split(len(scores), labels)
         
-        fold_results: List[FoldMetrics] = []
+        fold_results: list[FoldMetrics] = []
         all_f1 = []
         all_precision = []
         all_recall = []
@@ -242,7 +243,7 @@ class CrossValidator:
             roc_auc = 0.0
             pr_auc = 0.0
             if compute_auc and len(np.unique(test_labels)) > 1:
-                from sklearn.metrics import roc_auc_score, average_precision_score
+                from sklearn.metrics import average_precision_score, roc_auc_score
                 try:
                     roc_auc = float(roc_auc_score(test_labels, test_scores))
                 except Exception:
@@ -310,7 +311,7 @@ class CrossValidator:
         self, 
         values: np.ndarray, 
         confidence: float = 0.95,
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """Compute confidence interval using t-distribution.
         
         Args:
@@ -335,11 +336,11 @@ class CrossValidator:
         return (float(ci_lower), float(ci_upper))
 
 def cross_validate_benchmark(
-    scores_dict: Dict[str, List[float]],
-    labels: List[int],
+    scores_dict: dict[str, list[float]],
+    labels: list[int],
     k: int = 5,
     threshold: float = 0.5,
-) -> Dict[str, CrossValidationResult]:
+) -> dict[str, CrossValidationResult]:
     """Cross-validate multiple tools/engines.
     
     Args:

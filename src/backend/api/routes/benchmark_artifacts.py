@@ -8,7 +8,8 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, HTTPException, Path as PathParam, Query
+from fastapi import APIRouter, HTTPException, Query
+from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, RedirectResponse
 
 from src.backend.benchmark.results.results_loader import (

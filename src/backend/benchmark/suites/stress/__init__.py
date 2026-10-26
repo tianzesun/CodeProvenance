@@ -19,8 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from ...datasets.schema import CanonicalDataset, CloneType, CodePair, DatasetMetadata, Difficulty
 from ...datasets.synthetic_generator import SyntheticDatasetGenerator
-from ...datasets.schema import CanonicalDataset, CodePair, DatasetMetadata, CloneType, Difficulty
 
 
 @dataclass
@@ -40,7 +40,7 @@ class ParaphraseConfig:
 
 
 # Templates for common programming patterns that students might paraphrase
-PARAPHRASE_TEMPLATES: Dict[str, List[str]] = {
+PARAPHRASE_TEMPLATES: dict[str, list[str]] = {
     "python": [
         # Recursion vs iteration
         '''def factorial(n):
@@ -173,7 +173,7 @@ def generate_paraphrase_pairs(
     base_code: str,
     count: int,
     seed: int = 42
-) -> List[Tuple[str, str]]:
+) -> list[tuple[str, str]]:
     """Generate paraphrased code pairs.
 
     Creates multiple variants of the same algorithm with different implementations.
@@ -187,7 +187,7 @@ def generate_paraphrase_pairs(
         List of (original, paraphrased) code pairs.
     """
     rng = random.Random(seed)
-    pairs: List[Tuple[str, str]] = []
+    pairs: list[tuple[str, str]] = []
 
     transform_types = [
         "loop_conversion",
@@ -212,7 +212,7 @@ def generate_paraphrase_pairs(
 class ParaphraseDataset:
     """Dataset of paraphrased code pairs."""
 
-    pairs: List[Tuple[str, str]]
+    pairs: list[tuple[str, str]]
     name: str = "paraphrased_logic"
     version: str = "1.0"
 
@@ -253,7 +253,7 @@ class ParaphraseDataset:
 
 def create_paraphrase_dataset(
     output_dir: Path,
-    config: Optional[ParaphraseConfig] = None
+    config: ParaphraseConfig | None = None
 ) -> Path:
     """Generate paraphrased logic dataset.
 
@@ -273,7 +273,7 @@ def create_paraphrase_dataset(
     templates = PARAPHRASE_TEMPLATES.get(config.language, [])
     rng = random.Random(config.seed)
 
-    pairs: List[Tuple[str, str]] = []
+    pairs: list[tuple[str, str]] = []
     pair_id = 0
 
     for template in templates:
@@ -303,7 +303,7 @@ class StressConfig:
     cross_assignment_pairs: int = 1000 # Assignment leakage
 
     # Language distribution for adversarial testing
-    languages: List[str] = None
+    languages: list[str] = None
 
     def __post_init__(self):
         if self.languages is None:
@@ -315,7 +315,7 @@ class StressConfig:
 # =============================================================================
 
 # Templates for generating near-duplicate variations
-NEAR_DUPLICATE_TEMPLATES: Dict[str, List[str]] = {
+NEAR_DUPLICATE_TEMPLATES: dict[str, list[str]] = {
     "python": [
         '''def calculate_average(scores):
     """Calculate average of a list of scores."""
@@ -478,7 +478,7 @@ def apply_near_duplicate_transform(code: str, transform_type: str, seed: int) ->
 class NearDuplicateDataset:
     """Dataset of near-duplicate code pairs."""
 
-    pairs: List[Tuple[str, str]]
+    pairs: list[tuple[str, str]]
     name: str = "near_duplicates"
     version: str = "1.0"
 
@@ -521,7 +521,7 @@ class NearDuplicateDataset:
 # Cross-assignment dataset generation
 # =============================================================================
 
-CROSS_ASSIGNMENT_TEMPLATES: Dict[str, List[str]] = {
+CROSS_ASSIGNMENT_TEMPLATES: dict[str, list[str]] = {
     "python": [
         '''# Template: Data processing helper
 def process_data(data):
@@ -622,9 +622,9 @@ class StressBenchmarkSuite:
     LLM rewriting, professional obfuscation, and assignment leakage.
     """
 
-    def __init__(self, config: Optional[StressConfig] = None):
+    def __init__(self, config: StressConfig | None = None):
         self.config = config or StressConfig()
-        self._adversarial_datasets: Dict[str, Path] = {}
+        self._adversarial_datasets: dict[str, Path] = {}
 
     def prepare_adversarial_dataset(self, output_dir: Path) -> Path:
         """Generate adversarial synthetic dataset with cheating patterns.
@@ -682,7 +682,7 @@ class StressBenchmarkSuite:
         templates = PARAPHRASE_TEMPLATES.get(config.language, [])
         rng = random.Random(config.seed)
 
-        pairs: List[Tuple[str, str]] = []
+        pairs: list[tuple[str, str]] = []
         pair_id = 0
 
         for template in templates:
@@ -720,7 +720,7 @@ class StressBenchmarkSuite:
         templates = NEAR_DUPLICATE_TEMPLATES.get("python", [])
         rng = random.Random(22334)
 
-        pairs: List[Tuple[str, str]] = []
+        pairs: list[tuple[str, str]] = []
         pair_id = 0
 
         transform_types = [
@@ -772,7 +772,7 @@ class StressBenchmarkSuite:
             "template_variation",
         ]
 
-        pairs: List[Tuple[str, str]] = []
+        pairs: list[tuple[str, str]] = []
         pair_id = 0
 
         while len(pairs) < self.config.cross_assignment_pairs and templates:
@@ -794,9 +794,9 @@ class StressBenchmarkSuite:
 
     def compute_operational_metrics(
         self,
-        records: List,
-        k_values: List[int] = [5, 10, 20, 50]
-    ) -> Dict[str, Dict]:
+        records: list,
+        k_values: list[int] = [5, 10, 20, 50]
+    ) -> dict[str, dict]:
         """Compute professor-facing operational metrics.
 
         Args:
@@ -835,7 +835,7 @@ class StressBenchmarkSuite:
         results["false_accusation_rate"] = fp_rate
         return results
 
-    def run_stress_benchmark(self, engine_runner) -> Dict[str, Dict]:
+    def run_stress_benchmark(self, engine_runner) -> dict[str, dict]:
         """Run stress/adversarial benchmark suite.
 
         Args:
@@ -863,7 +863,7 @@ class StressBenchmarkSuite:
 
         return results
 
-    def generate_stress_report(self, results: Dict) -> Dict:
+    def generate_stress_report(self, results: dict) -> dict:
         """Generate stress test report highlighting failure modes.
 
         Args:

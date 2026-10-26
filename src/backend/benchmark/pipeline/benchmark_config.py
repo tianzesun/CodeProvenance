@@ -4,9 +4,9 @@ Single config object that defines the entire pipeline behavior.
 All runs are defined by this config - explicit configuration.
 """
 
-from typing import List, Optional, Dict, Any
-from dataclasses import dataclass, field
 import hashlib
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -52,7 +52,7 @@ class EvaluationConfig:
 class MetricsConfig:
     """Metrics to compute."""
 
-    metrics: List[str] = field(
+    metrics: list[str] = field(
         default_factory=lambda: ["precision", "recall", "f1", "accuracy", "map", "mrr"]
     )
 
@@ -135,7 +135,7 @@ class BenchmarkConfig:
         return hashlib.sha256(config_json.encode()).hexdigest()[:16]
 
     @classmethod
-    def from_dict(cls, config_dict: Dict[str, Any]) -> "BenchmarkConfig":
+    def from_dict(cls, config_dict: dict[str, Any]) -> "BenchmarkConfig":
         """Create config from dictionary.
 
         Args:

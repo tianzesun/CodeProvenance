@@ -10,8 +10,7 @@ import shutil
 import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Any, Optional, List
-import time
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
@@ -29,7 +28,6 @@ class ToolAdapter(ABC):
     @abstractmethod
     def name(self) -> str:
         """Unique tool identifier."""
-        pass
 
     @abstractmethod
     def score(self, code_a: str, code_b: str) -> float:
@@ -42,7 +40,6 @@ class ToolAdapter(ABC):
         Returns:
             Similarity score in [0, 1]
         """
-        pass
 
     def compare(self, code_a: str, code_b: str, **kwargs) -> float:
         """Alias for score() for cross_eval.py compatibility."""
@@ -50,8 +47,8 @@ class ToolAdapter(ABC):
 
     def score_batch(
         self,
-        pairs: List[tuple],
-    ) -> List[float]:
+        pairs: list[tuple],
+    ) -> list[float]:
         """Score multiple pairs.
 
         Args:
@@ -62,10 +59,10 @@ class ToolAdapter(ABC):
         """
         return [self.score(a, b) for a, b in pairs]
 
-    def compare_batch(self, pairs, **kwargs) -> List[float]:
+    def compare_batch(self, pairs, **kwargs) -> list[float]:
         return self.score_batch(pairs)
 
-    def get_metadata(self) -> Dict[str, Any]:
+    def get_metadata(self) -> dict[str, Any]:
         """Return metadata about this tool."""
         return {"name": self.name}
 
@@ -80,7 +77,7 @@ class BaseToolAdapter(ToolAdapter):
     def name(self) -> str:
         return self._name
 
-    def get_metadata(self) -> Dict[str, Any]:
+    def get_metadata(self) -> dict[str, Any]:
         return {"name": self.name}
 
 
@@ -201,7 +198,10 @@ class HybridEngineAdapter(BaseToolAdapter):
     def _ensure_engine(self):
         if self._engine is not None:
             return
-        from src.backend.engines.similarity.base_similarity import SimilarityEngine, register_builtin_algorithms
+        from src.backend.engines.similarity.base_similarity import (
+            SimilarityEngine,
+            register_builtin_algorithms,
+        )
         self._engine = SimilarityEngine()
         register_builtin_algorithms(self._engine)
         self._initialized = True
@@ -265,8 +265,8 @@ class CosineTFIDFAdapter(BaseToolAdapter):
         super().__init__(name="cosine_tfidf")
 
     def score(self, code_a: str, code_b: str) -> float:
-        from collections import Counter
         import math
+        from collections import Counter
 
         def tf_vector(text):
             tokens = text.split()
@@ -743,7 +743,7 @@ class SourcererCCAdapter(BaseToolAdapter):
             return round(min(0.35, max(0.0, rng.gauss(0.08, 0.06))), 4)
 
 
-def build_default_adapters() -> List[ToolAdapter]:
+def build_default_adapters() -> list[ToolAdapter]:
     """Build a list of default tool adapters.
 
     Returns:

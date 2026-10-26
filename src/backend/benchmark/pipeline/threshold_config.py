@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ class ThresholdConfig:
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"{name} must be in [0, 1], got {value}")
 
-    def get_threshold(self, clone_type: Optional[int] = None) -> float:
+    def get_threshold(self, clone_type: int | None = None) -> float:
         """Get threshold for a specific clone type.
 
         Args:
@@ -67,7 +67,7 @@ class ThresholdConfig:
         }
         return thresholds.get(clone_type, self.global_threshold)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "global_threshold": self.global_threshold,
@@ -78,7 +78,7 @@ class ThresholdConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ThresholdConfig:
+    def from_dict(cls, data: dict[str, Any]) -> ThresholdConfig:
         """Create from dictionary."""
         return cls(
             global_threshold=data.get("global_threshold", 0.7),
@@ -128,7 +128,7 @@ class PipelineThresholdConfig:
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     version: str = "1.0"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "thresholds": self.thresholds.to_dict(),
@@ -140,7 +140,7 @@ class PipelineThresholdConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> PipelineThresholdConfig:
+    def from_dict(cls, data: dict[str, Any]) -> PipelineThresholdConfig:
         """Create from dictionary."""
         return cls(
             thresholds=ThresholdConfig.from_dict(data.get("thresholds", {})),
@@ -169,7 +169,7 @@ class PipelineThresholdConfig:
 
 def compute_decision(
     score: float,
-    threshold: Optional[float] = None,
+    threshold: float | None = None,
 ) -> bool:
     """Compute binary decision from score and threshold.
 

@@ -6,14 +6,13 @@ with additional convenience functions.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, Callable
+from typing import Any
+
 import numpy as np
 
 from src.backend.benchmark.evaluation.statistics.bootstrap import (
     bootstrap_confidence_interval,
-    bootstrap_metric,
     paired_bootstrap_test,
-    BootstrapResult,
 )
 
 
@@ -21,7 +20,7 @@ def mcnemar_test(
     y_true: np.ndarray,
     y_pred_a: np.ndarray,
     y_pred_b: np.ndarray,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """McNemar's test for comparing two classifiers.
     
     Tests whether classifier A is significantly different from classifier B.
@@ -83,7 +82,7 @@ def add_significance_to_results(
     n_bootstrap: int = 1000,
     confidence_level: float = 0.95,
     seed: int = 42,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Add significance analysis to benchmark results.
     
     Computes bootstrap confidence intervals for precision, recall, and F1.
@@ -208,7 +207,7 @@ def compare_engines_significance(
     threshold: float = 0.5,
     n_bootstrap: int = 10000,
     seed: int = 42,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compare two engines with statistical significance testing.
     
     Args:

@@ -20,14 +20,11 @@ Usage:
 """
 from __future__ import annotations
 
-import keyword
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set
-
+from typing import Any
 
 # Language keywords to NOT normalize
-KEYWORDS: Set[str] = {
+KEYWORDS: set[str] = {
     # Python
     'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
     'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
@@ -35,27 +32,22 @@ KEYWORDS: Set[str] = {
     'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try',
     'while', 'with', 'yield',
     # Java
-    'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch',
-    'char', 'class', 'const', 'continue', 'default', 'do', 'double',
-    'else', 'enum', 'extends', 'final', 'finally', 'float', 'for',
-    'goto', 'if', 'implements', 'import', 'instanceof', 'int',
+    'abstract', 'boolean', 'byte', 'case', 'catch',
+    'char', 'const', 'default', 'do', 'double',
+    'enum', 'extends', 'final', 'float', 'goto', 'implements', 'instanceof', 'int',
     'interface', 'long', 'native', 'new', 'package', 'private',
-    'protected', 'public', 'return', 'short', 'static', 'strictfp',
+    'protected', 'public', 'short', 'static', 'strictfp',
     'super', 'switch', 'synchronized', 'this', 'throw', 'throws',
-    'transient', 'try', 'void', 'volatile', 'while',
+    'transient', 'void', 'volatile', 'while',
     # JavaScript
-    'var', 'let', 'const', 'function', 'return', 'if', 'else', 'for',
-    'while', 'do', 'switch', 'case', 'break', 'continue', 'new', 'delete',
-    'typeof', 'instanceof', 'void', 'in', 'of', 'async', 'await', 'yield',
-    'class', 'extends', 'constructor', 'try', 'catch', 'finally', 'throw',
-    'debugger', 'with', 'export', 'import',
+    'var', 'let', 'function', 'delete',
+    'typeof', 'of', 'constructor', 'debugger', 'export', 'import',
     # Common built-ins
-    'self', 'int', 'str', 'float', 'list', 'dict', 'set', 'tuple',
+    'self', 'str', 'list', 'dict', 'set', 'tuple',
     'bool', 'object', 'string', 'array', 'Map', 'Set', 'List',
     'ArrayList', 'HashMap', 'Math', 'System', 'console', 'document',
     'print', 'input', 'range', 'len', 'sum', 'max', 'min',
     'Integer', 'String', 'Boolean', 'Double', 'Long', 'Float',
-    'new', 'List', 'ArrayList',
 }
 
 
@@ -76,7 +68,7 @@ def normalize_identifiers(code: str, language: str = "python") -> str:
         >>> normalize_identifiers("def foo(x): return x + 1")
         'def ID_0(ID_1): return ID_1 + 1'
     """
-    identifier_map: Dict[str, int] = {}
+    identifier_map: dict[str, int] = {}
     counter = 0
     keywords = KEYWORDS
     

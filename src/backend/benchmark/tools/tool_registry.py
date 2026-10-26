@@ -7,9 +7,9 @@ metadata, paths, versions, and enablement state.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Sequence
 
 
 @dataclass(frozen=True)
@@ -23,9 +23,9 @@ class ToolSpec:
     category: str  # external | library | internal
     entry_kind: str  # benchmark_tool | helper_lib | internal_engine
     root_path: Path
-    adapter_module: Optional[str] = None
-    adapter_class: Optional[str] = None
-    version: Optional[str] = None
+    adapter_module: str | None = None
+    adapter_class: str | None = None
+    version: str | None = None
     supported_languages: Sequence[str] = field(default_factory=tuple)
     enabled: bool = True
     official: bool = True
@@ -41,7 +41,7 @@ class ToolRegistry:
     """
 
     def __init__(self) -> None:
-        self._tools: Dict[str, ToolSpec] = {}
+        self._tools: dict[str, ToolSpec] = {}
 
     def register(self, spec: ToolSpec) -> None:
         """Register a tool specification."""

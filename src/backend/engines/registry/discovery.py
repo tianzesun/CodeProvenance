@@ -113,7 +113,7 @@ def discover_plugins(
             else:
                 importlib.import_module(name)
             imported.append(name)
-        except Exception as exc:  # noqa: BLE001 - one broken runner must not hide the others
+        except Exception as exc:
             failed[name] = _describe(exc)
             logger.error("Plugin module %s failed to import", name, exc_info=True)
 

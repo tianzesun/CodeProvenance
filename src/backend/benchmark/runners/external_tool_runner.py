@@ -9,8 +9,9 @@ import subprocess
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 from src.backend.benchmark.adapters.dolos_adapter import run_dolos_batch
 from src.backend.benchmark.adapters.jplag_adapter import run_jplag_batch
@@ -20,9 +21,9 @@ from src.backend.benchmark.adapters.pmd_adapter import run_pmd_batch
 logger = logging.getLogger(__name__)
 
 
-SubmissionMap = Dict[str, str]
-PairList = List[Tuple[str, str]]
-ToolResult = Dict[str, Any]
+SubmissionMap = dict[str, str]
+PairList = list[tuple[str, str]]
+ToolResult = dict[str, Any]
 
 
 class ExternalToolRunner:
@@ -30,7 +31,7 @@ class ExternalToolRunner:
 
     def __init__(
         self,
-        tools_dir: Optional[Path] = None,
+        tools_dir: Path | None = None,
         moss_user_id: str = "",
     ) -> None:
         self.tools_dir = tools_dir or Path(__file__).resolve().parents[4] / "tools"
@@ -42,9 +43,9 @@ class ExternalToolRunner:
         tool_ids: Iterable[str],
         submissions: SubmissionMap,
         pairs: PairList,
-    ) -> Dict[str, ToolResult]:
+    ) -> dict[str, ToolResult]:
         """Run non-IntegrityDesk tools and preserve per-tool failures."""
-        results: Dict[str, ToolResult] = {}
+        results: dict[str, ToolResult] = {}
         for tool_id in tool_ids:
             normalized_tool_id = str(tool_id).strip().lower()
             if normalized_tool_id == "integritydesk":
@@ -74,7 +75,7 @@ class ExternalToolRunner:
         submissions: SubmissionMap,
         pairs: PairList,
         progress_cb=None,
-    ) -> Optional[ToolResult]:
+    ) -> ToolResult | None:
         """Run one external tool and return normalized pair scores."""
         if tool_id == "moss":
             if not self.moss_user_id:
@@ -97,9 +98,9 @@ class ExternalToolRunner:
             return self._run_sherlock(submissions, pairs, progress_cb=progress_cb)
         return None
 
-    def _find_tool_dir(self, tool_id: str) -> Optional[Path]:
+    def _find_tool_dir(self, tool_id: str) -> Path | None:
         """Resolve a benchmark tool directory from canonical and legacy paths."""
-        candidates: Dict[str, List[Path]] = {
+        candidates: dict[str, list[Path]] = {
             "nicad": [
                 self.external_tools_dir / "nicad",
                 self.external_tools_dir / "NiCad-6.2",
@@ -116,7 +117,7 @@ class ExternalToolRunner:
                 return candidate
         return None
 
-    def _find_nicad_executable(self) -> Optional[Path]:
+    def _find_nicad_executable(self) -> Path | None:
         """Find a NiCad executable in the configured tool location."""
         nicad_dir = self._find_tool_dir("nicad")
         if not nicad_dir:
@@ -126,10 +127,10 @@ class ExternalToolRunner:
                 return candidate
         return None
 
-    def _find_txl_executable(self) -> Optional[Path]:
+    def _find_txl_executable(self) -> Path | None:
         """Find a TXL executable used by NiCad."""
         nicad_dir = self._find_tool_dir("nicad")
-        candidates: List[Path] = []
+        candidates: list[Path] = []
         if nicad_dir:
             candidates.extend(
                 [
@@ -155,7 +156,7 @@ class ExternalToolRunner:
         submissions: SubmissionMap,
         pairs: PairList,
         progress_cb=None,
-    ) -> Optional[ToolResult]:
+    ) -> ToolResult | None:
         """Run NiCad and convert clone-class XML output to pair scores."""
         _ = progress_cb
         nicad_path = self._find_nicad_executable()
@@ -163,8 +164,8 @@ class ExternalToolRunner:
         if not nicad_path or not txl_path:
             return None
 
-        groups: Dict[str, SubmissionMap] = {}
-        score_by_pair: Dict[str, float] = {}
+        groups: dict[str, SubmissionMap] = {}
+        score_by_pair: dict[str, float] = {}
         language_map = {
             "python": "py",
             "java": "java",
@@ -207,7 +208,7 @@ class ExternalToolRunner:
         txl_path: Path,
         nicad_language: str,
         submissions: SubmissionMap,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Run NiCad for one language group."""
         with tempfile.TemporaryDirectory(prefix=f"nicad-{nicad_language}-") as temp_dir:
             source_root = Path(temp_dir) / f"submissions_{Path(temp_dir).name}"
@@ -254,14 +255,14 @@ class ExternalToolRunner:
                 return {}
             return self._parse_nicad_xml(xml_path, submissions, submission_map)
 
-    def _extract_nicad_report_dir(self, stdout: str) -> Optional[str]:
+    def _extract_nicad_report_dir(self, stdout: str) -> str | None:
         """Extract the output directory emitted by NiCad."""
         for line in stdout.splitlines():
             if line.startswith("Results in "):
                 return line.replace("Results in ", "", 1).strip()
         return None
 
-    def _find_nicad_xml(self, report_dir: Path) -> Optional[Path]:
+    def _find_nicad_xml(self, report_dir: Path) -> Path | None:
         """Find the NiCad XML clone report."""
         candidates = sorted(
             path
@@ -278,15 +279,15 @@ class ExternalToolRunner:
         self,
         xml_path: Path,
         submissions: SubmissionMap,
-        submission_map: Dict[str, Dict[str, str]],
-    ) -> Dict[str, float]:
+        submission_map: dict[str, dict[str, str]],
+    ) -> dict[str, float]:
         """Parse NiCad XML output into pair scores."""
         try:
             tree = ET.parse(xml_path)
         except ET.ParseError:
             return self._parse_nicad_xml_text(xml_path, submissions, submission_map)
 
-        score_by_pair: Dict[str, float] = {}
+        score_by_pair: dict[str, float] = {}
         root = tree.getroot()
         for class_node in root.findall("class"):
             try:
@@ -307,10 +308,10 @@ class ExternalToolRunner:
         self,
         xml_path: Path,
         submissions: SubmissionMap,
-        submission_map: Dict[str, Dict[str, str]],
-    ) -> Dict[str, float]:
+        submission_map: dict[str, dict[str, str]],
+    ) -> dict[str, float]:
         """Recover NiCad pair scores from malformed XML report text."""
-        score_by_pair: Dict[str, float] = {}
+        score_by_pair: dict[str, float] = {}
         report_text = xml_path.read_text(encoding="utf-8", errors="ignore")
         class_pattern = re.compile(
             r"<class\b(?P<attrs>[^>]*)>(?P<body>.*?)</class>", re.DOTALL
@@ -337,14 +338,14 @@ class ExternalToolRunner:
 
     def _add_nicad_class_scores(
         self,
-        score_by_pair: Dict[str, float],
+        score_by_pair: dict[str, float],
         similarity: float,
         source_paths: Iterable[str],
         submissions: SubmissionMap,
-        submission_map: Dict[str, Dict[str, str]],
+        submission_map: dict[str, dict[str, str]],
     ) -> None:
         """Add pair scores for one NiCad clone class."""
-        class_files: List[str] = []
+        class_files: list[str] = []
         for source_path in source_paths:
             filename = Path(source_path).name
             if filename in submissions:
@@ -361,7 +362,7 @@ class ExternalToolRunner:
                     score_by_pair.get(pair_key, 0.0), similarity
                 )
 
-    def _find_sherlock_executable(self) -> Optional[Path]:
+    def _find_sherlock_executable(self) -> Path | None:
         """Find an executable Sherlock binary."""
         sherlock_dir = self._find_tool_dir("sherlock")
         if not sherlock_dir:
@@ -376,20 +377,20 @@ class ExternalToolRunner:
         submissions: SubmissionMap,
         pairs: PairList,
         progress_cb=None,
-    ) -> Optional[ToolResult]:
+    ) -> ToolResult | None:
         """Run Sherlock and convert percentage output to pair scores."""
         _ = progress_cb
         sherlock_path = self._find_sherlock_executable()
         if not sherlock_path:
             return None
 
-        groups: Dict[str, SubmissionMap] = {}
+        groups: dict[str, SubmissionMap] = {}
         for filename, content in submissions.items():
             suffix = Path(filename).suffix.lower()
             if suffix:
                 groups.setdefault(suffix, {})[filename] = content
 
-        score_by_pair: Dict[str, float] = {}
+        score_by_pair: dict[str, float] = {}
         with tempfile.TemporaryDirectory(prefix="sherlock-benchmark-") as temp_dir:
             source_root = Path(temp_dir) / "subs"
             source_root.mkdir(parents=True, exist_ok=True)
@@ -436,9 +437,9 @@ class ExternalToolRunner:
     def _parse_sherlock_output(
         self,
         stdout: str,
-        path_to_filename: Dict[str, str],
-        name_to_filename: Dict[str, str],
-        score_by_pair: Dict[str, float],
+        path_to_filename: dict[str, str],
+        name_to_filename: dict[str, str],
+        score_by_pair: dict[str, float],
     ) -> None:
         """Parse Sherlock semicolon output into pair scores."""
         for raw_line in stdout.splitlines():
@@ -465,9 +466,9 @@ class ExternalToolRunner:
     def _resolve_sherlock_file(
         self,
         raw_path: str,
-        path_to_filename: Dict[str, str],
-        name_to_filename: Dict[str, str],
-    ) -> Optional[str]:
+        path_to_filename: dict[str, str],
+        name_to_filename: dict[str, str],
+    ) -> str | None:
         """Map a Sherlock output path or basename to the original submission name."""
         resolved = str(Path(raw_path).resolve())
         if resolved in path_to_filename:
@@ -476,9 +477,9 @@ class ExternalToolRunner:
 
     def _write_submission_dirs(
         self, target_dir: Path, submissions: SubmissionMap
-    ) -> Dict[str, Dict[str, str]]:
+    ) -> dict[str, dict[str, str]]:
         """Write submissions in one-directory-per-submission layout."""
-        written: Dict[str, Dict[str, str]] = {}
+        written: dict[str, dict[str, str]] = {}
         for index, (filename, content) in enumerate(sorted(submissions.items())):
             submission_id = f"sub{index:03d}"
             submission_dir = target_dir / submission_id
@@ -490,9 +491,9 @@ class ExternalToolRunner:
 
     def _write_flat_submissions(
         self, target_dir: Path, submissions: SubmissionMap
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """Write submissions into one directory and return original-name mapping."""
-        written: Dict[str, str] = {}
+        written: dict[str, str] = {}
         for filename, content in sorted(submissions.items()):
             safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(filename).name)
             target = target_dir / safe_name

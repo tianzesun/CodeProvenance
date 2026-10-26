@@ -16,10 +16,10 @@ Dataset structure:
     ├── max_in_list/
     └── reverse_string/
 """
-from typing import Dict, List, Any, Optional
-from pathlib import Path
-from dataclasses import dataclass, field
 import csv
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -56,14 +56,14 @@ class CodeSimilarityDataset:
     
     def __init__(self, data_dir: Path = Path("benchmark/data/CodeSimilarityDataset")):
         self.data_dir = data_dir
-        self._pairs: List[SimilarityPair] = []
-        self._source_cache: Dict[str, str] = {}
+        self._pairs: list[SimilarityPair] = []
+        self._source_cache: dict[str, str] = {}
     
     def load(
         self,
-        algorithms: Optional[List[str]] = None,
-        max_pairs: Optional[int] = None
-    ) -> List[SimilarityPair]:
+        algorithms: list[str] | None = None,
+        max_pairs: int | None = None
+    ) -> list[SimilarityPair]:
         """
         Load similarity pairs from the dataset.
         
@@ -112,9 +112,9 @@ class CodeSimilarityDataset:
     def _load_from_full_metadata(
         self,
         metadata_file: Path,
-        algorithms: Optional[List[str]] = None,
-        max_pairs: Optional[int] = None
-    ) -> List[SimilarityPair]:
+        algorithms: list[str] | None = None,
+        max_pairs: int | None = None
+    ) -> list[SimilarityPair]:
         """Load pairs from full_metadata.csv."""
         pairs = []
         
@@ -152,8 +152,8 @@ class CodeSimilarityDataset:
         self,
         metadata_file: Path,
         algorithm: str,
-        max_pairs: Optional[int] = None
-    ) -> List[SimilarityPair]:
+        max_pairs: int | None = None
+    ) -> list[SimilarityPair]:
         """Load pairs from algorithm-specific metadata.csv."""
         pairs = []
         
@@ -205,7 +205,7 @@ class CodeSimilarityDataset:
         
         return ""
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         stats = {
             "name": "CodeSimilarityDataset",
@@ -230,7 +230,7 @@ class CodeSimilarityDataset:
         
         return stats
     
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check dataset availability."""
         availability = {
             "data_dir": self.data_dir.exists(),

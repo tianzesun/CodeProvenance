@@ -21,7 +21,6 @@ from __future__ import annotations
 import ast
 import hashlib
 import logging
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -234,7 +233,7 @@ class AdversarialDefense:
                 evasion_detected=evasion_detected,
                 confidence=self._compute_confidence(obfuscation_score, paraphrase_indicators),
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("Adversarial analysis failed: %s", exc)
             return self._default_analysis(code)
 
@@ -256,7 +255,7 @@ class AdversarialDefense:
             return _fallback_hash(code)
         try:
             return _normalized_digest(tree)
-        except Exception as exc:  # noqa: BLE001 (e.g. RecursionError in ast.unparse)
+        except Exception as exc:
             logger.debug("Semantic hash failed: %s", exc)
             return _fallback_hash(code)
 
@@ -276,7 +275,7 @@ class AdversarialDefense:
                 try:
                     clone = ast.parse(ast.unparse(node))  # detach and normalise independently
                     hashes.append(_normalized_digest(clone))
-                except Exception:  # noqa: BLE001
+                except Exception:
                     continue
         return sorted(hashes)
 

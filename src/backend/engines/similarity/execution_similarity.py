@@ -348,7 +348,7 @@ class DockerSandbox:
             if on_timeout is not None:
                 try:
                     on_timeout()
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.warning("Could not stop sandbox container: %s", exc)
         try:
             proc.wait(timeout=5)

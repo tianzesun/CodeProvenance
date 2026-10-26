@@ -26,8 +26,6 @@ import re
 import string
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-
 
 # =============================================================================
 # Data structures
@@ -42,13 +40,13 @@ class SyntheticPair:
     clone_type: int  # 0=non-clone, 1=T1, 2=T2, 3=T3, 4=T4
     label: int  # 1=clone, 0=non-clone
     obfuscation: str = "none"  # "none", "rename", "reorder", "restructure"
-    metadata: Dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class SyntheticDataset:
     """Complete synthetic dataset."""
-    pairs: List[SyntheticPair]
+    pairs: list[SyntheticPair]
     name: str = "synthetic"
     version: str = "1.0"
     
@@ -88,7 +86,7 @@ class SyntheticDataset:
         return str(output_path)
     
     @classmethod
-    def load(cls, path: str) -> "SyntheticDataset":
+    def load(cls, path: str) -> SyntheticDataset:
         """Load dataset from JSON file.
         
         Args:
@@ -120,13 +118,13 @@ class SyntheticDataset:
             version=data.get("version", "1.0"),
         )
     
-    def stats(self) -> Dict[str, int]:
+    def stats(self) -> dict[str, int]:
         """Get dataset statistics.
         
         Returns:
             Dictionary with counts by clone type.
         """
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for p in self.pairs:
             key = f"type_{p.clone_type}" if p.clone_type > 0 else "non_clone"
             counts[key] = counts.get(key, 0) + 1
@@ -194,7 +192,7 @@ def _generate_variable_name(seed: int) -> str:
 # Clone type generators
 # =============================================================================
 
-def generate_type1_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
+def generate_type1_pair(base_code: str, seed: int = 42) -> tuple[str, str]:
     """Generate Type-1 clone pair (identical code).
     
     Args:
@@ -207,7 +205,7 @@ def generate_type1_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
     return base_code, base_code
 
 
-def generate_type2_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
+def generate_type2_pair(base_code: str, seed: int = 42) -> tuple[str, str]:
     """Generate Type-2 clone pair (renamed identifiers).
     
     Args:
@@ -252,7 +250,7 @@ def generate_type2_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
     return base_code, modified
 
 
-def generate_type3_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
+def generate_type3_pair(base_code: str, seed: int = 42) -> tuple[str, str]:
     """Generate Type-3 clone pair (restructured code).
     
     Args:
@@ -271,7 +269,7 @@ def generate_type3_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
     if len(non_empty) > 2:
         # Add a redundant comment line
         insert_pos = rng.choice(non_empty[1:-1]) if len(non_empty) > 2 else non_empty[0]
-        lines.insert(insert_pos, f"    # Processing step")
+        lines.insert(insert_pos, "    # Processing step")
     
     modified = '\n'.join(lines)
     
@@ -289,7 +287,7 @@ def generate_type3_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
     return base_code, modified
 
 
-def generate_type4_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
+def generate_type4_pair(base_code: str, seed: int = 42) -> tuple[str, str]:
     """Generate Type-4 clone pair (semantic equivalent, different syntax).
     
     Args:
@@ -303,7 +301,6 @@ def generate_type4_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
     modified = base_code
     
     # Transform 1: while -> for loops (when pattern detected)
-    import re
     
     # Transform 2: if-else conditional expressions
     modified = modified.replace("= True", "= not False")
@@ -328,7 +325,7 @@ def generate_type4_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
     return base_code, modified
 
 
-def generate_type5_adversarial_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
+def generate_type5_adversarial_pair(base_code: str, seed: int = 42) -> tuple[str, str]:
     """Generate Type-5 adversarial clone pair (professional obfuscation).
     
     This is what actual cheaters use. No existing benchmark has this category.
@@ -428,7 +425,7 @@ def generate_type5_adversarial_pair(base_code: str, seed: int = 42) -> Tuple[str
     return base_code, modified
 
 
-def generate_type6_llm_rewrite_pair(base_code: str, seed: int = 42) -> Tuple[str, str]:
+def generate_type6_llm_rewrite_pair(base_code: str, seed: int = 42) -> tuple[str, str]:
     """Generate Type-6 LLM rewritten clone pair.
     
     This is the #1 modern cheating method that NO existing benchmark tests.
@@ -488,7 +485,7 @@ def generate_type6_llm_rewrite_pair(base_code: str, seed: int = 42) -> Tuple[str
     return base_code, modified
 
 
-def generate_non_clone_pair(base_code: str, seed: int = 42, language: str = "python") -> Tuple[str, str]:
+def generate_non_clone_pair(base_code: str, seed: int = 42, language: str = "python") -> tuple[str, str]:
     """Generate a non-clone pair (completely different code).
     
     Args:
@@ -612,7 +609,7 @@ class SyntheticDatasetGenerator:
     
     def __init__(
         self,
-        base_codes: Optional[List[str]] = None,
+        base_codes: list[str] | None = None,
         seed: int = 42,
         language: str = "python"
     ):
@@ -629,7 +626,7 @@ class SyntheticDatasetGenerator:
         self._language = language
         self._base_codes = base_codes or self._get_default_templates(language)
     
-    def _get_default_templates(self, language: str) -> List[str]:
+    def _get_default_templates(self, language: str) -> list[str]:
         """Get default code templates for the given language.
         
         Args:
@@ -1307,7 +1304,7 @@ def heapify(arr, n, i):
         Returns:
             Generated SyntheticDataset.
         """
-        pairs: List[SyntheticPair] = []
+        pairs: list[SyntheticPair] = []
         pair_id = 0
         
         generators = {

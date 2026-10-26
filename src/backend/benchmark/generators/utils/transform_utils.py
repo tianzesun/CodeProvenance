@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import ast
 import random
-from typing import List, Optional
 
 from src.backend.benchmark.generators.utils.ast_utils import parse_code, unparse_code
 
@@ -54,7 +53,7 @@ class StatementReorderer(ast.NodeTransformer):
         node.body = shuffled_blocks
         return node
     
-    def _find_independent_blocks(self, statements: List[ast.stmt]) -> List[List[ast.stmt]]:
+    def _find_independent_blocks(self, statements: list[ast.stmt]) -> list[list[ast.stmt]]:
         """Find blocks of independent statements.
         
         Args:
@@ -82,7 +81,7 @@ class StatementReorderer(ast.NodeTransformer):
         
         return blocks
     
-    def _is_independent(self, stmt: ast.stmt, block: List[ast.stmt]) -> bool:
+    def _is_independent(self, stmt: ast.stmt, block: list[ast.stmt]) -> bool:
         """Check if statement is independent from block.
         
         Args:
@@ -206,7 +205,7 @@ class LoopConverter(ast.NodeTransformer):
         
         return node
     
-    def _for_to_while(self, for_node: ast.For) -> List[ast.stmt]:
+    def _for_to_while(self, for_node: ast.For) -> list[ast.stmt]:
         """Convert for loop to while loop.
         
         Args:

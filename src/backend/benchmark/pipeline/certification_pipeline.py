@@ -16,28 +16,30 @@ Usage:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
-from pathlib import Path
 import json
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
+from src.backend.benchmark.certification.adversarial_robustness import (
+    AdversarialRobustnessResult,
+    AdversarialRobustnessValidator,
+)
+from src.backend.benchmark.certification.reproducibility import (
+    ReproducibilityInfo,
+    collect_reproducibility_info,
+)
+from src.backend.benchmark.validation.cross_validator import (
+    CrossValidationResult,
+    cross_validate_benchmark,
+)
 from src.backend.benchmark.validation.label_validators import (
     DatasetLabelValidator,
     LabelValidationResult,
 )
-from src.backend.benchmark.validation.cross_validator import (
-    cross_validate_benchmark,
-    CrossValidationResult,
-)
-from src.backend.benchmark.certification.adversarial_robustness import (
-    AdversarialRobustnessValidator,
-    AdversarialRobustnessResult,
-)
-from src.backend.benchmark.certification.reproducibility import (
-    collect_reproducibility_info,
-    ReproducibilityInfo,
-)
+
 
 @dataclass
 class CertificationReport:
@@ -59,14 +61,14 @@ class CertificationReport:
     dataset_name: str
     total_pairs: int
     label_validation: LabelValidationResult
-    cross_validation: Dict[str, CrossValidationResult]
-    adversarial_robustness: Dict[str, AdversarialRobustnessResult]
+    cross_validation: dict[str, CrossValidationResult]
+    adversarial_robustness: dict[str, AdversarialRobustnessResult]
     reproducibility: ReproducibilityInfo
     passed_certification: bool
-    issues: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "timestamp": self.timestamp,
@@ -164,7 +166,7 @@ class CertificationReport:
                 f"  Stability Score:       {robustness.stability_score:.4f}",
                 f"  Mean Degradation:      {robustness.mean_degradation:.1%}",
                 f"  Max Degradation:       {robustness.max_degradation:.1%}",
-                f"  Attack Details:",
+                "  Attack Details:",
             ])
             for attack_name, degradation in robustness.attack_details.items():
                 lines.append(f"    - {attack_name}: {degradation:.1%} drop")
@@ -235,12 +237,12 @@ class CertificationPipeline:
     
     def run_full_certification(
         self,
-        code_pairs: List[Tuple[str, str]],
-        labels: List[int],
-        scores_dict: Dict[str, List[float]],
+        code_pairs: list[tuple[str, str]],
+        labels: list[int],
+        scores_dict: dict[str, list[float]],
         dataset_name: str = "benchmark_dataset",
-        alternative_labels: Optional[List[List[int]]] = None,
-        config: Optional[Dict[str, Any]] = None,
+        alternative_labels: list[list[int]] | None = None,
+        config: dict[str, Any] | None = None,
         threshold: float = 0.5,
     ) -> CertificationReport:
         """Run complete certification pipeline.
@@ -257,13 +259,13 @@ class CertificationPipeline:
         Returns:
             CertificationReport with all validation results.
         """
-        issues: List[str] = []
-        warnings: List[str] = []
+        issues: list[str] = []
+        warnings: list[str] = []
         
         timestamp = datetime.now().isoformat()
         
         # Step 1: Validate labels
-        print(f"[1/4] Validating label quality...")
+        print("[1/4] Validating label quality...")
         label_validation = DatasetLabelValidator.validate_dataset(
             pairs=code_pairs,
             labels=labels,
@@ -294,7 +296,7 @@ class CertificationPipeline:
             print(f"  ✓ {tool_name}: F1={cv_result.mean_f1:.4f} (±{cv_result.std_f1:.4f})")
         
         # Step 3: Test adversarial robustness
-        print(f"[3/4] Testing adversarial robustness...")
+        print("[3/4] Testing adversarial robustness...")
         adversarial_robustness = {}
         validator = AdversarialRobustnessValidator()
         
@@ -303,7 +305,7 @@ class CertificationPipeline:
             cv_result = cross_validation[tool_name]
             
             # Create a metric function that computes F1 from scores
-            def make_metric_fn(scores_list: List[float], threshold: float) -> Callable:
+            def make_metric_fn(scores_list: list[float], threshold: float) -> Callable:
                 def metric_fn(codes_a, codes_b, lbls, decisions):
                     # Compute decisions from scores
                     import numpy as np
@@ -342,7 +344,7 @@ class CertificationPipeline:
                 )
         
         # Step 4: Collect reproducibility info
-        print(f"[4/4] Collecting reproducibility information...")
+        print("[4/4] Collecting reproducibility information...")
         reproducibility = collect_reproducibility_info(
             config=config or {},
             random_seed=42,
@@ -374,11 +376,11 @@ class CertificationPipeline:
 
 
 def run_certification_pipeline(
-    code_pairs: List[Tuple[str, str]],
-    labels: List[int],
-    scores_dict: Dict[str, List[float]],
+    code_pairs: list[tuple[str, str]],
+    labels: list[int],
+    scores_dict: dict[str, list[float]],
     dataset_name: str = "benchmark_dataset",
-    output_path: Optional[Path] = None,
+    output_path: Path | None = None,
 ) -> CertificationReport:
     """Convenience function to run full certification.
     

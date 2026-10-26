@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
 
 from src.backend.benchmark.similarity.base_engine import BaseSimilarityEngine
 
@@ -36,7 +35,7 @@ class RefinedDecision:
     """Output from Precision Recovery Layer."""
     is_clone: bool
     confidence: float
-    rejection_reason: Optional[str] = None
+    rejection_reason: str | None = None
     fingerprint_sim: float = 0.0
     api_overlap: float = 0.0
 
@@ -46,7 +45,7 @@ class FunctionFingerprint:
     """Lightweight behavioral fingerprint of a function."""
     num_loops: int = 0
     num_branches: int = 0
-    function_calls: List[str] = field(default_factory=list)
+    function_calls: list[str] = field(default_factory=list)
     return_type_hint: str = ""
     num_params: int = 0
     has_docstring: bool = False
@@ -205,7 +204,7 @@ class PrecisionRecoveryLayer:
                              fingerprint_sim=fp_sim, api_overlap=api_overlap)
 
     def _structural_check(self, c: SimilarityCandidate,
-                         code_a: str, code_b: str) -> Optional[str]:
+                         code_a: str, code_b: str) -> str | None:
         """Stage 1: Fast structural rejection."""
         if c.ast_sim < self.MIN_AST_SIM and c.token_sim < 0.2:
             return "No structural similarity"
@@ -226,7 +225,7 @@ class PrecisionRecoveryLayer:
         return None
 
     def _semantic_check(self, c: SimilarityCandidate,
-                        api_overlap: float) -> Optional[str]:
+                        api_overlap: float) -> str | None:
         """Stage 2: Semantic consistency check."""
         if c.embedding_sim > 0.85 and api_overlap < self.MIN_API_OVERLAP_FOR_EMBEDDING:
             return "Semantic mismatch (API)"
@@ -245,7 +244,7 @@ class PrecisionRecoveryLayer:
     def _adaptive_threshold_check(self, c: SimilarityCandidate,
                                  code_a: str, code_b: str,
                                  final_score: float, fp_sim: float,
-                                 api_overlap: float) -> Optional[str]:
+                                 api_overlap: float) -> str | None:
         """Stage 5: Adaptive threshold + anti-FP heuristics."""
         size = min(len(code_a.split()), len(code_b.split()))
 

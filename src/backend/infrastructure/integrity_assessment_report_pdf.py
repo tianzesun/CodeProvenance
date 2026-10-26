@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def export_integrity_report_pdf(
-    report: "IntegrityAssessmentReport",
+    report: IntegrityAssessmentReport,
     html_content: str | None = None,
 ) -> bytes:
     """Export an IntegrityAssessmentReport to PDF bytes.
@@ -61,7 +61,7 @@ def export_integrity_report_pdf(
     return html_content.encode("utf-8")
 
 
-def export_integrity_report_html(report: "IntegrityAssessmentReport") -> str:
+def export_integrity_report_html(report: IntegrityAssessmentReport) -> str:
     """Export report as self-contained HTML string."""
     from src.backend.infrastructure.integrity_assessment_report_html import (
         render_integrity_report_html,

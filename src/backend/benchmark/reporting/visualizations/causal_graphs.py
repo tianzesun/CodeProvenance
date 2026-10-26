@@ -3,10 +3,10 @@
 Generates graph visualizations showing causal relationships between code similarities,
 highlighting attribution chains and influence patterns.
 """
-from typing import Any, Dict, List, Optional
+import json
 from dataclasses import dataclass
 from enum import Enum
-import json
+from typing import Any
 
 
 class NodeType(Enum):
@@ -32,9 +32,9 @@ class CausalNode:
     label: str
     node_type: NodeType
     similarity_score: float
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "node_id": self.node_id,
@@ -53,9 +53,9 @@ class CausalEdge:
     edge_type: EdgeType
     weight: float
     confidence: float
-    evidence: List[str]
+    evidence: list[str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "source_id": self.source_id,
@@ -86,9 +86,9 @@ class CausalGraphGenerator:
 
     def build_graph(
         self,
-        files: List[Dict[str, Any]],
-        similarities: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        files: list[dict[str, Any]],
+        similarities: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         """Build causal graph from file data and similarities.
 
         Args:
@@ -146,11 +146,11 @@ class CausalGraphGenerator:
 
     def generate(
         self,
-        files: List[Dict[str, Any]],
-        similarities: List[Dict[str, Any]],
+        files: list[dict[str, Any]],
+        similarities: list[dict[str, Any]],
         output_path: str,
         title: str = "Causal Similarity Graph"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate causal graph visualization.
 
         Args:
@@ -177,7 +177,7 @@ class CausalGraphGenerator:
 
         return result
 
-    def to_json(self, result: Dict[str, Any]) -> str:
+    def to_json(self, result: dict[str, Any]) -> str:
         """Convert generation result to JSON.
 
         Args:

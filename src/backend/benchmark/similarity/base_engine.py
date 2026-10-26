@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -27,9 +27,9 @@ class SimilarityScore:
         metadata: Additional information about the comparison.
     """
     score: float
-    component_scores: Dict[str, float] = field(default_factory=dict)
+    component_scores: dict[str, float] = field(default_factory=dict)
     confidence: float = 1.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self) -> None:
         """Validate score ranges."""
@@ -69,7 +69,6 @@ class BaseSimilarityEngine(ABC):
             Unique name for this engine (e.g., "token_v1", "ast_hybrid").
             Must be stable across runs for reproducibility.
         """
-        pass
     
     @abstractmethod
     def compare(self, code_a: str, code_b: str) -> float:
@@ -92,7 +91,6 @@ class BaseSimilarityEngine(ABC):
         Raises:
             ValueError: If inputs are empty or invalid.
         """
-        pass
     
     def compare_with_details(self, code_a: str, code_b: str) -> SimilarityScore:
         """Compare with detailed breakdown. Default: wraps compare().
@@ -130,8 +128,6 @@ class BaseSimilarityEngine(ABC):
         Args:
             **kwargs: Configuration key-value pairs.
         """
-        pass
     
     def reset(self) -> None:
         """Reset engine state (for stateful engines)."""
-        pass

@@ -14,10 +14,10 @@ Expected structure:
         └── problem_C/python/solution_0.py ...
     └── ground_truth.json
 """
-from typing import Dict, List, Any, Optional
-from pathlib import Path
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -37,7 +37,7 @@ class CodeJamPair:
     problem: str = ""
 
 
-def generate_dataset(data_dir: Path = Path("benchmark/data/google_codejam")) -> List[CodeJamPair]:
+def generate_dataset(data_dir: Path = Path("benchmark/data/google_codejam")) -> list[CodeJamPair]:
     """Generate a Code Jam-style dataset with plagiarism labels.
     
     Args:
@@ -109,9 +109,9 @@ class GoogleCodeJamDataset:
         self.data_dir = data_dir
         self.submissions_dir = data_dir / "submissions"
         self.gt_file = data_dir / "ground_truth.json"
-        self._pairs: List[CodeJamPair] = []
+        self._pairs: list[CodeJamPair] = []
 
-    def load(self, max_pairs: Optional[int] = None) -> List[CodeJamPair]:
+    def load(self, max_pairs: int | None = None) -> list[CodeJamPair]:
         if not self.gt_file.exists():
             return generate_dataset(self.data_dir)
         
@@ -128,7 +128,7 @@ class GoogleCodeJamDataset:
         self._pairs = pairs
         return pairs
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         subs = list(self.submissions_dir.rglob("*.py")) if self.submissions_dir.exists() else []
         return {
             "name": "Google Code Jam",
@@ -137,7 +137,7 @@ class GoogleCodeJamDataset:
             "loaded_pairs": len(self._pairs),
         }
     
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         return {
             "data_dir": self.data_dir.exists(),
             "submissions_dir": self.submissions_dir.exists(),

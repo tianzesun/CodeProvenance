@@ -13,8 +13,9 @@ References:
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 from scipy import stats
@@ -39,7 +40,7 @@ class ConfidenceInterval:
     method: str
     n_samples: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "point_estimate": self.point_estimate,
@@ -82,9 +83,9 @@ class BootstrapResult:
     ci_upper: float
     confidence_level: float
     n_bootstrap: int
-    bootstrap_means: Optional[np.ndarray] = None
+    bootstrap_means: np.ndarray | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "mean": self.mean,
@@ -410,7 +411,7 @@ def compute_all_confidence_intervals(
     successes: int,
     trials: int,
     confidence_level: float = 0.95,
-) -> Dict[str, ConfidenceInterval]:
+) -> dict[str, ConfidenceInterval]:
     """Compute confidence intervals using all available methods.
 
     Args:

@@ -7,9 +7,6 @@ from __future__ import annotations
 
 import random
 import re
-from typing import Optional
-
-from src.backend.benchmark.generators.base_loader import CodePool
 
 
 class Type1Generator:

@@ -6,16 +6,14 @@ statements, adding dead code, or converting loop types.
 from __future__ import annotations
 
 import random
-from typing import List, Optional
 
-from src.backend.benchmark.generators.base_loader import CodePool
+from src.backend.benchmark.generators.utils.ast_utils import is_valid_python
 from src.backend.benchmark.generators.utils.transform_utils import (
-    reorder_statements,
     add_dead_code,
     convert_loops,
+    reorder_statements,
     structural_transform,
 )
-from src.backend.benchmark.generators.utils.ast_utils import is_valid_python
 
 
 class Type3Generator:
@@ -68,7 +66,7 @@ class Type3Generator:
         
         return result
     
-    def _reorder_only(self, code: str, seed: Optional[int] = None) -> str:
+    def _reorder_only(self, code: str, seed: int | None = None) -> str:
         """Apply only statement reordering.
         
         Args:
@@ -81,7 +79,7 @@ class Type3Generator:
         use_seed = seed if seed is not None else self.seed
         return reorder_statements(code, seed=use_seed)
     
-    def _add_dead_code_only(self, code: str, seed: Optional[int] = None) -> str:
+    def _add_dead_code_only(self, code: str, seed: int | None = None) -> str:
         """Apply only dead code insertion.
         
         Args:
@@ -94,7 +92,7 @@ class Type3Generator:
         use_seed = seed if seed is not None else self.seed
         return add_dead_code(code, seed=use_seed)
     
-    def _convert_loops_only(self, code: str, seed: Optional[int] = None) -> str:
+    def _convert_loops_only(self, code: str, seed: int | None = None) -> str:
         """Apply only loop conversion.
         
         Args:
@@ -107,7 +105,7 @@ class Type3Generator:
         use_seed = seed if seed is not None else self.seed
         return convert_loops(code, seed=use_seed)
     
-    def _combined_transform(self, code: str, seed: Optional[int] = None) -> str:
+    def _combined_transform(self, code: str, seed: int | None = None) -> str:
         """Apply combined structural transformations.
         
         Args:
@@ -120,7 +118,7 @@ class Type3Generator:
         use_seed = seed if seed is not None else self.seed
         return structural_transform(code, seed=use_seed)
     
-    def generate_variations(self, code: str, n_variations: int = 3) -> List[str]:
+    def generate_variations(self, code: str, n_variations: int = 3) -> list[str]:
         """Generate multiple Type-3 variations.
         
         Args:
@@ -164,7 +162,7 @@ def generate_type3_clone(code: str, seed: int = 42) -> str:
     return generator.generate(code)
 
 
-def generate_type3_variations(code: str, n_variations: int = 3, seed: int = 42) -> List[str]:
+def generate_type3_variations(code: str, n_variations: int = 3, seed: int = 42) -> list[str]:
     """Generate multiple Type-3 variations.
     
     Args:

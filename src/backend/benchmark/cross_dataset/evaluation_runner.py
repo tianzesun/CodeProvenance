@@ -9,7 +9,8 @@ Computes:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Any
+
 import numpy as np
 
 
@@ -24,8 +25,8 @@ class EvaluationResult:
     num_pairs: int
     num_positive: int
     num_negative: int
-    scores: List[float]
-    labels: List[int]
+    scores: list[float]
+    labels: list[int]
     threshold: float
     precision: float
     recall: float
@@ -38,9 +39,9 @@ class EvaluationResult:
     tn: int
     fn: int
     optimal_threshold: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "tool_name": self.tool_name,
@@ -85,9 +86,9 @@ class EvaluationRunner:
         self,
         tool_name: str,
         dataset_name: str,
-        scores: List[float],
-        labels: List[int],
-        threshold: Optional[float] = None,
+        scores: list[float],
+        labels: list[int],
+        threshold: float | None = None,
     ) -> EvaluationResult:
         """Evaluate tool performance on a dataset.
 
@@ -154,10 +155,10 @@ class EvaluationRunner:
         self,
         tool_name: str,
         dataset_name: str,
-        scores_list: List[List[float]],
-        labels: List[int],
-        threshold: Optional[float] = None,
-    ) -> List[EvaluationResult]:
+        scores_list: list[list[float]],
+        labels: list[int],
+        threshold: float | None = None,
+    ) -> list[EvaluationResult]:
         """Evaluate multiple score sets (e.g., from different runs) on same dataset.
 
         Args:

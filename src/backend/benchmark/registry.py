@@ -8,7 +8,7 @@ Required engine contract:
 - compare(code1, code2) -> float: similarity in [0, 1]
 """
 from abc import ABC, abstractmethod
-from typing import Dict, Type, Any, Optional
+from typing import Any
 
 
 class DetectionEngine(ABC):
@@ -37,7 +37,6 @@ class DetectionEngine(ABC):
         Returns:
             Unique engine identifier (e.g., "token_v1", "ast_hybrid").
         """
-        pass
     
     @abstractmethod
     def compare(self, code1: str, code2: str) -> float:
@@ -59,7 +58,6 @@ class DetectionEngine(ABC):
         Raises:
             ValueError: If score is outside [0, 1].
         """
-        pass
     
     def _validate_score(self, score: float) -> float:
         """Validate similarity score is in [0, 1].
@@ -93,14 +91,14 @@ class EngineRegistry:
     """
     
     def __init__(self):
-        self._engines: Dict[str, Type] = {}
-        self._instances: Dict[str, Any] = {}
+        self._engines: dict[str, type] = {}
+        self._instances: dict[str, Any] = {}
     
     def register(
         self,
         name: str,
-        engine_class: Type,
-        config: Optional[dict] = None
+        engine_class: type,
+        config: dict | None = None
     ) -> None:
         """Register a detection engine.
         
@@ -138,7 +136,7 @@ class EngineRegistry:
         if config:
             self._instances[name] = engine_class(**config)
     
-    def get(self, name: str) -> Type[DetectionEngine]:
+    def get(self, name: str) -> type[DetectionEngine]:
         """Get engine class by name.
         
         Args:
@@ -172,7 +170,7 @@ class EngineRegistry:
             self._instances[name] = engine_class(**kwargs)
         return self._instances[name]
     
-    def list_engines(self) -> Dict[str, Type[DetectionEngine]]:
+    def list_engines(self) -> dict[str, type[DetectionEngine]]:
         """List all registered engines.
         
         Returns:
@@ -196,7 +194,7 @@ class EngineRegistry:
 registry = EngineRegistry()
 
 
-def register_engine(name: str, config: Optional[dict] = None):
+def register_engine(name: str, config: dict | None = None):
     """Decorator for registering engines.
     
     Usage:
@@ -207,7 +205,7 @@ def register_engine(name: str, config: Optional[dict] = None):
             def compare(self, code1, code2) -> float:
                 return token_similarity(code1, code2)
     """
-    def decorator(engine_class: Type[DetectionEngine]) -> Type[DetectionEngine]:
+    def decorator(engine_class: type[DetectionEngine]) -> type[DetectionEngine]:
         registry.register(name, engine_class, config)
         return engine_class
     return decorator

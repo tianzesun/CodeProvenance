@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 @dataclass
@@ -42,9 +42,9 @@ class FailurePattern:
     description: str
     size: int = 0
     avg_error: float = 0.0
-    characteristics: Dict[str, Any] = field(default_factory=dict)
+    characteristics: dict[str, Any] = field(default_factory=dict)
     recommended_fix: str = ""
-    sample_ids: List[str] = field(default_factory=list)
+    sample_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -59,8 +59,8 @@ class FailurePatternReport:
     """
     total_failures: int = 0
     num_patterns: int = 0
-    patterns: List[FailurePattern] = field(default_factory=list)
-    attack_surfaces: Dict[str, int] = field(default_factory=dict)
+    patterns: list[FailurePattern] = field(default_factory=list)
+    attack_surfaces: dict[str, int] = field(default_factory=dict)
     
     def summary(self) -> str:
         """Generate human-readable summary.
@@ -102,7 +102,7 @@ class FailurePatternReport:
         lines.append("=" * 70)
         return "\n".join(lines)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary.
         
         Returns:
@@ -195,8 +195,8 @@ class FailurePatternDetector:
     
     def detect(
         self,
-        results: List[Tuple[float, int, int, str, str]],
-        component_scores: Optional[List[Dict[str, float]]] = None,
+        results: list[tuple[float, int, int, str, str]],
+        component_scores: list[dict[str, float]] | None = None,
         threshold: float = 0.5,
     ) -> FailurePatternReport:
         """Detect failure patterns in benchmark results.
@@ -210,7 +210,7 @@ class FailurePatternDetector:
             FailurePatternReport with detected patterns.
         """
         # Identify failures (FP and FN)
-        failures: List[Dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
         for i, (score, label, clone_type, code_a, code_b) in enumerate(results):
             predicted = 1 if score >= threshold else 0
             if predicted != label:
@@ -231,15 +231,15 @@ class FailurePatternDetector:
             return FailurePatternReport(total_failures=0, num_patterns=0)
         
         # Classify each failure into a pattern
-        cluster_map: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        cluster_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
         
         for failure in failures:
             pattern_name = self._classify_failure(failure)
             cluster_map[pattern_name].append(failure)
         
         # Build patterns
-        patterns: List[FailurePattern] = []
-        attack_surfaces: Dict[str, int] = {}
+        patterns: list[FailurePattern] = []
+        attack_surfaces: dict[str, int] = {}
         
         for pattern_name, pattern_failures in sorted(
             cluster_map.items(),
@@ -279,7 +279,7 @@ class FailurePatternDetector:
             attack_surfaces=attack_surfaces,
         )
     
-    def _classify_failure(self, failure: Dict[str, Any]) -> str:
+    def _classify_failure(self, failure: dict[str, Any]) -> str:
         """Classify a failure into a known pattern.
         
         Args:

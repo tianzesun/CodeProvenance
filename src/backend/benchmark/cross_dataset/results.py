@@ -8,7 +8,8 @@ Contains result objects for:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Any
+
 import numpy as np
 
 
@@ -22,7 +23,7 @@ class RankingEntry:
     std: float = 0.0
     dataset_count: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "rank": self.rank,
             "tool_name": self.tool_name,
@@ -52,9 +53,9 @@ class DatasetResult:
     fp: int
     tn: int
     fn: int
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "dataset": self.dataset_name,
             "tool": self.tool_name,
@@ -79,11 +80,11 @@ class DatasetResult:
 class ToolResult:
     """Aggregated results for one tool across all datasets."""
     tool_name: str
-    dataset_results: List[DatasetResult] = field(default_factory=list)
-    mean_metrics: Dict[str, float] = field(default_factory=dict)
-    std_metrics: Dict[str, float] = field(default_factory=dict)
-    min_metrics: Dict[str, float] = field(default_factory=dict)
-    max_metrics: Dict[str, float] = field(default_factory=dict)
+    dataset_results: list[DatasetResult] = field(default_factory=list)
+    mean_metrics: dict[str, float] = field(default_factory=dict)
+    std_metrics: dict[str, float] = field(default_factory=dict)
+    min_metrics: dict[str, float] = field(default_factory=dict)
+    max_metrics: dict[str, float] = field(default_factory=dict)
     stability_score: float = 0.0
 
     def compute_aggregates(self) -> None:
@@ -92,7 +93,7 @@ class ToolResult:
             return
 
         metric_names = ["precision", "recall", "f1", "accuracy", "roc_auc", "pr_auc"]
-        values: Dict[str, List[float]] = {m: [] for m in metric_names}
+        values: dict[str, list[float]] = {m: [] for m in metric_names}
 
         for dr in self.dataset_results:
             for m in metric_names:
@@ -114,7 +115,7 @@ class ToolResult:
 
         self.stability_score = float(np.mean(stability_scores)) if stability_scores else 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "tool_name": self.tool_name,
             "num_datasets": len(self.dataset_results),
@@ -136,12 +137,12 @@ class CrossEvalSummary:
         - Average performance across datasets per tool
         - Variance and stability metrics
     """
-    dataset_results: List[DatasetResult] = field(default_factory=list)
-    tool_results: Dict[str, ToolResult] = field(default_factory=dict)
-    per_dataset_rankings: Dict[str, List[RankingEntry]] = field(default_factory=dict)
-    overall_rankings: Dict[str, List[RankingEntry]] = field(default_factory=dict)
-    stability_rankings: List[RankingEntry] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    dataset_results: list[DatasetResult] = field(default_factory=list)
+    tool_results: dict[str, ToolResult] = field(default_factory=dict)
+    per_dataset_rankings: dict[str, list[RankingEntry]] = field(default_factory=dict)
+    overall_rankings: dict[str, list[RankingEntry]] = field(default_factory=dict)
+    stability_rankings: list[RankingEntry] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def compute_rankings(self) -> None:
         """Compute all rankings from dataset results."""
@@ -151,11 +152,11 @@ class CrossEvalSummary:
 
     def _compute_per_dataset_rankings(self) -> None:
         """Rank tools per dataset by F1 score."""
-        by_dataset: Dict[str, List[DatasetResult]] = {}
+        by_dataset: dict[str, list[DatasetResult]] = {}
         for dr in self.dataset_results:
             by_dataset.setdefault(dr.dataset_name, []).append(dr)
 
-        rankings: Dict[str, List[RankingEntry]] = {}
+        rankings: dict[str, list[RankingEntry]] = {}
         for ds_name, results in by_dataset.items():
             sorted_results = sorted(results, key=lambda r: r.f1, reverse=True)
             rankings[ds_name] = [
@@ -174,7 +175,7 @@ class CrossEvalSummary:
     def _compute_overall_rankings(self) -> None:
         """Rank tools by mean performance across datasets."""
         metric_names = ["f1", "precision", "recall", "roc_auc", "pr_auc", "accuracy"]
-        rankings: Dict[str, List[RankingEntry]] = {}
+        rankings: dict[str, list[RankingEntry]] = {}
 
         for metric in metric_names:
             tool_means = []
@@ -218,7 +219,7 @@ class CrossEvalSummary:
             for i, se in enumerate(stability_entries)
         ]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert full summary to dictionary."""
         return {
             "per_dataset_rankings": {

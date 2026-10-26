@@ -16,11 +16,12 @@ import logging
 import re
 import sys
 import time
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 
 from src.backend.benchmark.contracts.evaluation_result import EnrichedPair
 
@@ -45,7 +46,7 @@ class TechniqueSignal:
 class TechniqueSummary:
     """Minimal obfuscation summary used for reporting."""
 
-    primary_technique: Optional[str]
+    primary_technique: str | None
     complexity_score: float
     techniques: list[TechniqueSignal] = field(default_factory=list)
 
@@ -564,7 +565,7 @@ class PANBenchmarkRunner:
         self,
         tool_name: str,
         dataset_name: str,
-        dataset_path: Optional[Path] = None,
+        dataset_path: Path | None = None,
     ) -> PANBenchmarkResult:
         """Run one tool on one dataset with caching."""
         dataset = self._load_dataset(dataset_name, dataset_path)
@@ -638,9 +639,9 @@ class PANBenchmarkRunner:
 
     def run_benchmark(
         self,
-        tools: Optional[list[str]] = None,
-        datasets: Optional[list[str]] = None,
-        custom_dataset_path: Optional[Path] = None,
+        tools: list[str] | None = None,
+        datasets: list[str] | None = None,
+        custom_dataset_path: Path | None = None,
     ) -> BenchmarkComparisonReport:
         """Run the selected benchmark matrix and return a report model."""
         selected_tools = tools or self.get_available_tools()
@@ -684,7 +685,7 @@ class PANBenchmarkRunner:
     def _load_dataset(
         self,
         dataset_name: str,
-        dataset_path: Optional[Path] = None,
+        dataset_path: Path | None = None,
     ) -> PANDataset:
         """Load one supported dataset."""
         normalized_name = dataset_name.lower()

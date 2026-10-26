@@ -1,9 +1,9 @@
 """JPlag Normalizer."""
-from typing import List, Dict, Any, Optional
-from pathlib import Path
-import xml.etree.ElementTree as ET
 import json
+import xml.etree.ElementTree as ET
+
 from src.backend.benchmark.normalizer.base_normalizer import BaseNormalizer
+
 
 class JPlagNormalizer(BaseNormalizer):
     @property
@@ -37,7 +37,7 @@ class JPlagNormalizer(BaseNormalizer):
                     f1, f2 = c.get("name1",""), c.get("name2","")
                     sim = float(c.get("similarity", 0))
                     results.append({"file1": f1, "file2": f2, "similarity": min(1.0, sim/100.0 if sim > 1 else sim)})
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 pass
         return self.deduplicate_pairs(results)
     def _find_file(self, path, ext):

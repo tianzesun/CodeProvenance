@@ -1,9 +1,10 @@
 """JPlag Parser - parses XML/JSON output to StandardOutput."""
-from typing import List, Dict, Any, Optional
-from pathlib import Path
 import json
 import xml.etree.ElementTree as ET
-from src.backend.benchmark.parsers.base_parser import BaseToolParser, StandardOutput, ParserError
+from pathlib import Path
+from typing import Any
+
+from src.backend.benchmark.parsers.base_parser import BaseToolParser, ParserError, StandardOutput
 
 
 class JPlagParser(BaseToolParser):
@@ -33,7 +34,7 @@ class JPlagParser(BaseToolParser):
         pairs = self.filter_pairs(pairs, self.threshold)
         return StandardOutput(tool=self.tool_name, dataset=self.dataset, pairs=pairs)
     
-    def _find_file(self, path: Path, ext: str) -> Optional[Path]:
+    def _find_file(self, path: Path, ext: str) -> Path | None:
         if path.is_file() and path.suffix == ext:
             return path
         if path.is_dir():
@@ -42,7 +43,7 @@ class JPlagParser(BaseToolParser):
                     return f
         return None
     
-    def _parse_xml(self, xml_path: Path) -> List[Dict[str, Any]]:
+    def _parse_xml(self, xml_path: Path) -> list[dict[str, Any]]:
         try:
             tree = ET.parse(xml_path)
         except ET.ParseError:
@@ -72,11 +73,11 @@ class JPlagParser(BaseToolParser):
             pairs.append(pair)
         return pairs
     
-    def _parse_json(self, json_path: Path) -> List[Dict[str, Any]]:
+    def _parse_json(self, json_path: Path) -> list[dict[str, Any]]:
         try:
             with open(json_path) as f:
                 data = json.load(f)
-        except (json.JSONDecodeError, IOError):
+        except (OSError, json.JSONDecodeError):
             raise ParserError(f"Invalid JSON: {json_path}")
         pairs = []
         for c in data.get("comparisons", []):
@@ -86,7 +87,7 @@ class JPlagParser(BaseToolParser):
             pairs.append(self.make_pair(c.get("name1", ""), c.get("name2", ""), sim))
         return pairs
     
-    def _parse_results_dir(self, results_dir: Path) -> List[Dict[str, Any]]:
+    def _parse_results_dir(self, results_dir: Path) -> list[dict[str, Any]]:
         pairs = []
         for rf in results_dir.glob("result-*.xml"):
             try:
@@ -98,6 +99,6 @@ class JPlagParser(BaseToolParser):
                 if sim > 1.0:
                     sim /= 100.0
                 pairs.append(self.make_pair(f1, f2, sim))
-            except (ET.ParseError, IOError, ValueError):
+            except (OSError, ET.ParseError, ValueError):
                 continue
         return pairs

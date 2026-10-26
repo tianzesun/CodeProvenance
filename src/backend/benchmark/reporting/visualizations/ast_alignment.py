@@ -3,10 +3,10 @@
 Generates visual diagrams showing AST structure alignment between code pairs,
 highlighting structural similarities and differences.
 """
-from typing import Any, Dict, List, Optional
+import json
 from dataclasses import dataclass
 from enum import Enum
-import json
+from typing import Any
 
 
 class AlignmentType(Enum):
@@ -24,11 +24,11 @@ class ASTNode:
     node_id: str
     node_type: str
     value: str
-    children: List['ASTNode']
+    children: list['ASTNode']
     line_start: int
     line_end: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "node_id": self.node_id,
@@ -48,7 +48,7 @@ class AlignmentPair:
     alignment_type: AlignmentType
     similarity_score: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "source_node": self.source_node.to_dict(),
@@ -113,7 +113,7 @@ class ASTAlignmentVisualizer:
         self,
         source_ast: ASTNode,
         target_ast: ASTNode
-    ) -> List[AlignmentPair]:
+    ) -> list[AlignmentPair]:
         """Compute alignment between two ASTs.
 
         Args:
@@ -165,7 +165,7 @@ class ASTAlignmentVisualizer:
         code_b: str,
         output_path: str,
         title: str = "AST Alignment Diagram"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate AST alignment visualization.
 
         Args:
@@ -204,7 +204,7 @@ class ASTAlignmentVisualizer:
 
         return result
 
-    def to_json(self, result: Dict[str, Any]) -> str:
+    def to_json(self, result: dict[str, Any]) -> str:
         """Convert generation result to JSON.
 
         Args:

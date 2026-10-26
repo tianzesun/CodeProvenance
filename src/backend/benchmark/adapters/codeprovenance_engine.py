@@ -7,10 +7,10 @@ FROZEN INTERFACE: evaluate() returns canonical EvaluationResult.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
+from ..contracts.evaluation_result import EnrichedPair, EvaluationResult
 from .base_adapter import BaseAdapter
-from ..contracts.evaluation_result import EvaluationResult, EnrichedPair
 
 
 class CodeProvenanceAdapter(BaseAdapter):
@@ -34,8 +34,10 @@ class CodeProvenanceAdapter(BaseAdapter):
     def _get_engine(self) -> Any:
         """Lazy-load the actual CodeProvenance engine."""
         if self._engine is None:
-            from src.backend.engines.similarity.base_similarity import SimilarityEngine
-            from src.backend.engines.similarity.base_similarity import register_builtin_algorithms
+            from src.backend.engines.similarity.base_similarity import (
+                SimilarityEngine,
+                register_builtin_algorithms,
+            )
 
             self._engine = SimilarityEngine()
             register_builtin_algorithms(self._engine)

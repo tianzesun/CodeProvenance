@@ -47,7 +47,12 @@ if TYPE_CHECKING:  # pragma: no cover
     )
     from .ast_analyzer import ASTAnalyzer, ASTFeatures, analyze_ast, compute_ast_score
     from .ast_analyzer import get_analyzer as get_ast_analyzer
-    from .model_fingerprinting import ModelFingerprint, ModelFingerprinter, detect_model, get_fingerprinter
+    from .model_fingerprinting import (
+        ModelFingerprint,
+        ModelFingerprinter,
+        detect_model,
+        get_fingerprinter,
+    )
     from .transformer_perplexity import (
         TransformerPerplexityAnalyzer,
         compute_ai_score,

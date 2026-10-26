@@ -7,11 +7,12 @@ Implements:
 - Robustness scoring under adversarial transformations
 """
 from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
+from typing import Any
+
 import numpy as np
-from pathlib import Path
 
 
 class GroundTruthLabel(Enum):
@@ -67,7 +68,7 @@ class ConfusionMatrix:
             return 0.0
         return self.fp / (self.fp + self.tn)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "tp": self.tp,
             "fp": self.fp,
@@ -99,17 +100,17 @@ class EvaluationMetrics:
     """Complete evaluation metrics for a detector."""
     tool_name: str
     dataset_name: str
-    thresholds: List[ThresholdResult] = field(default_factory=list)
-    confusion_matrix: Optional[ConfusionMatrix] = None
-    best_threshold: Optional[float] = None
+    thresholds: list[ThresholdResult] = field(default_factory=list)
+    confusion_matrix: ConfusionMatrix | None = None
+    best_threshold: float | None = None
     best_f1: float = 0.0
     auc_roc: float = 0.0
     auc_pr: float = 0.0
     robustness_score: float = 0.0
     
     def compute_at_threshold(self, threshold: float, 
-                            scores: List[float], 
-                            labels: List[int]) -> ConfusionMatrix:
+                            scores: list[float], 
+                            labels: list[int]) -> ConfusionMatrix:
         """Compute confusion matrix at a given threshold."""
         cm = ConfusionMatrix()
         for score, label in zip(scores, labels):
@@ -126,9 +127,9 @@ class EvaluationMetrics:
     
     def compute_roc_pr_curves(
         self,
-        scores: List[float],
-        labels: List[int],
-    ) -> Tuple[List[float], List[float], List[float], List[float]]:
+        scores: list[float],
+        labels: list[int],
+    ) -> tuple[list[float], list[float], list[float], list[float]]:
         """Compute ROC and PR curve data points."""
         sorted_indices = np.argsort(scores)[::-1]
         sorted_scores = np.array(scores)[sorted_indices]
@@ -168,7 +169,7 @@ class EvaluationMetrics:
         
         return tpr_list, fpr_list, precision_list, recall_list
     
-    def compute_auc(self, x: List[float], y: List[float]) -> float:
+    def compute_auc(self, x: list[float], y: list[float]) -> float:
         """Compute AUC using trapezoidal rule."""
         x, y = np.array(x), np.array(y)
         sorted_idx = np.argsort(x)
@@ -177,10 +178,10 @@ class EvaluationMetrics:
         return np.trapz(y_sorted, x_sorted)
     
     def evaluate(self, 
-                scores: List[float], 
-                labels: List[int],
+                scores: list[float], 
+                labels: list[int],
                 threshold: float = 0.5,
-                compute_curves: bool = True) -> 'EvaluationMetrics':
+                compute_curves: bool = True) -> EvaluationMetrics:
         """Run full evaluation on scores and labels."""
         self.confusion_matrix = self.compute_at_threshold(threshold, scores, labels)
         self.best_threshold = threshold
@@ -211,7 +212,7 @@ class EvaluationMetrics:
         
         return self
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "tool": self.tool_name,
             "dataset": self.dataset_name,
@@ -228,12 +229,12 @@ class EvaluationMetrics:
 class RobustnessMetrics:
     """Metrics for adversarial robustness testing."""
     original_score: float
-    transformed_scores: List[float]
+    transformed_scores: list[float]
     variance: float = 0.0
     mean_score: float = 0.0
     robustness_score: float = 0.0
     
-    def compute(self) -> 'RobustnessMetrics':
+    def compute(self) -> RobustnessMetrics:
         """Compute robustness metrics from transformed scores."""
         if not self.transformed_scores:
             return self
@@ -249,7 +250,7 @@ class RobustnessMetrics:
         
         return self
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "original_score": round(self.original_score, 4),
             "mean_transformed": round(self.mean_score, 4),
@@ -264,7 +265,6 @@ class CodeTransformer:
     @staticmethod
     def rename_variables(code: str, language: str) -> str:
         """Rename all variables to generic names."""
-        import re
         # Simple placeholder - would need language-specific parsing
         # Replace common variable patterns
         result = code
@@ -298,7 +298,7 @@ class CodeTransformer:
         return result.strip()
 
 
-def compare_detectors(metrics_list: List[EvaluationMetrics]) -> Dict[str, Any]:
+def compare_detectors(metrics_list: list[EvaluationMetrics]) -> dict[str, Any]:
     """Compare multiple detector evaluations.
     
     Args:

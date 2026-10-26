@@ -70,7 +70,7 @@ def _load_policy_config(path: Path | None = None) -> dict[str, Any]:
         if not isinstance(data, dict):
             raise TypeError("policy config must be a mapping")
         return data
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Failed to load detection policy config %s (%s); using defaults", path, exc)
         return {}
 

@@ -10,10 +10,10 @@ to the rule-based ``FusionEngine`` score when the artifact is missing.
 from __future__ import annotations
 
 import json
-import math
 import logging
+import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ MODELS_DIR = Path(__file__).resolve().parent.parent / "similarity" / "models"
 ARTIFACT_NAME = "learned_fusion_model.json"
 ARTIFACT_VERSION = "1"
 
-DEFAULT_FEATURE_NAMES: Tuple[str, ...] = (
+DEFAULT_FEATURE_NAMES: tuple[str, ...] = (
     "ast",
     "fingerprint",
     "embedding",
@@ -48,14 +48,14 @@ class LearnedFusionScorer:
     fusion score.
     """
 
-    def __init__(self, artifact_path: Optional[Path] = None) -> None:
+    def __init__(self, artifact_path: Path | None = None) -> None:
         self._artifact_path = (
             Path(artifact_path) if artifact_path else MODELS_DIR / ARTIFACT_NAME
         )
-        self._feature_names: List[str] = []
-        self._coefficients: List[float] = []
+        self._feature_names: list[str] = []
+        self._coefficients: list[float] = []
         self._intercept: float = 0.0
-        self._metadata: Dict[str, Any] = {}
+        self._metadata: dict[str, Any] = {}
         self._available = False
         self._load()
 
@@ -65,7 +65,7 @@ class LearnedFusionScorer:
         return self._available
 
     @property
-    def feature_names(self) -> List[str]:
+    def feature_names(self) -> list[str]:
         """Order of coefficients used by the loaded model."""
         return list(self._feature_names)
 
@@ -73,7 +73,7 @@ class LearnedFusionScorer:
     # evolved (the shipped artifact says ``logo_auc_roc``, newer runs say
     # ``cv_auc_roc``). Look for all of them so the load log never reports a
     # bare 0.0000 next to a perfectly valid model.
-    _AUC_KEYS: Tuple[Tuple[str, str], ...] = (
+    _AUC_KEYS: tuple[tuple[str, str], ...] = (
         ("cv_auc_roc", "CV AUC"),
         ("logo_auc_roc", "LOGO AUC"),
         ("auc_roc", "AUC"),
@@ -96,7 +96,7 @@ class LearnedFusionScorer:
                 return label
         return "AUC"
 
-    def version_info(self) -> Dict[str, Any]:
+    def version_info(self) -> dict[str, Any]:
         """Return training metadata embedded in the artifact."""
         return dict(self._metadata)
 
@@ -155,7 +155,7 @@ class LearnedFusionScorer:
             )
             self._available = False
 
-    def score(self, features: Dict[str, float]) -> float:
+    def score(self, features: dict[str, float]) -> float:
         """Return calibrated plagiarism probability in [0, 1].
 
         Missing features are treated as 0.0 to match extraction defaults.
@@ -178,7 +178,7 @@ class LearnedFusionScorer:
             )  # features are unit-scale scores
         return _sigmoid(linear)
 
-    def try_score(self, features: Dict[str, float]) -> Optional[float]:
+    def try_score(self, features: dict[str, float]) -> float | None:
         """Like :meth:`score`, but ``None`` when no model is loaded.
 
         ``score`` returns 0.0 when unavailable, which a caller that forgets to check

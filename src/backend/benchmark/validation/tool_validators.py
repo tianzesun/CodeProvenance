@@ -4,10 +4,10 @@ Ensures tool outputs are valid, deterministic, and reproducible.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Any, List, Tuple
-import math
 import json
+import math
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -31,7 +31,7 @@ class ToolValidationResult:
 class ToolValidationReport:
     """Complete validation report for tool outputs."""
     tool_id: str
-    results: List[ToolValidationResult]
+    results: list[ToolValidationResult]
     all_passed: bool
     summary: str
     determinism_score: float  # 0-1, how deterministic is the tool
@@ -59,7 +59,7 @@ class ToolValidator:
 
     @staticmethod
     def validate_score_range(
-        output: Dict[str, Any],
+        output: dict[str, Any],
     ) -> ToolValidationResult:
         """Validate that similarity score is in valid range [0, 1].
 
@@ -104,7 +104,7 @@ class ToolValidator:
 
     @staticmethod
     def validate_required_fields(
-        output: Dict[str, Any],
+        output: dict[str, Any],
     ) -> ToolValidationResult:
         """Validate that output contains all required fields.
 
@@ -128,7 +128,7 @@ class ToolValidator:
 
     @staticmethod
     def validate_no_nan_inf(
-        output: Dict[str, Any],
+        output: dict[str, Any],
     ) -> ToolValidationResult:
         """Validate that score is not NaN or Inf.
 
@@ -160,7 +160,7 @@ class ToolValidator:
 
     @staticmethod
     def validate_decimal_precision(
-        output: Dict[str, Any],
+        output: dict[str, Any],
         max_decimal_places: int = 6,
     ) -> ToolValidationResult:
         """Validate that score has consistent decimal precision.
@@ -203,7 +203,7 @@ class ToolValidator:
 
     @staticmethod
     def validate_matches_format(
-        output: Dict[str, Any],
+        output: dict[str, Any],
     ) -> ToolValidationResult:
         """Validate that matches field has correct format.
 
@@ -253,8 +253,8 @@ class ToolValidator:
 
     @staticmethod
     def check_determinism(
-        outputs: List[Dict[str, Any]],
-    ) -> Tuple[float, List[ToolValidationResult]]:
+        outputs: list[dict[str, Any]],
+    ) -> tuple[float, list[ToolValidationResult]]:
         """Check determinism by comparing multiple runs on same input.
 
         Args:
@@ -318,7 +318,7 @@ class ToolValidator:
     @staticmethod
     def validate_tool_output(
         tool_id: str,
-        output: Dict[str, Any],
+        output: dict[str, Any],
     ) -> ToolValidationReport:
         """Perform complete validation of a single tool output.
 
@@ -366,7 +366,7 @@ class ToolValidator:
     @staticmethod
     def validate_tool_determinism(
         tool_id: str,
-        outputs: List[Dict[str, Any]],
+        outputs: list[dict[str, Any]],
     ) -> ToolValidationReport:
         """Validate tool determinism across multiple runs.
 

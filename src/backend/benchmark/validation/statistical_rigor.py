@@ -5,15 +5,15 @@ to ensure benchmark results are statistically sound and trustworthy.
 """
 from __future__ import annotations
 
-import numpy as np
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Any, Callable
+
+import numpy as np
 from scipy import stats
-import math
 
 from src.backend.evaluation.pan_metrics import (
-    PANMetrics,
     Detection,
+    PANMetrics,
     calculate_pan_metrics,
 )
 
@@ -81,7 +81,7 @@ class RobustnessResult:
     tool_id: str
     perturbation_type: str
     original_score: float
-    perturbed_scores: List[float]
+    perturbed_scores: list[float]
     mean_change: float
     std_change: float
     robustness_score: float  # 0-1, higher is more robust
@@ -97,9 +97,9 @@ class RobustnessResult:
 @dataclass
 class StatisticalReport:
     """Complete statistical analysis report."""
-    confidence_intervals: List[ConfidenceInterval]
-    significance_tests: List[SignificanceTest]
-    robustness_results: List[RobustnessResult]
+    confidence_intervals: list[ConfidenceInterval]
+    significance_tests: list[SignificanceTest]
+    robustness_results: list[RobustnessResult]
     summary: str
 
     def __str__(self) -> str:
@@ -121,8 +121,8 @@ class ConfidenceIntervalCalculator:
 
     @staticmethod
     def bootstrap_ci(
-        data: List[float],
-        statistic_func: Callable[[List[float]], float] = np.mean,
+        data: list[float],
+        statistic_func: Callable[[list[float]], float] = np.mean,
         confidence: float = 0.95,
         n_bootstrap: int = 10000,
         random_seed: int = 42,
@@ -168,7 +168,7 @@ class ConfidenceIntervalCalculator:
 
     @staticmethod
     def calculate_metric_ci(
-        metrics_list: List[PANMetrics],
+        metrics_list: list[PANMetrics],
         metric_name: str,
         confidence: float = 0.95,
         n_bootstrap: int = 10000,
@@ -209,9 +209,9 @@ class SignificanceTester:
 
     @staticmethod
     def mcnemars_test(
-        tool1_predictions: List[Detection],
-        tool2_predictions: List[Detection],
-        ground_truth: List[Detection],
+        tool1_predictions: list[Detection],
+        tool2_predictions: list[Detection],
+        ground_truth: list[Detection],
         alpha: float = 0.05,
     ) -> SignificanceTest:
         """Perform McNemar's test for paired tool comparison.
@@ -266,8 +266,8 @@ class SignificanceTester:
 
     @staticmethod
     def paired_t_test(
-        tool1_metrics: List[float],
-        tool2_metrics: List[float],
+        tool1_metrics: list[float],
+        tool2_metrics: list[float],
         alpha: float = 0.05,
     ) -> SignificanceTest:
         """Perform paired t-test for tool comparison.
@@ -300,8 +300,8 @@ class SignificanceTester:
 
     @staticmethod
     def wilcoxon_test(
-        tool1_metrics: List[float],
-        tool2_metrics: List[float],
+        tool1_metrics: list[float],
+        tool2_metrics: list[float],
         alpha: float = 0.05,
     ) -> SignificanceTest:
         """Perform Wilcoxon signed-rank test (non-parametric).
@@ -397,7 +397,7 @@ class RobustnessAnalyzer:
         tool_func: Callable[[str, str], float],
         source_code: str,
         suspicious_code: str,
-        perturbations: List[Tuple[str, Callable[[str], str]]] | None = None,
+        perturbations: list[tuple[str, Callable[[str], str]]] | None = None,
     ) -> RobustnessResult:
         """Analyze tool robustness under code perturbations.
 
@@ -452,7 +452,7 @@ class StatisticalAnalyzer:
 
     @staticmethod
     def analyze_metrics(
-        metrics_list: List[PANMetrics],
+        metrics_list: list[PANMetrics],
         confidence: float = 0.95,
         alpha: float = 0.05,
     ) -> StatisticalReport:
@@ -503,8 +503,8 @@ class StatisticalAnalyzer:
 
     @staticmethod
     def compare_tools(
-        tool1_metrics: List[PANMetrics],
-        tool2_metrics: List[PANMetrics],
+        tool1_metrics: list[PANMetrics],
+        tool2_metrics: list[PANMetrics],
         metric_name: str = "f1_score",
         alpha: float = 0.05,
     ) -> SignificanceTest:

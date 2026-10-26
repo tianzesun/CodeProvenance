@@ -13,17 +13,18 @@ from __future__ import annotations
 
 import json
 import random
-import yaml
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+import yaml
 
 from src.backend.benchmark.generators.base_loader import CodePool
+from src.backend.benchmark.generators.negatives import generate_negative_pair
 from src.backend.benchmark.generators.type1_exact import generate_type1_clone
 from src.backend.benchmark.generators.type2_rename import generate_type2_clone
 from src.backend.benchmark.generators.type3_structure import generate_type3_clone
 from src.backend.benchmark.generators.type4_semantic import generate_type4_clone
-from src.backend.benchmark.generators.negatives import generate_negative_pair
 from src.backend.benchmark.generators.utils.ast_utils import count_lines, count_tokens
 
 
@@ -56,7 +57,7 @@ class DatasetBuilder:
             "negative_hard": 0,
         }
     
-    def _load_config(self, config_path: str) -> Dict[str, Any]:
+    def _load_config(self, config_path: str) -> dict[str, Any]:
         """Load configuration from YAML file.
         
         Args:
@@ -73,7 +74,7 @@ class DatasetBuilder:
         with open(path, 'r') as f:
             return yaml.safe_load(f)
     
-    def _default_config(self) -> Dict[str, Any]:
+    def _default_config(self) -> dict[str, Any]:
         """Return default configuration.
         
         Returns:
@@ -101,7 +102,7 @@ class DatasetBuilder:
             },
         }
     
-    def build(self) -> List[Dict[str, Any]]:
+    def build(self) -> list[dict[str, Any]]:
         """Build the complete dataset.
         
         Returns:
@@ -289,7 +290,7 @@ class DatasetBuilder:
         self,
         code_a: str,
         code_b: str,
-        constraints: Dict[str, Any],
+        constraints: dict[str, Any],
     ) -> bool:
         """Validate that a pair meets constraints.
         
@@ -325,8 +326,8 @@ class DatasetBuilder:
         label: int,
         clone_type: str,
         difficulty: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Create a dataset pair with metadata.
         
         Args:
@@ -356,7 +357,7 @@ class DatasetBuilder:
         
         return pair
     
-    def save(self, dataset: List[Dict[str, Any]], output_path: str) -> None:
+    def save(self, dataset: list[dict[str, Any]], output_path: str) -> None:
         """Save dataset to JSON file.
         
         Args:

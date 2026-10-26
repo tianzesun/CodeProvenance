@@ -15,7 +15,7 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -35,7 +35,7 @@ class EffectSizeResult:
     magnitude: str
     method: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "value": self.value,
@@ -211,7 +211,7 @@ def cliffs_delta(
 def interpret_effect_size(
     value: float,
     method: str = "cohens_d",
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Interpret effect size value.
 
     Args:
@@ -251,7 +251,7 @@ def compute_all_effect_sizes(
     scores_a: np.ndarray,
     scores_b: np.ndarray,
     paired: bool = True,
-) -> Dict[str, EffectSizeResult]:
+) -> dict[str, EffectSizeResult]:
     """Compute all effect size measures.
 
     Args:

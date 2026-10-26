@@ -420,7 +420,7 @@ class WeightedTreeEditDistance:
 
         # one bottom-up hash per node (the forest is post-order, so its last node is the
         # root); ``to_tuple()`` per node was quadratic in the tree size
-        label = lambda n: f"{n.node_type}|{n.value}"  # noqa: E731
+        label = lambda n: f"{n.node_type}|{n.value}"
         hashes_a = tu.subtree_hashes(forest_a[-1], label)
         hashes_b = tu.subtree_hashes(forest_b[-1], label)
         set_a = {hashes_a[id(n)] for n in forest_a}

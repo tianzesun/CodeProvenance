@@ -6,9 +6,9 @@ Contains 1,731,860 Java function pairs with clone labels.
 
 Reference: https://huggingface.co/datasets/code_x_glue_cc_clone_detection_big_clone_bench
 """
-from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
 from pathlib import Path
-from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -47,10 +47,10 @@ class CodeXGLUECloneDataset:
     def __init__(self, data_dir: Path = Path("benchmark/data/codexglue_clone")):
         self.data_dir = data_dir
         self.hf_dir = data_dir / "huggingface"
-        self._pairs: List[CodeXGLUEClonePair] = []
+        self._pairs: list[CodeXGLUEClonePair] = []
         self._dataset = None
     
-    def load(self, split: str = "train", max_pairs: Optional[int] = None) -> List[CodeXGLUEClonePair]:
+    def load(self, split: str = "train", max_pairs: int | None = None) -> list[CodeXGLUEClonePair]:
         """
         Load CodeXGLUE clone pairs from HuggingFace Arrow format.
         
@@ -99,13 +99,13 @@ class CodeXGLUECloneDataset:
         self._pairs = pairs
         return pairs
     
-    def _get_available_splits(self) -> List[str]:
+    def _get_available_splits(self) -> list[str]:
         """Get available dataset splits."""
         if not self.hf_dir.exists():
             return []
         return [d.name for d in self.hf_dir.iterdir() if d.is_dir()]
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         stats = {
             "name": "CodeXGLUE Clone Detection",
@@ -134,7 +134,7 @@ class CodeXGLUECloneDataset:
         
         return stats
     
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check dataset availability."""
         return {
             "data_dir": self.data_dir.exists(),

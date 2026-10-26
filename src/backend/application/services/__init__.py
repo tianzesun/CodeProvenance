@@ -1,5 +1,8 @@
 """Application Services - Orchestration layer."""
 
-from src.backend.application.services.student_service import StudentService, AssignmentVersionService
+from src.backend.application.services.student_service import (
+    AssignmentVersionService,
+    StudentService,
+)
 
-__all__ = ["StudentService", "AssignmentVersionService"]
+__all__ = ["AssignmentVersionService", "StudentService"]

@@ -10,21 +10,20 @@ that resists common obfuscation techniques:
 
 Supports Python and Java (via tree-sitter for Java).
 """
-from typing import Dict, List, Any, Optional, Tuple, Set
-from pathlib import Path
 import ast
 import hashlib
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from collections import defaultdict, Counter
+from typing import Any
 
 
 @dataclass
 class ASTNode:
     """Normalized AST node representation."""
     node_type: str
-    children: List['ASTNode'] = field(default_factory=list)
-    attributes: Dict[str, Any] = field(default_factory=dict)
-    position: Optional[Tuple[int, int]] = None  # (line, col)
+    children: list['ASTNode'] = field(default_factory=list)
+    attributes: dict[str, Any] = field(default_factory=dict)
+    position: tuple[int, int] | None = None  # (line, col)
 
     def structure_hash(self, normalize_ids: bool = True) -> str:
         """
@@ -42,7 +41,7 @@ class ASTNode:
             parts.append(token)
         return hashlib.md5('|'.join(parts).encode()).hexdigest()
 
-    def walk(self) -> List['ASTNode']:
+    def walk(self) -> list['ASTNode']:
         """Walk all nodes in tree."""
         result = [self]
         for child in self.children:
@@ -56,14 +55,14 @@ class ASTSimilarityResult:
     score: float
     structural_similarity: float
     token_similarity: float
-    common_patterns: List[str] = field(default_factory=list)
-    differences: List[str] = field(default_factory=list)
+    common_patterns: list[str] = field(default_factory=list)
+    differences: list[str] = field(default_factory=list)
 
 
 class PythonASTParser:
     """Parses Python code into normalized AST representation."""
 
-    def parse(self, source: str) -> Optional[ASTNode]:
+    def parse(self, source: str) -> ASTNode | None:
         """Parse Python source code into ASTNode tree."""
         try:
             tree = ast.parse(source)
@@ -108,7 +107,7 @@ class PythonASTParser:
             position=position,
         )
 
-    def extract_structure_tokens(self, node: ASTNode) -> List[str]:
+    def extract_structure_tokens(self, node: ASTNode) -> list[str]:
         """Extract structural tokens (node types) for similarity."""
         return [n.node_type for n in node.walk()]
 
@@ -134,7 +133,7 @@ class JavaASTParser:
     For production, consider integrating tree-sitter-java.
     """
 
-    def parse(self, source: str) -> Optional[ASTNode]:
+    def parse(self, source: str) -> ASTNode | None:
         """Parse Java source code into ASTNode tree."""
         try:
             lines = source.split('\n')
@@ -144,7 +143,7 @@ class JavaASTParser:
         except Exception:
             return None
 
-    def _parse_class(self, lines: List[str], parent: ASTNode) -> None:
+    def _parse_class(self, lines: list[str], parent: ASTNode) -> None:
         """Extract class and method structure."""
         i = 0
         while i < len(lines):
@@ -183,7 +182,7 @@ class JavaASTParser:
             
             i += 1
 
-    def _match_class_decl(self, line: str) -> Optional[Tuple[str]]:
+    def _match_class_decl(self, line: str) -> tuple[str] | None:
         """Match Java class declaration."""
         import re
         match = re.search(r'(?:public\s+)?(?:abstract\s+)?class\s+(\w+)', line)
@@ -191,7 +190,7 @@ class JavaASTParser:
             return (match.group(1),)
         return None
 
-    def _match_method_decl(self, line: str) -> Optional[Tuple[str]]:
+    def _match_method_decl(self, line: str) -> tuple[str] | None:
         """Match Java method declaration."""
         import re
         match = re.search(r'(?:public|private|protected)?\s*\w*\s+(\w+)\s*\(', line)
@@ -199,7 +198,7 @@ class JavaASTParser:
             return (match.group(1),)
         return None
 
-    def _parse_block(self, lines: List[str], start: int, parent: ASTNode) -> int:
+    def _parse_block(self, lines: list[str], start: int, parent: ASTNode) -> int:
         """Parse a code block (between braces)."""
         brace_count = 0
         i = start
@@ -240,7 +239,7 @@ class JavaASTParser:
         
         return i
 
-    def _extract_java_tokens(self, line: str) -> List[str]:
+    def _extract_java_tokens(self, line: str) -> list[str]:
         """Extract significant tokens from Java code line."""
         import re
         # Remove comments
@@ -381,7 +380,7 @@ class ASTSimilarityComparator:
                 return depth + 1
         return -1
 
-    def _jaccard_similarity(self, seq1: List[str], seq2: List[str]) -> float:
+    def _jaccard_similarity(self, seq1: list[str], seq2: list[str]) -> float:
         """Compute Jaccard similarity between two sequences."""
         set1 = set(seq1)
         set2 = set(seq2)
@@ -389,7 +388,7 @@ class ASTSimilarityComparator:
             return 1.0
         return len(set1 & set2) / len(set1 | set2)
 
-    def _find_common_patterns(self, tree1: ASTNode, tree2: ASTNode) -> List[str]:
+    def _find_common_patterns(self, tree1: ASTNode, tree2: ASTNode) -> list[str]:
         """Find common structural patterns between two ASTs."""
         patterns = []
         types1 = set(n.node_type for n in tree1.walk())
@@ -405,7 +404,7 @@ class ASTSimilarityComparator:
         
         return patterns
 
-    def _find_differences(self, tree1: ASTNode, tree2: ASTNode) -> List[str]:
+    def _find_differences(self, tree1: ASTNode, tree2: ASTNode) -> list[str]:
         """Find structural differences between two ASTs."""
         diffs = []
         types1 = set(n.node_type for n in tree1.walk())
@@ -423,7 +422,7 @@ class ASTSimilarityComparator:
 
 
 # Convenience function
-def ast_compare(code1: str, code2: str, language: str = "python") -> Dict[str, Any]:
+def ast_compare(code1: str, code2: str, language: str = "python") -> dict[str, Any]:
     """
     Quick AST-based similarity comparison.
 

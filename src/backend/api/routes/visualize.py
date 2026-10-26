@@ -50,8 +50,7 @@ def build_heatmap(length: int, ranges: list[tuple[int, int, float]]) -> list[flo
     heat = [0.0] * length
     for start, end, strength in ranges:
         for i in range(max(0, start), min(length, end)):
-            if strength > heat[i]:
-                heat[i] = strength
+            heat[i] = max(heat[i], strength)
     return heat
 
 

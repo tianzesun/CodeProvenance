@@ -839,9 +839,7 @@ class ASTNormalizer:
                 branches += 1
             elif isinstance(node, (ast.For, ast.AsyncFor, ast.While)):
                 loops += 1
-            elif isinstance(node, ast.ExceptHandler):
-                extra_paths += 1
-            elif isinstance(node, ast.IfExp):
+            elif isinstance(node, ast.ExceptHandler) or isinstance(node, ast.IfExp):
                 extra_paths += 1
             elif isinstance(node, ast.BoolOp):
                 extra_paths += len(node.values) - 1

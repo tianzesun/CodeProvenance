@@ -8,7 +8,8 @@ rejected with a clear ``TypeError``; and with ``lazy=True`` nothing runs at impo
 
 from __future__ import annotations
 
-from typing import Any, Callable, TypeVar, overload
+from collections.abc import Callable
+from typing import Any, TypeVar, overload
 
 from .plugin_base import ExecutionPlugin
 from .plugin_registry import PluginRegistry
@@ -54,7 +55,7 @@ def register_plugin(cls: Any = None, *, replace: bool = False, lazy: bool = Fals
             return klass
         try:
             instance = klass()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise PluginRegistrationError(
                 f"could not instantiate plugin {klass.__module__}.{klass.__qualname__}: {exc}"
             ) from exc

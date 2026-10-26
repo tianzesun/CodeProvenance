@@ -184,7 +184,7 @@ def apply_calibrator(calibrator: Any, probability: float) -> float:
     if callable(proba):
         try:
             value = float(proba([[probability]])[0][1])
-        except Exception:  # noqa: S110
+        except Exception:
             value = None
     if value is None:
         try:

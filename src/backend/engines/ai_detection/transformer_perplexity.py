@@ -275,7 +275,7 @@ class TransformerPerplexityAnalyzer:
                 cached = cache.get(key)
                 if isinstance(cached, (int, float)) and math.isfinite(cached) and cached > 0:
                     return float(cached)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug("Perplexity cache read failed: %s", exc)
 
         try:
@@ -283,7 +283,7 @@ class TransformerPerplexityAnalyzer:
             if len(ids) - 1 < MIN_TOKENS:
                 return None
             nll, tokens = windowed_nll(ids, self._score_window, max_length, stride)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("Perplexity computation failed: %s", exc)
             return None
         if tokens <= 0 or not math.isfinite(nll):
@@ -293,7 +293,7 @@ class TransformerPerplexityAnalyzer:
         if cache is not None:
             try:
                 cache.set(key, result, ttl=86400)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug("Perplexity cache write failed: %s", exc)
         return result
 
@@ -317,7 +317,7 @@ class TransformerPerplexityAnalyzer:
         ai_score, interpretation = perplexity_to_ai_score(perplexity)
         try:
             token_count = len(self._encode(code[:MAX_CHARS])) - 1
-        except Exception:  # noqa: BLE001
+        except Exception:
             token_count = None
         return {
             "available": True,

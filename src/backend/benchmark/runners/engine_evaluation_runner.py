@@ -20,10 +20,11 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,8 @@ class ScorerResult:
     default_recall: float = 0.0
     ece: float = 0.0  # expected calibration error, 10 equal-width bins
     brier: float = 0.0
-    scores: List[float] = field(default_factory=list)
-    labels: List[int] = field(default_factory=list)
+    scores: list[float] = field(default_factory=list)
+    labels: list[int] = field(default_factory=list)
 
     def to_json_dict(self) -> dict[str, Any]:
         """Convert to a JSON-safe dictionary."""
@@ -81,9 +82,9 @@ class EngineEvaluationReport:
     pair_count: int
     positive_pairs: int
     negative_pairs: int
-    scorers: List[ScorerResult]
+    scorers: list[ScorerResult]
     runtime_seconds: float
-    source_files: Optional[list[str]] = None
+    source_files: list[str] | None = None
 
     def save_json(self, path: Path) -> Path:
         """Write JSON report to disk."""
@@ -202,7 +203,7 @@ class EngineEvaluationReport:
         return path
 
     @classmethod
-    def from_json(cls, path: Path) -> "EngineEvaluationReport":
+    def from_json(cls, path: Path) -> EngineEvaluationReport:
         """Load a report previously written by ``save_json``."""
         payload = json.loads(path.read_text(encoding="utf-8"))
         scorers = [ScorerResult(**item) for item in payload["scorers"]]
@@ -233,13 +234,13 @@ class EngineEvaluationRunner:
     def __init__(
         self,
         output_dir: Path = Path("reports/engine_evaluation"),
-        dataset_root: Optional[Path] = None,
+        dataset_root: Path | None = None,
         threshold_step: float = 0.02,
         moss_user_id: str = "",
-        enabled_tools: Optional[Iterable[str]] = None,
-        pair_limit: Optional[int] = None,
+        enabled_tools: Iterable[str] | None = None,
+        pair_limit: int | None = None,
         dataset_name: str = "IR-Plag-Dataset",
-        dataset_roots: Optional[Iterable[Path]] = None,
+        dataset_roots: Iterable[Path] | None = None,
         external_batch_size: int = 80,
         prewarm_embeddings: bool = True,
     ) -> None:
@@ -327,10 +328,10 @@ class EngineEvaluationRunner:
         repo_root = Path(__file__).resolve().parents[4]
         return repo_root / "data" / "datasets" / "IR-Plag-Dataset"
 
-    def _dataset_search_roots(self) -> List[Path]:
+    def _dataset_search_roots(self) -> list[Path]:
         """Return the directories searched for corpus folders."""
         repo_root = Path(__file__).resolve().parents[4]
-        candidates: List[Path] = []
+        candidates: list[Path] = []
         if self.dataset_roots:
             candidates.extend(self.dataset_roots)
         if self.dataset_root is not None:
@@ -338,13 +339,13 @@ class EngineEvaluationRunner:
         candidates.extend(
             [repo_root / "data" / "datasets", repo_root / "data" / "bigger_datasets"]
         )
-        unique: List[Path] = []
+        unique: list[Path] = []
         for candidate in candidates:
             if candidate not in unique:
                 unique.append(candidate)
         return unique
 
-    def _load_pairs(self) -> List[LabeledPair]:
+    def _load_pairs(self) -> list[LabeledPair]:
         """Load the labeled pairs of the selected corpus.
 
         Delegates to the training runner's loaders so a comparison scores the
@@ -361,14 +362,14 @@ class EngineEvaluationRunner:
         return loader.load_pairs([self.dataset_name])
 
     @staticmethod
-    def _pair_filenames(pair: LabeledPair, index: int) -> Tuple[str, str]:
+    def _pair_filenames(pair: LabeledPair, index: int) -> tuple[str, str]:
         """Return stable, extension-correct submission names for one pair."""
         suffix = ".py" if (pair.language or "java").lower() == "python" else ".java"
         return f"pair_{index:04d}_a{suffix}", f"pair_{index:04d}_b{suffix}"
 
     def _balanced_subset(
-        self, pairs: List[LabeledPair], limit: int
-    ) -> List[LabeledPair]:
+        self, pairs: list[LabeledPair], limit: int
+    ) -> list[LabeledPair]:
         """Take a label-balanced subset when limiting the pair count.
 
         Slices positives and negatives independently so partial runs still
@@ -381,7 +382,7 @@ class EngineEvaluationRunner:
 
         positive_slice = positives[: (limit // 2) + (limit % 2)]
         negative_slice = negatives[: (limit // 2)]
-        selected: List[LabeledPair] = []
+        selected: list[LabeledPair] = []
         for index in range(max(len(positive_slice), len(negative_slice))):
             if index < len(positive_slice):
                 selected.append(positive_slice[index])
@@ -389,18 +390,18 @@ class EngineEvaluationRunner:
                 selected.append(negative_slice[index])
         return selected
 
-    def _submissions_for_pairs(self, pairs: List[LabeledPair]) -> Dict[str, str]:
+    def _submissions_for_pairs(self, pairs: list[LabeledPair]) -> dict[str, str]:
         """Build a filename-keyed submission map with unique per-pair names."""
-        submissions: Dict[str, str] = {}
+        submissions: dict[str, str] = {}
         for index, pair in enumerate(pairs):
             file_a, file_b = self._pair_filenames(pair, index)
             submissions[file_a] = pair.code_a
             submissions[file_b] = pair.code_b
         return submissions
 
-    def _pair_specs(self, pairs: List[LabeledPair]) -> List[Dict[str, Any]]:
+    def _pair_specs(self, pairs: list[LabeledPair]) -> list[dict[str, Any]]:
         """Build the pair spec list consumed by ``BatchDetectionService``."""
-        specs: List[Dict[str, Any]] = []
+        specs: list[dict[str, Any]] = []
         for index, pair in enumerate(pairs):
             file_a, file_b = self._pair_filenames(pair, index)
             specs.append({"file_a": file_a, "file_b": file_b, "label": pair.label})
@@ -408,9 +409,9 @@ class EngineEvaluationRunner:
 
     def _score_integritydesk_engines(
         self,
-        submissions: Dict[str, str],
-        pairs: List[LabeledPair],
-    ) -> List[ScorerResult]:
+        submissions: dict[str, str],
+        pairs: list[LabeledPair],
+    ) -> list[ScorerResult]:
         """Score all IntegrityDesk engines on every pair using the production path."""
         from src.backend.application.services.batch_detection_service import (
             BatchDetectionService,
@@ -457,7 +458,7 @@ class EngineEvaluationRunner:
         # align features to labels via the stable pair filenames instead of
         # relying on result order.
         pair_keys = list(enumerate(pairs))
-        result_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        result_by_key: dict[tuple[str, str], dict[str, Any]] = {}
         for result in results:
             file_a = getattr(result, "file_a", "")
             file_b = getattr(result, "file_b", "")
@@ -467,14 +468,14 @@ class EngineEvaluationRunner:
                 ] = dict(getattr(result, "features", {}) or {})
 
         engine_names = ("ast", "fingerprint", "embedding", "ngram", "winnowing")
-        feature_rows: Dict[str, List[float]] = {name: [] for name in engine_names}
+        feature_rows: dict[str, list[float]] = {name: [] for name in engine_names}
         feature_rows["logic_flow"] = []
         feature_rows["fused"] = []
         feature_rows["fused_rule"] = []
         feature_rows["fused_score"] = []
         feature_rows["baseline_adjusted_score"] = []
 
-        labels: List[int] = []
+        labels: list[int] = []
         for index, pair in pair_keys:
             file_a, file_b = self._pair_filenames(pair, index)
             expected_key = EngineEvaluationRunner._normalize_pair(file_a, file_b)
@@ -518,7 +519,7 @@ class EngineEvaluationRunner:
             )
         ]
 
-        scorers: List[ScorerResult] = []
+        scorers: list[ScorerResult] = []
         for name, scores in feature_rows.items():
             scorers.append(
                 self._make_scorer(
@@ -532,8 +533,8 @@ class EngineEvaluationRunner:
 
     def _score_external_tools(
         self,
-        pairs: List[LabeledPair],
-    ) -> List[ScorerResult]:
+        pairs: list[LabeledPair],
+    ) -> list[ScorerResult]:
         """Score the real MOSS / JPlag / Dolos adapters on every pair.
 
         JPlag and Dolos compare each submission against every other submission
@@ -554,14 +555,14 @@ class EngineEvaluationRunner:
             list(range(start, min(start + batch_size, len(pairs))))
             for start in range(0, len(pairs), batch_size)
         ]
-        scorers: List[ScorerResult] = []
+        scorers: list[ScorerResult] = []
 
         for tool_id in sorted(self.enabled_tools):
-            scores_by_index: Dict[int, float] = {}
+            scores_by_index: dict[int, float] = {}
             error = ""
             for batch in batches:
-                submissions: Dict[str, str] = {}
-                pair_tuples: List[Tuple[str, str]] = []
+                submissions: dict[str, str] = {}
+                pair_tuples: list[tuple[str, str]] = []
                 for index in batch:
                     file_a, file_b = self._pair_filenames(pairs[index], index)
                     submissions[file_a] = pairs[index].code_a
@@ -618,14 +619,14 @@ class EngineEvaluationRunner:
 
     @staticmethod
     def _extract_tool_pair_scores(
-        payload: Dict[str, Any],
-        pair_tuples: List[Tuple[str, str]],
-    ) -> Optional[Dict[Tuple[str, str], float]]:
+        payload: dict[str, Any],
+        pair_tuples: list[tuple[str, str]],
+    ) -> dict[tuple[str, str], float] | None:
         """Map normalized external-tool output onto the requested pair keys."""
         rows = payload.get("pairs")
         if not isinstance(rows, list) or not rows:
             return None
-        by_key: Dict[Tuple[str, str], float] = {}
+        by_key: dict[tuple[str, str], float] = {}
         for row in rows:
             file_a = row.get("file_a")
             file_b = row.get("file_b")
@@ -639,7 +640,7 @@ class EngineEvaluationRunner:
         return by_key
 
     @staticmethod
-    def _normalize_pair(file_a: str, file_b: str) -> Tuple[str, str]:
+    def _normalize_pair(file_a: str, file_b: str) -> tuple[str, str]:
         """Build a stable unordered pair key."""
         return tuple(sorted((file_a, file_b)))  # type: ignore[return-value]
 
@@ -647,8 +648,8 @@ class EngineEvaluationRunner:
         self,
         name: str,
         kind: str,
-        scores: List[float],
-        labels: List[int],
+        scores: list[float],
+        labels: list[int],
     ) -> ScorerResult:
         """Compute metrics for one scorer from aligned scores and labels."""
         auc = EngineEvaluationRunner.auc_roc(scores, labels)
@@ -678,10 +679,10 @@ class EngineEvaluationRunner:
 
     @staticmethod
     def calibration_metrics(
-        scores: List[float],
-        labels: List[int],
+        scores: list[float],
+        labels: list[int],
         bins: int = 10,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Return expected calibration error and the Brier score.
 
         A similarity score is only readable as a probability if these are low;
@@ -720,7 +721,7 @@ class EngineEvaluationRunner:
         )
 
     @staticmethod
-    def auc_roc(scores: List[float], labels: List[int]) -> float:
+    def auc_roc(scores: list[float], labels: list[int]) -> float:
         """Compute ROC-AUC using the Mann-Whitney concordance estimator."""
         positives = [score for score, label in zip(scores, labels) if label == 1]
         negatives = [score for score, label in zip(scores, labels) if label == 0]
@@ -743,12 +744,12 @@ class EngineEvaluationRunner:
     @classmethod
     def best_threshold_metrics(
         cls,
-        scores: List[float],
-        labels: List[int],
+        scores: list[float],
+        labels: list[int],
         step: float = 0.02,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Sweep thresholds and return the best-F1 operating point."""
-        best: Dict[str, float] = {
+        best: dict[str, float] = {
             "threshold": 0.5,
             "precision": 0.0,
             "recall": 0.0,
@@ -764,10 +765,10 @@ class EngineEvaluationRunner:
 
     @staticmethod
     def metrics_at_threshold(
-        scores: List[float],
-        labels: List[int],
+        scores: list[float],
+        labels: list[int],
         threshold: float,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Compute binary metrics for a single threshold."""
         tp = fp = tn = fn = 0
         for score, label in zip(scores, labels):
@@ -800,13 +801,13 @@ class EngineEvaluationRunner:
 
 def run_engine_evaluation(
     output_dir: Path = Path("reports/engine_evaluation"),
-    dataset_root: Optional[Path] = None,
+    dataset_root: Path | None = None,
     threshold_step: float = 0.02,
     moss_user_id: str = "",
-    enabled_tools: Optional[Iterable[str]] = None,
-    pair_limit: Optional[int] = None,
+    enabled_tools: Iterable[str] | None = None,
+    pair_limit: int | None = None,
     dataset_name: str = "IR-Plag-Dataset",
-    dataset_roots: Optional[Iterable[Path]] = None,
+    dataset_roots: Iterable[Path] | None = None,
     external_batch_size: int = 80,
     prewarm_embeddings: bool = True,
 ) -> EngineEvaluationReport:

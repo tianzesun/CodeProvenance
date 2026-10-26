@@ -7,8 +7,8 @@ Usage:
 """
 from __future__ import annotations
 
-import sys
 import logging
+import sys
 from pathlib import Path
 
 # Add repo root to path
@@ -29,8 +29,10 @@ def main() -> int:
         return 1
 
     try:
+        from src.backend.benchmark.runners.benchmark_validation_runner import (
+            BenchmarkValidationRunner,
+        )
         from src.backend.benchmark.validation.protocol import ValidationProtocol
-        from src.backend.benchmark.runners.benchmark_validation_runner import BenchmarkValidationRunner
     except ModuleNotFoundError as exc:
         logger.error("Missing runtime dependency for validation command: %s", exc)
         return 1

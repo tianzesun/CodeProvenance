@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
+from src.backend.benchmark.runners.comparative_runner import ComparativeBenchmarkRunner
 from src.backend.benchmark.runners.core_runner import CoreBenchmarkRunner
 from src.backend.benchmark.runners.diagnostic_runner import DiagnosticBenchmarkRunner
-from src.backend.benchmark.runners.comparative_runner import ComparativeBenchmarkRunner
 from src.backend.benchmark.runners.layer_runner import ThreeLayerBenchmarkRunner
 
 
@@ -27,12 +27,12 @@ class FullBenchmarkRunner:
         type4: int = 50,
         non_clone: int = 200,
         seed: int = 42,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run full benchmark suite."""
         output_path = Path(self.output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        all_results: Dict[str, Any] = {}
+        all_results: dict[str, Any] = {}
 
         # Run core benchmark
         print("\n[1/4] Running Core Benchmark...")

@@ -6,22 +6,16 @@ Layer 3: Generalization - Cross-language/project validation
 """
 from __future__ import annotations
 
-import json
 import random
 import re
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any
 
-from src.backend.benchmark.pipeline.loader import CanonicalDataset, CodePair
-from src.backend.benchmark.pipeline.stages import SimilarityResult
 from src.backend.benchmark.evaluation.metrics.significance import (
-    bootstrap_confidence_interval,
-    mcnemar_test,
     add_significance_to_results,
 )
 from src.backend.benchmark.normalizer.identifier_normalizer import normalize_identifiers
-
+from src.backend.benchmark.pipeline.loader import CanonicalDataset, CodePair
 
 # =============================================================================
 # Layer 1: Sensitivity - 17+ Plagiarism Techniques
@@ -42,7 +36,7 @@ class RenameVariables(PlagiarismTechnique):
     
     def apply(self, code: str, seed: int = 42) -> str:
         rng = random.Random(seed)
-        id_map: Dict[str, str] = {}
+        id_map: dict[str, str] = {}
         counter = 0
         keywords = {'if', 'else', 'for', 'while', 'return', 'def', 'class',
                     'import', 'from', 'try', 'except', 'with', 'as', 'in',
@@ -310,7 +304,7 @@ class ChainTransformation(PlagiarismTechnique):
     name = "chain_transformation"
     description = "Apply 3+ techniques in sequence"
     
-    def __init__(self, techniques: List[PlagiarismTechnique]):
+    def __init__(self, techniques: list[PlagiarismTechnique]):
         self.techniques = techniques
     
     def apply(self, code: str, seed: int = 42) -> str:
@@ -321,7 +315,7 @@ class ChainTransformation(PlagiarismTechnique):
 
 
 # Registry of all 17+ techniques
-ALL_TECHNIQUES: List[PlagiarismTechnique] = [
+ALL_TECHNIQUES: list[PlagiarismTechnique] = [
     RenameVariables(),
     RestructureStatements(),
     ChangeLoopType(),
@@ -355,7 +349,7 @@ class SensitivityDatasetGenerator:
         self._seed = seed
         self._rng = random.Random(seed)
     
-    def generate(self, base_codes: List[str], 
+    def generate(self, base_codes: list[str], 
                  codes_per_technique: int = 50) -> CanonicalDataset:
         """Generate dataset with all plagiarism techniques.
         
@@ -369,7 +363,7 @@ class SensitivityDatasetGenerator:
         if not base_codes:
             raise ValueError("base_codes cannot be empty")
         
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         pair_id = 0
         
         for tech_idx, technique in enumerate(ALL_TECHNIQUES):
@@ -435,7 +429,7 @@ class PrecisionEvaluator:
         self._engine = engine
         self._top_n = top_n
     
-    def evaluate(self, assignments: List[StudentAssignment]) -> Dict[str, Any]:
+    def evaluate(self, assignments: list[StudentAssignment]) -> dict[str, Any]:
         """Compare all pairs and analyze top-N matches.
         
         Args:
@@ -470,7 +464,7 @@ class PrecisionEvaluator:
         
         return analysis
     
-    def _compute_distribution(self, results: List[Dict]) -> Dict[str, float]:
+    def _compute_distribution(self, results: list[dict]) -> dict[str, float]:
         scores = [r["score"] for r in results]
         if not scores:
             return {}
@@ -497,7 +491,7 @@ class GeneralizationEvaluator:
     def __init__(self, engine: Any):
         self._engine = engine
     
-    def evaluate(self, language_pairs: List[Tuple[List[str], List[str]]]) -> Dict[str, Any]:
+    def evaluate(self, language_pairs: list[tuple[list[str], list[str]]]) -> dict[str, Any]:
         """Test engine across multiple languages/projects.
         
         Args:
@@ -543,9 +537,9 @@ class GeneralizationEvaluator:
 
 @dataclass
 class ThreeLayerResult:
-    layer1_sensitivity: Dict[str, Any]
-    layer2_precision: Dict[str, Any]
-    layer3_generalization: Dict[str, Any]
+    layer1_sensitivity: dict[str, Any]
+    layer2_precision: dict[str, Any]
+    layer3_generalization: dict[str, Any]
     overall_score: float
     
     def summary(self) -> str:
@@ -566,9 +560,9 @@ class ThreeLayerBenchmarkRunner:
         self._seed = seed
     
     def run(self, 
-            base_codes: List[str],
-            student_assignments: Optional[List[StudentAssignment]] = None,
-            language_samples: Optional[List[Tuple[str, List[str]]]] = None
+            base_codes: list[str],
+            student_assignments: list[StudentAssignment] | None = None,
+            language_samples: list[tuple[str, list[str]]] | None = None
             ) -> ThreeLayerResult:
         """Run comprehensive three-layer benchmark.
         
@@ -609,7 +603,7 @@ class ThreeLayerBenchmarkRunner:
             overall_score=overall
         )
     
-    def _run_layer1(self, base_codes: List[str]) -> Dict[str, Any]:
+    def _run_layer1(self, base_codes: list[str]) -> dict[str, Any]:
         """Layer 1: Sensitivity analysis with per-technique confusion matrix."""
         generator = SensitivityDatasetGenerator(self._seed)
         dataset = generator.generate(base_codes, codes_per_technique=20)
@@ -627,8 +621,8 @@ class ThreeLayerBenchmarkRunner:
         
         # Analyze per-technique with full confusion matrix
         threshold = 0.5
-        technique_confusion: Dict[str, Dict[str, int]] = {}
-        technique_scores: Dict[str, List[float]] = {}
+        technique_confusion: dict[str, dict[str, int]] = {}
+        technique_scores: dict[str, list[float]] = {}
         
         for r, pair in zip(results, dataset.pairs):
             tech_name = ALL_TECHNIQUES[pair.clone_type % len(ALL_TECHNIQUES)].name if pair.clone_type >= 0 and pair.clone_type != 0 else "non_clone"
@@ -651,7 +645,7 @@ class ThreeLayerBenchmarkRunner:
                 technique_confusion[tech_name]["fn"] += 1
         
         # Build per-technique detection report with metrics
-        technique_detection: Dict[str, Dict[str, Any]] = {}
+        technique_detection: dict[str, dict[str, Any]] = {}
         for tech_name, confusion in technique_confusion.items():
             tp = confusion["tp"]
             fp = confusion["fp"]
@@ -701,7 +695,7 @@ class ThreeLayerBenchmarkRunner:
             "total_pairs_tested": len(results),
         }
     
-    def _run_layer2_synthetic(self, base_codes: List[str], use_normalizer: bool = True) -> Dict[str, Any]:
+    def _run_layer2_synthetic(self, base_codes: list[str], use_normalizer: bool = True) -> dict[str, Any]:
         """Layer 2: Precision analysis using synthetic data.
         
         Creates both positive pairs (plagiarized) and negative pairs (non-plagiarized)
@@ -797,7 +791,7 @@ class ThreeLayerBenchmarkRunner:
             },
         }
     
-    def _run_layer2(self, student_assignments: List[StudentAssignment]) -> Dict[str, Any]:
+    def _run_layer2(self, student_assignments: list[StudentAssignment]) -> dict[str, Any]:
         """Layer 2: Precision analysis using real student submissions.
         
         Compares each student's code against all others to measure
@@ -855,7 +849,7 @@ class ThreeLayerBenchmarkRunner:
             "source": "real_student_assignments",
         }
     
-    def _run_layer3(self, language_samples: List[Tuple[str, List[str]]]) -> Dict[str, Any]:
+    def _run_layer3(self, language_samples: list[tuple[str, list[str]]]) -> dict[str, Any]:
         """Layer 3: Generalization using real multi-language data.
         
         Tests the engine across different programming languages
@@ -908,7 +902,7 @@ class ThreeLayerBenchmarkRunner:
             "source": "real_multi_language",
         }
     
-    def _run_layer3_synthetic(self, base_codes: List[str]) -> Dict[str, Any]:
+    def _run_layer3_synthetic(self, base_codes: list[str]) -> dict[str, Any]:
         """Layer 3: Generalization using real multi-language data.
         
         Tests the engine across Python, Java, and JavaScript implementations
@@ -936,7 +930,7 @@ class ThreeLayerBenchmarkRunner:
         # Determine if we have single-language samples (list) or multi-language (list[str])
         first_val = next(iter(generators.values()), None)
         
-        results: Dict[str, Dict[str, float]] = {}
+        results: dict[str, dict[str, float]] = {}
         
         if first_val and isinstance(first_val, list) and first_val and isinstance(first_val[0], str):
             # Multi-language: generators values are lists of code strings per language
@@ -955,7 +949,7 @@ class ThreeLayerBenchmarkRunner:
                 }
             
             # Cross-language pairs: Python-Java, Python-JS, Java-JS
-            cross_lang_scores: Dict[str, List[float]] = {}
+            cross_lang_scores: dict[str, list[float]] = {}
             lang_names = list(generators.keys())
             for i, lang_a in enumerate(lang_names):
                 for lang_b in lang_names[i + 1:]:

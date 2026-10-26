@@ -13,8 +13,7 @@ from __future__ import annotations
 import hashlib
 import random
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -62,7 +61,7 @@ class ExternalToolAdapter(ABC):
     def compare(self, code_a: str, code_b: str) -> float:
         """Return a similarity score in [0, 1]."""
 
-    def compare_batch(self, pairs: List[Tuple[str, str]]) -> List[float]:
+    def compare_batch(self, pairs: list[tuple[str, str]]) -> list[float]:
         """Score a batch of pairs."""
         return [self.compare(a, b) for a, b in pairs]
 
@@ -518,7 +517,7 @@ class VendetectAdapter(ExternalToolAdapter):
 # Tier 5 — Modern Baseline
 # Tier 6 — Specialized
 
-ALL_COMPETITOR_ADAPTERS: List[ExternalToolAdapter] = [
+ALL_COMPETITOR_ADAPTERS: list[ExternalToolAdapter] = [
     # Tier 1
     MOSSAdapter(),
     JPlagAdapter(),

@@ -1,7 +1,8 @@
 """Base Normalizer interface."""
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Tuple
 from pathlib import Path
+from typing import Any
+
 
 class BaseNormalizer(ABC):
     @property
@@ -9,13 +10,13 @@ class BaseNormalizer(ABC):
     def tool_name(self) -> str:
         pass
     @abstractmethod
-    def normalize(self, output_path: Path) -> List[Dict[str, Any]]:
+    def normalize(self, output_path: Path) -> list[dict[str, Any]]:
         pass
     @staticmethod
-    def canonicalize_pair(f1: str, f2: str) -> Tuple[str, str]:
+    def canonicalize_pair(f1: str, f2: str) -> tuple[str, str]:
         return tuple(sorted([f1.strip(), f2.strip()]))
     @staticmethod
-    def deduplicate_pairs(predictions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def deduplicate_pairs(predictions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen = {}
         for p in predictions:
             f1, f2 = p.get("file1",""), p.get("file2","")

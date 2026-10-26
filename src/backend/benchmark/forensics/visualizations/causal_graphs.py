@@ -15,9 +15,8 @@ Usage:
 """
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -33,7 +32,7 @@ class GraphConfig:
         show_weights: Whether to show edge weights.
         output_format: Output format (png, pdf, svg).
     """
-    figsize: Tuple[int, int] = (10, 8)
+    figsize: tuple[int, int] = (10, 8)
     dpi: int = 150
     node_size: int = 500
     font_size: int = 10
@@ -85,7 +84,7 @@ class CausalGraphGenerator:
         generator.generate(root_cause_report, "output.png")
     """
     
-    def __init__(self, config: Optional[GraphConfig] = None):
+    def __init__(self, config: GraphConfig | None = None):
         """Initialize causal graph generator.
         
         Args:

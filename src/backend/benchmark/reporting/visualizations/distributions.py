@@ -3,10 +3,10 @@
 Generates visualizations of similarity score distributions across benchmark results,
 showing statistical patterns and outliers.
 """
-from typing import Any, Dict, List, Optional
+import json
 from dataclasses import dataclass
 from enum import Enum
-import json
+from typing import Any
 
 
 class DistributionType(Enum):
@@ -30,7 +30,7 @@ class DistributionConfig:
     width: int = 800
     height: int = 600
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "distribution_type": self.distribution_type.value,
@@ -52,7 +52,7 @@ class DistributionPlotter:
     helping identify patterns, outliers, and statistical properties.
     """
 
-    def __init__(self, config: Optional[DistributionConfig] = None):
+    def __init__(self, config: DistributionConfig | None = None):
         """Initialize distribution plotter.
 
         Args:
@@ -60,7 +60,7 @@ class DistributionPlotter:
         """
         self.config = config or DistributionConfig()
 
-    def compute_statistics(self, scores: List[float]) -> Dict[str, float]:
+    def compute_statistics(self, scores: list[float]) -> dict[str, float]:
         """Compute statistical measures for scores.
 
         Args:
@@ -109,7 +109,7 @@ class DistributionPlotter:
             "iqr": iqr
         }
 
-    def detect_outliers(self, scores: List[float]) -> List[float]:
+    def detect_outliers(self, scores: list[float]) -> list[float]:
         """Detect outliers using IQR method.
 
         Args:
@@ -127,7 +127,7 @@ class DistributionPlotter:
 
         return [s for s in scores if s < lower_bound or s > upper_bound]
 
-    def compute_histogram(self, scores: List[float]) -> Dict[str, Any]:
+    def compute_histogram(self, scores: list[float]) -> dict[str, Any]:
         """Compute histogram bins and counts.
 
         Args:
@@ -158,11 +158,11 @@ class DistributionPlotter:
 
     def generate(
         self,
-        scores: List[float],
+        scores: list[float],
         output_path: str,
         title: str = "Score Distribution",
-        labels: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
+        labels: list[str] | None = None
+    ) -> dict[str, Any]:
         """Generate distribution visualization.
 
         Args:
@@ -196,10 +196,10 @@ class DistributionPlotter:
 
     def generate_comparison(
         self,
-        distributions: Dict[str, List[float]],
+        distributions: dict[str, list[float]],
         output_path: str,
         title: str = "Score Distribution Comparison"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate comparison of multiple distributions.
 
         Args:
@@ -224,7 +224,7 @@ class DistributionPlotter:
 
         return result
 
-    def to_json(self, result: Dict[str, Any]) -> str:
+    def to_json(self, result: dict[str, Any]) -> str:
         """Convert generation result to JSON.
 
         Args:

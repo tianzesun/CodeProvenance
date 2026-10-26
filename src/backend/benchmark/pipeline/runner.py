@@ -13,11 +13,11 @@ Rules:
 4. Parallel execution support for large datasets
 """
 
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from typing import List, Dict, Any, Optional, Callable, Tuple
-from dataclasses import dataclass
-import random
 import os
+import random
+from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from threading import Lock
 
 try:
@@ -31,29 +31,27 @@ except ImportError:
 
     _HAS_TQDM = False
 
+from src.backend.benchmark.forensics.clone_type_breakdown import (
+    analyze_clone_type_breakdown,
+)
 from src.backend.benchmark.pipeline.benchmark_config import BenchmarkConfig
+from src.backend.benchmark.pipeline.external_loader import ExternalDatasetLoader
 from src.backend.benchmark.pipeline.loader import (
     CanonicalDataset,
     CodePair,
-    DatasetLoader,
 )
-from src.backend.benchmark.pipeline.external_loader import ExternalDatasetLoader
 from src.backend.benchmark.pipeline.stages import (
-    NormalizerStage,
-    ParserStage,
-    SimilarityStage,
     EvaluationStage,
+    MetricsResult,
     MetricsStage,
+    NormalizerStage,
+    ParsedCode,
+    ParserStage,
     ReportingStage,
     SimilarityResult,
-    MetricsResult,
-    ParsedCode,
+    SimilarityStage,
 )
 from src.backend.benchmark.registry import registry
-from src.backend.benchmark.forensics.clone_type_breakdown import (
-    CloneTypeBreakdown,
-    analyze_clone_type_breakdown,
-)
 
 # Auto-load plugins
 try:
@@ -91,7 +89,7 @@ class BenchmarkRunResult:
     dataset_version: str
     engine_name: str
     metrics: MetricsResult
-    report_paths: Dict[str, str] = None
+    report_paths: dict[str, str] = None
     success: bool = True
     error: str = ""
 
@@ -113,14 +111,14 @@ class BenchmarkRunner:
         """
         self._seed = seed
         random.seed(seed)
-        self._sim_cache: Dict[str, float] = {}
+        self._sim_cache: dict[str, float] = {}
         self._sim_cache_lock = Lock()
 
     def load_external_dataset(
         self,
         name: str,
         split: str = "test",
-        max_pairs: Optional[int] = None,
+        max_pairs: int | None = None,
     ) -> CanonicalDataset:
         """Load an external dataset by name.
 
@@ -214,7 +212,7 @@ class BenchmarkRunner:
             use_parallel = num_pairs > 50
 
             # ===== Stage 1: Normalize all code =====
-            all_code: Dict[str, str] = {}
+            all_code: dict[str, str] = {}
             all_code_lock = Lock()
 
             def _normalize_one(pair: CodePair) -> None:
@@ -245,7 +243,7 @@ class BenchmarkRunner:
                     _normalize_one(pair)
 
             # ===== Stage 2: Parse all code =====
-            parsed: Dict[str, ParsedCode] = {}
+            parsed: dict[str, ParsedCode] = {}
             parsed_lock = Lock()
 
             def _parse_one(code_id: str, norm_code: str) -> None:
@@ -293,7 +291,7 @@ class BenchmarkRunner:
                     _parse_one(cid, nc)
 
             # ===== Stage 3: Compute similarity =====
-            results: List[SimilarityResult] = []
+            results: list[SimilarityResult] = []
             results_lock = Lock()
 
             def _similarity_one(pair: CodePair) -> None:
@@ -413,8 +411,8 @@ class BenchmarkRunner:
 
     def _optimize_threshold(
         self,
-        results: List[SimilarityResult],
-        ground_truth: Dict,
+        results: list[SimilarityResult],
+        ground_truth: dict,
         strategy: str = "f1_max",
     ) -> float:
         """Find optimal threshold by maximizing F1.
@@ -430,7 +428,7 @@ class BenchmarkRunner:
         best_threshold = 0.5
         best_score = -1.0
 
-        for t_int in range(0, 101):
+        for t_int in range(101):
             t = t_int / 100.0
             tp = fp = tn = fn = 0
 
@@ -449,9 +447,9 @@ class BenchmarkRunner:
                     fn += 1
 
             from src.backend.benchmark.evaluation.metrics import (
+                f1_score,
                 precision,
                 recall,
-                f1_score,
             )
 
             prec = precision(tp, fp)
@@ -513,8 +511,8 @@ class BenchmarkRunner:
         rng.shuffle(pos_pairs)
         rng.shuffle(neg_pairs)
 
-        pos_folds: List[List[CodePair]] = [[] for _ in range(actual_folds)]
-        neg_folds: List[List[CodePair]] = [[] for _ in range(actual_folds)]
+        pos_folds: list[list[CodePair]] = [[] for _ in range(actual_folds)]
+        neg_folds: list[list[CodePair]] = [[] for _ in range(actual_folds)]
 
         for i, p in enumerate(pos_pairs):
             pos_folds[i % actual_folds].append(p)
@@ -591,9 +589,9 @@ class BenchmarkRunner:
     def run_comparison(
         self,
         dataset: CanonicalDataset,
-        engine_names: List[str],
-        config: Optional[BenchmarkConfig] = None,
-    ) -> Dict[str, BenchmarkRunResult]:
+        engine_names: list[str],
+        config: BenchmarkConfig | None = None,
+    ) -> dict[str, BenchmarkRunResult]:
         """Run benchmark with multiple engines and compare results.
 
         Args:
@@ -619,8 +617,8 @@ class BenchmarkRunner:
     def run_comparison_report(
         self,
         dataset: CanonicalDataset,
-        engine_names: List[str],
-        config: Optional[BenchmarkConfig] = None,
+        engine_names: list[str],
+        config: BenchmarkConfig | None = None,
     ) -> str:
         """Run multi-engine comparison and return a formatted report string.
 
@@ -656,10 +654,6 @@ class BenchmarkRunner:
 
         # Statistical significance
         if len(engine_names) >= 2:
-            import numpy as np
-            from src.backend.benchmark.evaluation.metrics.significance import (
-                compare_engines_significance,
-            )
 
             scores_by_engine = {}
             for name in engine_names:

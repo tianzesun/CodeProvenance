@@ -5,9 +5,9 @@ All evaluation results are flattened into BenchmarkRecord for single source of t
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from enum import IntEnum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class CloneType(IntEnum):
@@ -55,7 +55,7 @@ class BenchmarkRecord:
     clone_type: int = 0
     difficulty: str = "EASY"
     language: str = "unknown"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate record after initialization."""
@@ -66,12 +66,12 @@ class BenchmarkRecord:
         if self.clone_type < 0 or self.clone_type > 6:
             raise ValueError(f"Clone type must be 0-6, got {self.clone_type}")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> BenchmarkRecord:
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkRecord:
         """Create from dictionary."""
         return cls(**data)
 
@@ -121,7 +121,7 @@ class EngineMetrics:
     ci_recall: tuple[float, float] = (0.0, 0.0)
     ci_f1: tuple[float, float] = (0.0, 0.0)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "engine_name": self.engine_name,
@@ -174,7 +174,7 @@ class ComparisonResult:
     recall_diff: float
     ci_f1_diff: tuple[float, float] = (0.0, 0.0)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "engine_a": self.engine_a,
@@ -194,8 +194,8 @@ class ComparisonResult:
 
 
 def extract_labels_and_scores(
-    records: List[BenchmarkRecord],
-) -> tuple[List[int], List[float], List[bool]]:
+    records: list[BenchmarkRecord],
+) -> tuple[list[int], list[float], list[bool]]:
     """Extract labels, scores, and decisions from records.
 
     Args:
@@ -211,7 +211,7 @@ def extract_labels_and_scores(
 
 
 def records_to_arrays(
-    records: List[BenchmarkRecord],
+    records: list[BenchmarkRecord],
 ) -> tuple:
     """Convert records to numpy arrays for analysis.
 
@@ -227,12 +227,12 @@ def records_to_arrays(
 
 
 def filter_records(
-    records: List[BenchmarkRecord],
-    engine: Optional[str] = None,
-    clone_type: Optional[int] = None,
-    difficulty: Optional[str] = None,
-    language: Optional[str] = None,
-) -> List[BenchmarkRecord]:
+    records: list[BenchmarkRecord],
+    engine: str | None = None,
+    clone_type: int | None = None,
+    difficulty: str | None = None,
+    language: str | None = None,
+) -> list[BenchmarkRecord]:
     """Filter records by specified criteria.
 
     Args:
@@ -263,8 +263,8 @@ def filter_records(
 
 
 def group_records_by_engine(
-    records: List[BenchmarkRecord],
-) -> Dict[str, List[BenchmarkRecord]]:
+    records: list[BenchmarkRecord],
+) -> dict[str, list[BenchmarkRecord]]:
     """Group records by engine name.
 
     Args:
@@ -273,7 +273,7 @@ def group_records_by_engine(
     Returns:
         Dictionary mapping engine names to their records.
     """
-    groups: Dict[str, List[BenchmarkRecord]] = {}
+    groups: dict[str, list[BenchmarkRecord]] = {}
     for record in records:
         if record.engine not in groups:
             groups[record.engine] = []

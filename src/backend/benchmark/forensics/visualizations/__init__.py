@@ -5,17 +5,17 @@ Provides publication-ready visualizations:
 - ASTAlignmentVisualizer: AST alignment diagrams
 - CausalGraphGenerator: Causal similarity graphs
 """
-from src.backend.benchmark.forensics.visualizations.heatmaps import (
-    TokenHeatmapGenerator,
-    HeatmapConfig,
-)
 from src.backend.benchmark.forensics.visualizations.ast_alignment import (
-    ASTAlignmentVisualizer,
     AlignmentConfig,
+    ASTAlignmentVisualizer,
 )
 from src.backend.benchmark.forensics.visualizations.causal_graphs import (
     CausalGraphGenerator,
     GraphConfig,
+)
+from src.backend.benchmark.forensics.visualizations.heatmaps import (
+    HeatmapConfig,
+    TokenHeatmapGenerator,
 )
 
 __all__ = [

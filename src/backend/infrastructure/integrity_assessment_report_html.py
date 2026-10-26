@@ -12,10 +12,9 @@ from html import escape
 from typing import Any
 
 from src.backend.infrastructure.integrity_assessment_report import (
-    IntegrityAssessmentReport,
     PLAGIARISM_TYPES,
     RISK_LEVELS,
-    ENGINE_LABELS,
+    IntegrityAssessmentReport,
 )
 
 logger = logging.getLogger(__name__)
