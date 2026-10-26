@@ -593,7 +593,7 @@ export default function CasesQueuePage() {
                 <h3 className="mt-4 text-base font-semibold text-slate-900 dark:text-white">No cases found</h3>
                 <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
                   {cases.length === 0
-                    ? 'Run an AI detection or similarity analysis to create cases.'
+                    ? 'Open a case from a flagged pair on a check’s results page, and it will appear here.'
                     : 'No cases match the current filters or search.'}
                 </p>
               </div>

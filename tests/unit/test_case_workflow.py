@@ -193,3 +193,43 @@ def test_assigning_a_reviewer_does_not_reopen_a_closed_case(client, seeded) -> N
     reopened = client.patch(f"/api/cases/{case_id}", json={"status": "OPEN"}).json()
     assert reopened["status"] == "OPEN"
     assert not reopened["closed_at"]
+
+
+def _open_pair(client: TestClient, job_id: str, file_a="a.py", file_b="b.py"):
+    return client.post(
+        "/api/cases/from-pair",
+        json={"job_id": job_id, "file_a": file_a, "file_b": file_b},
+    )
+
+
+def test_a_case_opened_from_a_pair_is_linked_to_its_result(client, seeded) -> None:
+    # File names in either order find the row, which stores them sorted.
+    response = _open_pair(client, seeded["job_mine"], "b.py", "a.py")
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["created"] is True
+    case = body["case"]
+    assert case["priority"] == "HIGH"  # the seeded pair scores 0.9
+    assert case["title"].startswith("b.py and a.py")
+
+    detail = client.get(f"/api/cases/{case['id']}").json()
+    assert detail["result_ids"] == [seeded["result_mine"]]
+
+
+def test_opening_a_case_on_the_same_pair_again_returns_the_first(client, seeded) -> None:
+    first = _open_pair(client, seeded["job_mine"]).json()["case"]["id"]
+    again = _open_pair(client, seeded["job_mine"])
+    assert again.status_code == 200
+    assert again.json()["created"] is False
+    assert again.json()["case"]["id"] == first
+
+    listed = client.get(f"/api/cases/for-job/{seeded['job_mine']}").json()
+    assert listed == [
+        {"file_a": "a.py", "file_b": "b.py", "case_id": first, "status": "OPEN"}
+    ]
+
+
+def test_a_case_cannot_be_opened_on_another_organizations_pair(client, seeded) -> None:
+    assert _open_pair(client, seeded["job_other"]).status_code == 404
+    assert _open_pair(client, seeded["job_mine"], "a.py", "c.py").status_code == 404
+    assert client.get(f"/api/cases/for-job/{seeded['job_other']}").status_code == 404

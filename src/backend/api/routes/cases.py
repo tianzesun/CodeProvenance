@@ -7,7 +7,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import inspect as sa_inspect
@@ -22,6 +22,7 @@ from src.backend.models.database import (
     Assignment,
     Case,
     CaseComment,
+    CaseResultLink,
     Job,
     SimilarityResult,
     User,
@@ -76,6 +77,19 @@ class ResultLinkCreate(BaseModel):
     """Schema for linking a result."""
 
     result_id: uuid.UUID
+
+
+class CaseFromPairCreate(BaseModel):
+    """Schema for opening a case on one pair of a check.
+
+    The pair is named by its check and file names, not a result id: the
+    results page reads pairs from the job's file copy, whose ids are not the
+    ``similarity_results`` row ids.
+    """
+
+    job_id: str = Field(..., min_length=1, max_length=64)
+    file_a: str = Field(..., min_length=1, max_length=512)
+    file_b: str = Field(..., min_length=1, max_length=512)
 
 
 class CaseResponse(BaseModel):
@@ -374,6 +388,66 @@ def _require_result_in_org(
         raise HTTPException(status_code=404, detail="Result not found")
 
 
+# A pair this similar opens as a HIGH priority case; below it, MEDIUM.
+HIGH_PRIORITY_SCORE = 0.9
+CASE_TITLE_MAX = 255
+
+
+def _find_pair_result(
+    db: Session, job_id: str, file_a: str, file_b: str
+) -> SimilarityResult | None:
+    """The stored result for a pair; rows keep the two file names sorted."""
+    a_name, b_name = sorted([file_a, file_b])
+    return (
+        db.query(SimilarityResult)
+        .filter(
+            SimilarityResult.job_id == job_id,
+            SimilarityResult.submission_a_id == a_name,
+            SimilarityResult.submission_b_id == b_name,
+        )
+        .first()
+    )
+
+
+def _visible_cases_by_result(
+    db: Session, result_ids: list[str], user: dict, tenant: dict
+) -> dict[str, Case]:
+    """Newest case the caller may see for each result id, keyed by result id."""
+    if not result_ids:
+        return {}
+    rows = (
+        db.query(CaseResultLink.similarity_result_id, Case)
+        .join(Case, Case.id == CaseResultLink.case_id)
+        .filter(
+            CaseResultLink.similarity_result_id.in_(result_ids),
+            Case.organization_id == tenant["id"],
+        )
+        .order_by(Case.created_at.desc())
+        .all()
+    )
+    scope = sharing.access_scope(db, user)
+    courses = sharing.assignment_course_map(db, [case for _, case in rows])
+    found: dict[str, Case] = {}
+    for result_id, case in rows:
+        key = str(result_id)
+        if key not in found and sharing.case_in_scope(db, case, user, scope, courses):
+            found[key] = case
+    return found
+
+
+def _pair_case_title(
+    job: Job, assignment: Assignment | None, file_a: str, file_b: str
+) -> str:
+    """``a.py and b.py · Assignment 1``, cut to the column's length."""
+    title = f"{file_a} and {file_b}"
+    context = (assignment.name if assignment is not None else None) or job.name
+    if context:
+        title = f"{title} · {context}"
+    if len(title) > CASE_TITLE_MAX:
+        title = f"{title[: CASE_TITLE_MAX - 1]}…"
+    return title
+
+
 # ==================== Routes ====================
 
 
@@ -515,6 +589,84 @@ async def link_result(
     _require_result_in_org(db, payload.result_id, user, tenant)
     link = service.link_result(case_id, payload.result_id)
     return _serialize_result_link(link)
+
+
+@router.post("/cases/from-pair", response_model=dict)
+async def open_case_for_pair(
+    payload: CaseFromPairCreate,
+    response: Response,
+    user=Depends(get_current_user),
+    tenant=Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    """Open a case on one flagged pair of a check, linked to its result.
+
+    A pair that already has a case the caller can see returns that case
+    (200) rather than opening a second one, so a repeated click is safe. A
+    new case is 201. The case joins the check's assignment when the caller
+    can read its course; otherwise it has none and stays visible to its
+    creator, as a case opened from the cases API would.
+    """
+    result = _find_pair_result(db, payload.job_id, payload.file_a, payload.file_b)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Pair not found")
+    _require_result_in_org(db, uuid.UUID(str(result.id)), user, tenant)
+
+    existing = _visible_cases_by_result(db, [str(result.id)], user, tenant)
+    if str(result.id) in existing:
+        response.status_code = 200
+        return {"case": _serialize_case(existing[str(result.id)]), "created": False}
+
+    job = db.get(Job, payload.job_id)
+    assignment = db.get(Assignment, job.assignment_id) if job.assignment_id else None
+    assignment_id = None
+    if assignment is not None and academic_access.can_read_course(
+        db, user, str(assignment.course_id)
+    ):
+        assignment_id = uuid.UUID(str(assignment.id))
+
+    service = CaseService(db)
+    case = service.create_case(
+        organization_id=tenant["id"],
+        title=_pair_case_title(job, assignment, payload.file_a, payload.file_b),
+        assignment_id=assignment_id,
+        created_by_id=user["id"],
+        priority=(
+            "HIGH"
+            if float(result.similarity_score or 0) >= HIGH_PRIORITY_SCORE
+            else "MEDIUM"
+        ),
+    )
+    service.link_result(case.id, uuid.UUID(str(result.id)))
+    response.status_code = 201
+    return {"case": _serialize_case(case), "created": True}
+
+
+@router.get("/cases/for-job/{job_id}", response_model=list[dict])
+async def list_cases_for_job(
+    job_id: str,
+    user=Depends(get_current_user),
+    tenant=Depends(get_current_tenant),
+    db: Session = Depends(get_db),
+):
+    """Cases the caller can see on each pair of a check, for the results page."""
+    results = (
+        db.query(SimilarityResult).filter(SimilarityResult.job_id == job_id).all()
+    )
+    if not results:
+        return []
+    _require_result_in_org(db, uuid.UUID(str(results[0].id)), user, tenant)
+    cases = _visible_cases_by_result(db, [str(r.id) for r in results], user, tenant)
+    return [
+        {
+            "file_a": r.submission_a_id,
+            "file_b": r.submission_b_id,
+            "case_id": str(cases[str(r.id)].id),
+            "status": cases[str(r.id)].status,
+        }
+        for r in results
+        if str(r.id) in cases
+    ]
 
 
 class CaseSharing(BaseModel):

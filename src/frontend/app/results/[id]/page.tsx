@@ -231,6 +231,11 @@ function pairKey(result) {
   return `${result.file_a || ''}::${result.file_b || ''}`;
 }
 
+/** Order-independent pair key: the cases API returns a pair's names sorted. */
+function sortedPairKey(fileA, fileB) {
+  return [fileA || '', fileB || ''].sort().join('::');
+}
+
 const ENGINE_META = {
   ast: {
     name: 'Structure (AST)',
@@ -375,6 +380,8 @@ export default function ResultsPage() {
   const [pairStatuses, setPairStatuses] = useState({}); // key `${a}::${b}` -> status string
   const [reportsOpen, setReportsOpen] = useState(false); // Reports dropdown in inspector header
   const [detailTab, setDetailTab] = useState('signals'); // signals | blocks | code
+  const [pairCases, setPairCases] = useState({}); // sortedPairKey -> { case_id, status }
+  const [openingCase, setOpeningCase] = useState(false);
 
   useEffect(() => () => {
     if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
@@ -441,6 +448,26 @@ export default function ResultsPage() {
     return () => controller.abort();
   }, [authLoading, hasUser, id, router, loadAttempt]);
 
+  // Which pairs already have a case, so the inspector offers "View case" instead of opening a second one.
+  // A check with no stored pairs (or none of the caller's) simply has no cases to show.
+  const jobId = job?.id;
+  useEffect(() => {
+    if (!jobId || isGuest) {
+      return;
+    }
+    const controller = new AbortController();
+    apiClient.get(`/api/cases/for-job/${encodeURIComponent(jobId)}`, { signal: controller.signal })
+      .then((res) => {
+        const next = {};
+        (Array.isArray(res.data) ? res.data : []).forEach((row) => {
+          next[sortedPairKey(row.file_a, row.file_b)] = { case_id: row.case_id, status: row.status };
+        });
+        setPairCases(next);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [jobId, isGuest]);
+
   const updateReview = async (payload) => {
     const res = await apiClient.patch(`/api/job/${encId}/review`, payload);
     setJob(res.data);
@@ -480,6 +507,42 @@ export default function ResultsPage() {
       setReviewError(describeActionError(err, 'Couldn’t save the review status. The change was not recorded.'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Opens a case on the pair (or returns the one it already has) and marks the pair Escalated, which is
+  // what the review status means: sent on for formal review. A Confirmed pair keeps its status.
+  const openCaseForPair = async (row) => {
+    if (!row || openingCase || isGuest || !job?.id) {
+      return;
+    }
+    setOpeningCase(true);
+    setReviewError('');
+    try {
+      const res = await apiClient.post('/api/cases/from-pair', {
+        job_id: job.id,
+        file_a: row.file_a,
+        file_b: row.file_b,
+      });
+      const opened = res.data?.case;
+      if (opened?.id) {
+        setPairCases((prev) => ({
+          ...prev,
+          [sortedPairKey(row.file_a, row.file_b)]: { case_id: opened.id, status: opened.status },
+        }));
+      }
+    } catch (err) {
+      setReviewError(
+        err?.response?.status === 404
+          ? 'A case can’t be opened for this pair because it isn’t stored for this check.'
+          : describeActionError(err, 'Couldn’t open a case for this pair.'),
+      );
+      return;
+    } finally {
+      setOpeningCase(false);
+    }
+    if (!['confirmed', 'escalated'].includes(row._status || 'unreviewed')) {
+      await updatePairStatus(row, 'escalated');
     }
   };
 
@@ -1247,6 +1310,27 @@ export default function ResultsPage() {
                     <span className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200">{confidencePct}%</span>
                   </div>
                 )}
+                {!isGuest && (() => {
+                  const linkedCase = pairCases[sortedPairKey(activeResult.file_a, activeResult.file_b)];
+                  return linkedCase ? (
+                    <Link
+                      href={`/cases/${encodeURIComponent(linkedCase.case_id)}`}
+                      className="inline-flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-500/15 dark:text-violet-300"
+                    >
+                      View case →
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => openCaseForPair(activeResult)}
+                      disabled={openingCase || saving}
+                      title="Start a formal review record for this pair: assign a reviewer, add comments, and track the outcome in My Cases. The pair is marked Escalated."
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      {openingCase ? 'Opening case…' : 'Open a case'}
+                    </button>
+                  );
+                })()}
                 {saving && <span role="status" className="text-xs text-slate-500">Saving…</span>}
                 {savedFlash && !saving && (
                   <span role="status" className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
