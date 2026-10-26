@@ -5,30 +5,21 @@ This file contains project-specific rules that Cursor AI follows automatically.
 ## IMPORTANT: Read Before Any Task
 
 **Session Start Protocol (Mandatory):**
-At the beginning of every session, read these three files in order:
+At the beginning of every session, follow the ritual in `docs/CURRENT_FOCUS.md`:
 1. `docs/CURRENT_FOCUS.md`
-2. `docs/SCHEMA_OVERVIEW.md`
-3. `docs/BENCHMARK_WORK.md`
+2. `docs/AI_DETECTOR_VS_TURNITIN.md`
+3. `git log --oneline -15` (docs can lag the code)
 
 Then:
 4. Read `CLAUDE.md` for vibe coding and token rules
 5. Read `.ai-rules.md` before making code changes
 
-**Hard Rules (Current Reality - You are in Schema Work Mode):**
-- The user is **actively editing** `src/backend/models/database.py`.
-- **Never** read the full `src/backend/models/database.py` (626 lines) unless the user explicitly writes: “read the full database.py” or “check the implementation in the model file”.
-- When doing schema work, you **must** default to this order:
-  1. `docs/SCHEMA_WORK_NOTES.md`
-  2. `docs/SCHEMA_OVERVIEW.md`
-  3. `docs/CURRENT_FOCUS.md`
-- Only read the full model file as a last resort, and only after the user explicitly permits it.
-- Always prefer the three small focus files (`CURRENT_FOCUS.md`, `SCHEMA_OVERVIEW.md`, `BENCHMARK_WORK.md`) + `SCHEMA_WORK_NOTES.md` over large source files.
+Read `docs/SCHEMA_OVERVIEW.md` for schema questions and `docs/BENCHMARK_WORK.md` for benchmark work.
 
 ## Token Efficiency & Context Rules (Critical for Long Sessions)
 
-- **Session Start**: You must read `CURRENT_FOCUS.md`, `SCHEMA_OVERVIEW.md`, and `BENCHMARK_WORK.md` at the start of every session.
-- **Never** read the full `src/backend/models/database.py` (626 lines) unless the user explicitly asks.
-- **Always prefer** the three small focus files (`CURRENT_FOCUS.md`, `SCHEMA_OVERVIEW.md`, `BENCHMARK_WORK.md`) over large source files.
+- **Never** read the full `src/backend/models/database.py` (~1,360 lines) unless the user explicitly asks; use `docs/SCHEMA_OVERVIEW.md`.
+- `src/backend/api/server.py` is 19k+ lines: grep it, don't read it whole.
 - Only load files directly relevant to the current task.
 - When exploring, summarize findings instead of dumping large code blocks.
 - During "vibe coding" mode, be exploratory but actively protect context size.
@@ -49,26 +40,13 @@ Then:
 ### Project Structure (Current)
 ```
 src/
-├── api/               # FastAPI routes & endpoints
-├── application/       # Use cases & orchestration
-├── backend/           # Core backend logic + models
-├── benchmark/         # Benchmarking & evaluation framework
-├── core/              # Core detection primitives
-├── domain/            # Domain models & interfaces
-├── engines/           # Similarity & AI detection engines
-├── evaluation/        # Metrics, datasets, error analysis
-├── frontend/          # Next.js 16 + React 19 dashboard
-├── infrastructure/    # DB, logging, reports, external services
-├── models/            # Shared data models
-└── utils/             # Shared utilities
+├── backend/           # FastAPI app: api/, application/, benchmark/, engines/, evaluation/,
+│                      # infrastructure/, models/, workers/, ...
+└── frontend/          # Next.js 16 + React 19 dashboard
 ```
 
-For the full detailed structure, see `docs/PROJECT_STRUCTURE.md`.
-
-**Important**: The structure evolved significantly after the cms merge. Do not rely on old folder assumptions.
-
 ### API Design
-- RESTful endpoints under `src/api/`
+- RESTful endpoints under `src/backend/api/`
 - Request validation with Pydantic schemas
 - Consistent error response format
 - Rate limiting enabled
@@ -85,15 +63,10 @@ For the full detailed structure, see `docs/PROJECT_STRUCTURE.md`.
 - Follow all security rules in `.ai-rules.md`
 - Use conventional commits (see `AGENTS.md`) and always update tests
 
-## Current Context (May 2026)
+## Current Context (October 2026)
 
-- Active work on large production database schema + benchmark metric integrity
-- Primary files: `src/backend/models/database.py`, `tests/unit/test_benchmark_metric_integrity.py`, `src/frontend/app/benchmark/page.tsx`
-
-**Mandatory Reading at Session Start:**
-- `docs/CURRENT_FOCUS.md`
-- `docs/SCHEMA_OVERVIEW.md`
-- `docs/BENCHMARK_WORK.md`
+- Detection honesty and product hardening; see `docs/CURRENT_FOCUS.md` for what is done and open
+- Schema is stable (no active schema work)
 
 See `CLAUDE.md` for detailed vibe coding rules and token efficiency guidelines.
 

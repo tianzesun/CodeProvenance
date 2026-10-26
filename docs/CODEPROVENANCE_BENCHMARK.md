@@ -94,8 +94,7 @@ admissible **iff**:
    precision-regression fixtures).
 2. **Verified human** per file (provenance: pre-LLM-era archives, invigilated
    work, or instructor-verified; suspicion is not a label).
-3. **Versioned and checksummed** (dataset dir + manifest; SHA-256 per file —
-   same governance as `SCIENTIFIC_WHITE_PAPER.md` §5).
+3. **Versioned and checksummed** (dataset dir + manifest; SHA-256 per file).
 4. **Scored with the production path only** (`AIDetectionOrchestrator`, the
    object the background job runs) at the **frozen product thresholds**
    (0.40 / 0.50 / 0.70) via `scripts/measure_human_fp.py`.
@@ -126,7 +125,7 @@ already on the accuracy page.
 5. **Institutional holdout**: data acquisition (user-side), not code —
    `docs/STUDENT_DATA_REQUEST_PACK.md` is the packaged ask.
 
-## Anti-goals (per BENCHMARK_SYSTEM.md rules)
+## Anti-goals
 
 - Never tune thresholds on a §2b corpus; it stops being a validation set.
 - Never report §1 numbers without the grouped-holdout (no-leakage) note.

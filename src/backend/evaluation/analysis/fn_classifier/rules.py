@@ -1,7 +1,7 @@
 """
 FN Rules - Rule-based classification (Level 1).
 
-Implements classification rules from FN.md spec:
+Implements classification rules:
 - Rule 1: Variable renaming (token_sim low, ident_overlap high)
 - Rule 2: Structural variation (ast_sim medium, token_sim low)
 - Rule 3: Dead code insertion (length_ratio > 1.5)

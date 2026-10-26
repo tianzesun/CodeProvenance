@@ -1,4 +1,4 @@
-# Current Focus (August 2026)
+# Current Focus (updated 26 October 2026)
 
 **CURRENT MODE: Detection Honesty & Product Hardening** (post-case-loop phase)
 
@@ -36,7 +36,20 @@ as its UI.
   accuracy page, results banner, and dossier evidence details.
 - **E2E verified on a from-scratch stack** (fresh Postgres → full alembic chain →
   integration 30/30 → live upload/dossier/viva/PDF). Alembic runs clean from
-  zero (head `e2f4a6b8c0d1`).
+  zero (head `e2f4a6b8c0d1` at the time; now `t3u4v5w6x7y8`, and CI checks
+  that migrations create every table and column the models use).
+- **FP deep-dive** (2026-08-22, `docs/HUMAN_FP_BASELINE.md` § Per-file deep-dive):
+  style, not length, drives student flags, so a length-based "short submission"
+  annotation was rejected.
+- **Plagiarism-side false matches (October)**: code most of the class shares is
+  left out and professors are told; tiny, empty, starter-code and reordered pairs
+  are held at review with a stated reason.
+- **Class-level evaluation** (2026-10-25): runner and October baseline in
+  `docs/BENCHMARK_WORK.md`.
+- **Sharing and workspace settings** (PR #9, 2026-10-25): courses, analyses and
+  cases are private unless shared; per-workspace settings, encrypted credentials
+  and notifications. Rollout notes in `docs/ROLLOUT_SHARING_AND_SETTINGS.md`.
+- **Results page → case**: a flagged pair can open a case directly (2026-10-26).
 
 ## Current Active Areas
 
@@ -45,10 +58,7 @@ as its UI.
    institutional data; the ask is packaged in `docs/STUDENT_DATA_REQUEST_PACK.md`
    (pilot scope: 60–100 ground-truth samples). **This is a user-side data
    acquisition task, not a coding task.**
-2. **FP deep-dive** — per-file score analysis of the kaggle student corpus
-   (length ↔ flag-rate interaction) to ground any short-code uncertainty
-   annotation in data rather than guesswork.
-3. **Threshold/banding review** — deliberately GATED on the real holdout; do not
+2. **Threshold/banding review** — deliberately GATED on the real holdout; do not
    move bands on the unlabelled corpus alone.
 
 ## Must-Read Files
@@ -61,9 +71,8 @@ as its UI.
 ## Files to Avoid Reading Unless Explicitly Asked
 
 - `src/backend/models/database.py` — use `SCHEMA_OVERVIEW.md`
-- `src/backend/api/server.py` (13k+ lines) — grep, don't read whole
+- `src/backend/api/server.py` (19k+ lines) — grep, don't read whole
 - Large migration files unless schema debugging is the explicit task
-- `docs/TODO.md` — historical 48-week roadmap, largely superseded
 
 ## Session Rules for Codex
 

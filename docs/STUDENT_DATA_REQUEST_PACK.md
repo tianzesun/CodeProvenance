@@ -3,7 +3,7 @@
 **One-page ask for course teams** — what IntegrityDesk needs to finish **both** AI-detection
 validation and **plagiarism-checker recall validation**, and exactly how to hand it over.
 Full methodology lives in `docs/AI_HOLDOUT_COLLECTION.md` (AI detection) and
-`docs/BENCHMARK_SYSTEM.md` (plagiarism engine benchmarking); this page is the version
+`docs/BENCHMARK_WORK.md` (plagiarism engine benchmarking); this page is the version
 to send to an instructor.
 
 ---

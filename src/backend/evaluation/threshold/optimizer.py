@@ -1,5 +1,5 @@
 """
-Threshold Optimizer - Threshold.md spec.
+Threshold Optimizer.
 
 PR Curve + Optimal Point Selection.
 
@@ -57,7 +57,7 @@ class ThresholdResult:
 
 class ThresholdOptimizer:
     """
-    Threshold optimizer following Threshold.md spec.
+    Threshold optimizer.
 
     Pipeline:
     1. Compute PR curve (1000 points)

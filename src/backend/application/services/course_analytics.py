@@ -3,7 +3,7 @@
 Aggregation is computed from detached row dicts so the functions are pure and
 unit-testable without a database. The FastAPI layer feeds these functions rows
 loaded from ``SimilarityResult``/``Job``. Derived analytics are kept separate
-from raw detection data (see docs/ARCHITECTURE.md); a cache/materialized-view
+from raw detection data; a cache/materialized-view
 layer can be added later without changing these contracts.
 """
 

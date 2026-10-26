@@ -1,4 +1,4 @@
-# Benchmark Work (May 2026)
+# Benchmark Work (updated October 2026)
 
 **Current Focus**: Benchmark Metric Integrity + Benchmark System Improvements
 
@@ -10,12 +10,17 @@ Ensure the benchmark system produces **statistically sound, reproducible, and tr
 
 - `tests/unit/test_benchmark_metric_integrity.py` — Core integrity tests for benchmark metrics
 - `src/frontend/app/benchmark/page.tsx` — Frontend for the benchmark system
+- `src/backend/benchmark/runners/class_evaluation_runner.py` — class-level evaluation (see below)
+- `src/backend/benchmark/runners/learned_fusion_training_runner.py` — trains the production
+  learned-fusion score (procedure in `docs/FUSION_TRAINING_WORKFLOW.md`)
 - `docs/SCHEMA_OVERVIEW.md` — Needed when benchmark work touches data models
 
 ## Important Context
 
-- The project recently went through a large schema merge (cms branch).
-- Benchmark work must remain stable despite ongoing schema evolution.
+- Learned fusion is the production primary score; training and `engine-eval` runs belong on
+  the GPU host (`docs/GPU_TRAINING_RUNBOOK.md`).
+- Threshold and band changes are gated on a labelled student-code holdout
+  (`docs/STUDENT_DATA_REQUEST_PACK.md`).
 - Focus is on correctness, not just speed or features.
 - Statistical rigor and false positive / false negative analysis are important.
 
@@ -36,7 +41,6 @@ Ensure the benchmark system produces **statistically sound, reproducible, and tr
 ## Current Risks / Watch Items
 
 - Large schema file (`src/backend/models/database.py`) can easily pollute context.
-- Some benchmark code may still reference older model patterns from before the cms merge.
 - Frontend benchmark page may be out of sync with backend changes.
 
 ## Session Guidance
