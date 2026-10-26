@@ -136,7 +136,6 @@ EMBEDDING_SERVER_HOST=${EMBEDDING_SERVER_HOST:-}
 EMBEDDING_SERVER_PORT=$EMBEDDING_PORT
 LOG_LEVEL=INFO
 UPLOAD_DIR=./uploads
-MAX_UPLOAD_SIZE_MB=100
 EOF
 
 # -----------------------------------------------------------------------------

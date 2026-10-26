@@ -22,7 +22,7 @@ PEOPLE = ("owner", "ta", "colleague", "outsider")
 
 
 @pytest.fixture
-def world():
+def world(job_tenant_id):
     """One organization's course with an owner and a TA, a colleague, and an
     outsider from another organization."""
     ids = {name: str(uuid.uuid4()) for name in (*PEOPLE, "org", "other_org")}
@@ -65,6 +65,7 @@ def world():
         db.add(
             Job(
                 id=ids["job"],
+                tenant_id=job_tenant_id,
                 name="sharing test",
                 status="completed",
                 assignment_id=ids["assignment"],
