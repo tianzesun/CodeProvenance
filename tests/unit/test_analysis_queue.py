@@ -157,6 +157,30 @@ class TestRunUploadAnalysisTask:
         assert user["is_guest"] is True
         assert server._guest_job_flags(user)["guest"] is True
 
+    def test_server_import_failure_marks_the_job_failed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stale worker whose ``server`` import fails must not leave the
+        job at "queued" forever."""
+        import builtins
+
+        from src.backend.workers import analysis_tasks
+
+        marked: list[str] = []
+        monkeypatch.setattr(analysis_tasks, "_mark_failed_without_server", marked.append)
+        real_import = builtins.__import__
+
+        def _failing_import(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "src.backend.api" and "server" in (args[2] or ()):
+                raise ImportError("cannot import name 'workspace_overrides'")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _failing_import)
+
+        with pytest.raises(ImportError):
+            analysis_tasks.run_upload_analysis.run(job_id="job-4", job_dir="/tmp")
+        assert marked == ["job-4"]
+
 
 class TestDispatchAnalysis:
     """Uploads must queue on Celery when possible, run inline otherwise."""

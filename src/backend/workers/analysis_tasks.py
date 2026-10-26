@@ -16,13 +16,50 @@ in-memory state is required.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from src.backend.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+def _mark_failed_without_server(job_id: str) -> None:
+    """Best-effort failed status for a job whose task could not load ``server``.
+
+    Writes the jobs row and, when present, job.json (the two places
+    ``server._get_job`` reads). Never raises: the caller re-raises the
+    original error.
+    """
+    message = "Analysis worker failed to start; restart the worker and resubmit."
+    try:
+        from src.backend.config.database import SessionLocal
+        from src.backend.models.database import Job
+
+        with SessionLocal() as db:
+            db_job = db.query(Job).filter(Job.id == job_id).first()
+            if db_job is not None:
+                db_job.status = "failed"
+                db_job.failed_at = datetime.now()
+                db_job.error_message = message
+                db.commit()
+    except Exception:
+        logger.warning("Could not mark job %s failed in DB", job_id, exc_info=True)
+    try:
+        # Mirrors server.REPORTS_DIR / job_id / JOB_METADATA_FILENAME.
+        metadata_path = (
+            Path(__file__).resolve().parent.parent.parent / "reports" / job_id / "job.json"
+        )
+        if metadata_path.exists():
+            stored = json.loads(metadata_path.read_text(encoding="utf-8"))
+            stored["status"] = "failed"
+            stored["error"] = message
+            metadata_path.write_text(json.dumps(stored, indent=2), encoding="utf-8")
+    except Exception:
+        logger.warning("Could not mark job %s failed on disk", job_id, exc_info=True)
 
 
 @celery_app.task(
@@ -76,7 +113,15 @@ def run_upload_analysis(
     # Local import: pulling ``server`` at module scope wouldboot the whole
     # API app inside every Celery worker prefork child before the broker
     # connection is even established, and creates import cycles in tests.
-    from src.backend.api import server
+    try:
+        from src.backend.api import server
+    except Exception:
+        # A worker running older code than the files on disk fails here,
+        # before ``server`` can record anything — the job then sat at
+        # "queued" forever. Mark it failed without ``server``'s helpers.
+        logger.exception("Could not load analysis server for job %s", job_id)
+        _mark_failed_without_server(job_id)
+        raise
 
     current_user: dict[str, Any] | None = None
     if owner_user_id or tenant_id or is_guest:
