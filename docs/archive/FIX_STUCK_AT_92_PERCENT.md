@@ -17,7 +17,7 @@ The code fix has been applied, but you need to **restart the backend server** to
 ### Option 1: Use the Restart Script
 ```bash
 cd /home/tsun/Documents/CodeProvenance
-./RESTART_BACKEND.sh
+./scripts/restart_backend.sh
 ```
 
 ### Option 2: Manual Restart
