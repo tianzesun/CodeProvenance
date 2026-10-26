@@ -60,6 +60,9 @@ jobs:
       - name: Full chain applies from scratch
         run: python -m alembic upgrade head
 
+      - name: Migrated schema matches the models
+        run: python scripts/check_schema_drift.py
+
       - name: Head revision rolls back and re-applies
         run: |
           python -m alembic downgrade -1
