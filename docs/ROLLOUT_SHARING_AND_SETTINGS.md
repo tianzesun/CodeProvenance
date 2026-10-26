@@ -20,9 +20,12 @@ Covers the changes on branch `fix/benchmark-plugin-and-typecheck` (PR #9).
 2. Add `SETTINGS_ENCRYPTION_KEY` to the environment from the managed secret store (base64 of
    32 random bytes; see `docs/ENVIRONMENT_SETUP.md`). Keep it: losing it makes every saved
    workspace credential unreadable. `deploy/setup.sh` reuses an existing key on re-runs.
-3. Deploy the code, then run the migration that adds `resource_shares`:
+3. Deploy the code, then run the migrations. They add `resource_shares`, plus the case columns
+   (`priority`, `investigator_id`, `closed_at`) and `timeline_events` table that no migration
+   created before; databases that already have them are left unchanged:
    ```bash
    alembic upgrade head
+   python scripts/check_schema_drift.py   # should report no missing tables or columns
    ```
 4. Restart the backend and workers.
 5. Encrypt credentials saved before this release:
