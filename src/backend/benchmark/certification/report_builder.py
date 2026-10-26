@@ -6,23 +6,32 @@ with statistical analysis, stratified results, and reproducibility tracking.
 from __future__ import annotations
 
 import json
-import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
-from jinja2 import Environment, FileSystemLoader, Template
+from jinja2 import Environment, FileSystemLoader
 
-from .models import BenchmarkRecord, EngineMetrics, ComparisonResult, records_to_arrays, group_records_by_engine
-from .statistical_tests import mcnemar_test, wilcoxon_signed_rank_test, paired_statistical_tests, bonferroni_correction
-from .effect_size import cohens_d, cliffs_delta, interpret_effect_size
-from .confidence_intervals import bootstrap_ci, wilson_score_interval, ConfidenceInterval
+from .effect_size import cliffs_delta, cohens_d
+from .models import (
+    BenchmarkRecord,
+    ComparisonResult,
+    EngineMetrics,
+    group_records_by_engine,
+)
+from .reproducibility import (
+    ReproducibilityInfo,
+    collect_reproducibility_info,
+    compute_reproducibility_hash,
+)
+from .statistical_tests import (
+    mcnemar_test,
+    wilcoxon_signed_rank_test,
+)
 from .stratified import StratifiedAnalyzer, StratifiedResults, compute_metrics_from_records
-from .tables import ResultsTable, SignificanceTable, StratifiedTable
-from .plots import ReliabilityDiagramPlotter, DegradationCurvePlotter
-from .reproducibility import collect_reproducibility_info, ReproducibilityInfo, compute_reproducibility_hash
+from .tables import ResultsTable, SignificanceTable
 
 
 @dataclass
@@ -46,17 +55,17 @@ class CertificationReport:
     report_id: str
     timestamp: str
     dataset_name: str
-    engines: List[str]
+    engines: list[str]
     n_samples: int
     main_results: ResultsTable
     significance_tests: SignificanceTable
-    stratified_results: Dict[str, StratifiedResults]
-    comparisons: Dict[str, ComparisonResult]
+    stratified_results: dict[str, StratifiedResults]
+    comparisons: dict[str, ComparisonResult]
     reproducibility: ReproducibilityInfo
     executive_summary: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "report_id": self.report_id,
@@ -77,7 +86,7 @@ class CertificationReport:
         """Convert to JSON string."""
         return json.dumps(self.to_dict(), indent=indent, default=str)
 
-    def save_json(self, path: Union[str, Path]) -> None:
+    def save_json(self, path: str | Path) -> None:
         """Save report to JSON file."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -178,7 +187,7 @@ class CertificationReport:
 
         return html
 
-    def save_html(self, path: Union[str, Path]) -> None:
+    def save_html(self, path: str | Path) -> None:
         """Save report to HTML file."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -220,7 +229,7 @@ class CertificationReportBuilder:
 
     def __init__(
         self,
-        baseline_engine: Optional[str] = None,
+        baseline_engine: str | None = None,
         n_bootstrap: int = 2000,
         confidence_level: float = 0.95,
         alpha: float = 0.05,
@@ -244,9 +253,9 @@ class CertificationReportBuilder:
 
     def build(
         self,
-        records: List[BenchmarkRecord],
+        records: list[BenchmarkRecord],
         dataset_name: str = "evaluation_dataset",
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
     ) -> CertificationReport:
         """Build complete certification report.
 
@@ -406,10 +415,10 @@ class CertificationReportBuilder:
 
     def _generate_executive_summary(
         self,
-        engines: List[str],
-        engine_metrics: Dict[str, EngineMetrics],
-        comparisons: Dict[str, ComparisonResult],
-        stratified_results: Dict[str, StratifiedResults],
+        engines: list[str],
+        engine_metrics: dict[str, EngineMetrics],
+        comparisons: dict[str, ComparisonResult],
+        stratified_results: dict[str, StratifiedResults],
     ) -> str:
         """Generate executive summary.
 

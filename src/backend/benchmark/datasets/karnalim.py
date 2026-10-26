@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any
 
 from src.backend.benchmark.datasets.schema import (
     CanonicalDataset,
@@ -29,7 +30,7 @@ class KarnalimSample:
     id: str
     content: str
     language: str = "java"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -41,7 +42,7 @@ class KarnalimClonePair:
     sample_b_id: str
     clone_type: int = 2
     is_plagiarism: bool = True
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class KarnalimDataset(DatasetContract):
@@ -54,14 +55,14 @@ class KarnalimDataset(DatasetContract):
     expected_sample_count = 132
     expected_clone_pair_count = 28
 
-    def __init__(self, dataset_path: Optional[Path] = None):
+    def __init__(self, dataset_path: Path | None = None):
         """Initialize the loader with an explicit or environment-provided path."""
         self.dataset_path = dataset_path or Path(
             os.environ.get("KARNALIM_DATASET_PATH", "./datasets/karnalim")
         )
         self.loaded = False
-        self._samples: List[KarnalimSample] = []
-        self._clone_pairs: List[KarnalimClonePair] = []
+        self._samples: list[KarnalimSample] = []
+        self._clone_pairs: list[KarnalimClonePair] = []
 
     @property
     def metadata(self) -> DatasetMetadata:
@@ -171,7 +172,7 @@ class KarnalimDataset(DatasetContract):
     @staticmethod
     def _to_code_pair(
         pair: KarnalimClonePair,
-        sample_by_id: Dict[str, KarnalimSample],
+        sample_by_id: dict[str, KarnalimSample],
     ) -> CodePair:
         """Convert a Karnalim pair into the shared canonical pair schema."""
         sample_a = sample_by_id[pair.sample_a_id]
@@ -196,14 +197,14 @@ class KarnalimDataset(DatasetContract):
         self._ensure_loaded()
         return iter(self._clone_pairs)
 
-    def get_sample_by_id(self, sample_id: str) -> Optional[KarnalimSample]:
+    def get_sample_by_id(self, sample_id: str) -> KarnalimSample | None:
         """Return one sample by identifier, or ``None`` when it is absent."""
         self._ensure_loaded()
         return next(
             (sample for sample in self._samples if sample.id == sample_id), None
         )
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Return lightweight statistics for the loaded dataset."""
         self._ensure_loaded()
         assignments = {sample.metadata["assignment"] for sample in self._samples}

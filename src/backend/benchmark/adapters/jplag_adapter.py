@@ -6,8 +6,9 @@ import csv
 import re
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 from src.backend.benchmark.adapters.base_adapter import BaseAdapter
 from src.backend.benchmark.contracts.evaluation_result import (
@@ -58,7 +59,7 @@ class JPlagAdapter(BaseAdapter):
         extension = self._extension_for_language(str(language))
         file_a = f"a{extension}"
         file_b = f"b{extension}"
-        metadata: Dict[str, Any] = {
+        metadata: dict[str, Any] = {
             "language": language,
             "min_tokens": self._min_tokens,
             "real_jplag": True,
@@ -71,17 +72,17 @@ class JPlagAdapter(BaseAdapter):
 
     def run_batch(
         self,
-        submissions: Dict[str, str],
+        submissions: dict[str, str],
         pairs: Iterable[tuple[str, str]],
         progress_cb=None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run JPlag for all submissions and return requested pair scores."""
         jar_path = self._find_jar()
         if not jar_path:
             return {"pairs": []}
 
-        groups: Dict[str, Dict[str, str]] = {}
-        score_by_pair: Dict[str, float] = {}
+        groups: dict[str, dict[str, str]] = {}
+        score_by_pair: dict[str, float] = {}
         for filename, content in submissions.items():
             groups.setdefault(self._infer_language_from_filename(filename), {})[
                 filename
@@ -113,10 +114,10 @@ class JPlagAdapter(BaseAdapter):
         self,
         jar_path: Path,
         jplag_language: str,
-        submissions: Dict[str, str],
+        submissions: dict[str, str],
         progress_cb=None,
         allow_text_fallback: bool = True,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Run one JPlag language group."""
         with tempfile.TemporaryDirectory(prefix="jplag-adapter-") as temp_dir:
             source_root = Path(temp_dir) / "subs"
@@ -210,7 +211,7 @@ class JPlagAdapter(BaseAdapter):
             "submissionset" in output and "submission" in output and "removed" in output
         )
 
-    def _suffixes_for_submissions(self, submissions: Dict[str, str]) -> str:
+    def _suffixes_for_submissions(self, submissions: dict[str, str]) -> str:
         """Return JPlag suffix filters for the submitted filenames."""
         suffixes = sorted(
             {
@@ -222,10 +223,10 @@ class JPlagAdapter(BaseAdapter):
         return ",".join(suffixes)
 
     def _parse_results_csv(
-        self, csv_path: Path, submission_map: Dict[str, Dict[str, str]]
-    ) -> Dict[str, float]:
+        self, csv_path: Path, submission_map: dict[str, dict[str, str]]
+    ) -> dict[str, float]:
         """Parse JPlag results.csv into pair scores."""
-        scores: Dict[str, float] = {}
+        scores: dict[str, float] = {}
         if not csv_path.exists():
             return scores
         with csv_path.open(newline="", encoding="utf-8") as handle:
@@ -249,7 +250,7 @@ class JPlagAdapter(BaseAdapter):
                 )
         return scores
 
-    def _find_jar(self) -> Optional[Path]:
+    def _find_jar(self) -> Path | None:
         """Find the bundled JPlag jar."""
         candidates = [self.TOOL_DIR / "jplag.jar"]
         candidates.extend(sorted(self.TOOL_DIR.glob("*jar-with-dependencies.jar")))
@@ -257,10 +258,10 @@ class JPlagAdapter(BaseAdapter):
         return next((candidate for candidate in candidates if candidate.exists()), None)
 
     def _write_submission_dirs(
-        self, target_dir: Path, submissions: Dict[str, str]
-    ) -> Dict[str, Dict[str, str]]:
+        self, target_dir: Path, submissions: dict[str, str]
+    ) -> dict[str, dict[str, str]]:
         """Write files using JPlag's submission-directory layout."""
-        written: Dict[str, Dict[str, str]] = {}
+        written: dict[str, dict[str, str]] = {}
         for index, (filename, content) in enumerate(sorted(submissions.items())):
             submission_id = f"sub{index:03d}"
             submission_dir = target_dir / submission_id
@@ -306,9 +307,9 @@ class JPlagAdapter(BaseAdapter):
 
 
 def run_jplag_batch(
-    submissions: Dict[str, str],
+    submissions: dict[str, str],
     pairs: Iterable[tuple[str, str]],
     progress_cb=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run the canonical JPlag batch adapter used by benchmark APIs."""
     return JPlagAdapter().run_batch(submissions, pairs, progress_cb=progress_cb)

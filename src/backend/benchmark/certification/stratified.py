@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 
-from .models import BenchmarkRecord, EngineMetrics, filter_records, group_records_by_engine
-from .confidence_intervals import bootstrap_ci, ConfidenceInterval
+from .confidence_intervals import bootstrap_ci
+from .models import BenchmarkRecord, EngineMetrics
 
 
 @dataclass(frozen=True)
@@ -37,17 +37,17 @@ class StratifiedMetrics:
         ci_f1: Confidence interval for F1.
     """
     stratum_name: str
-    stratum_value: Union[int, str]
+    stratum_value: int | str
     n_samples: int
     precision: float
     recall: float
     f1: float
     accuracy: float
-    ci_precision: Tuple[float, float] = (0.0, 0.0)
-    ci_recall: Tuple[float, float] = (0.0, 0.0)
-    ci_f1: Tuple[float, float] = (0.0, 0.0)
+    ci_precision: tuple[float, float] = (0.0, 0.0)
+    ci_recall: tuple[float, float] = (0.0, 0.0)
+    ci_f1: tuple[float, float] = (0.0, 0.0)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "stratum_name": self.stratum_name,
@@ -77,12 +77,12 @@ class StratifiedResults:
     """
     engine_name: str
     overall_metrics: EngineMetrics
-    by_clone_type: Dict[int, StratifiedMetrics] = field(default_factory=dict)
-    by_difficulty: Dict[str, StratifiedMetrics] = field(default_factory=dict)
-    by_language: Dict[str, StratifiedMetrics] = field(default_factory=dict)
-    degradation_analysis: Dict[str, Any] = field(default_factory=dict)
+    by_clone_type: dict[int, StratifiedMetrics] = field(default_factory=dict)
+    by_difficulty: dict[str, StratifiedMetrics] = field(default_factory=dict)
+    by_language: dict[str, StratifiedMetrics] = field(default_factory=dict)
+    degradation_analysis: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "engine_name": self.engine_name,
@@ -95,7 +95,7 @@ class StratifiedResults:
 
 
 def compute_metrics_from_records(
-    records: List[BenchmarkRecord],
+    records: list[BenchmarkRecord],
     engine_name: str = "engine",
     n_bootstrap: int = 1000,
     confidence_level: float = 0.95,
@@ -192,9 +192,9 @@ def compute_metrics_from_records(
 
 
 def compute_stratified_metrics(
-    records: List[BenchmarkRecord],
+    records: list[BenchmarkRecord],
     stratum_name: str,
-    stratum_value: Union[int, str],
+    stratum_value: int | str,
     n_bootstrap: int = 1000,
     confidence_level: float = 0.95,
     seed: int = 42,
@@ -274,10 +274,10 @@ def compute_stratified_metrics(
 
 
 def compute_operational_metrics(
-    records: List[BenchmarkRecord],
-    k_values: List[int] = [5, 10, 20, 50],
+    records: list[BenchmarkRecord],
+    k_values: list[int] = [5, 10, 20, 50],
     threshold: float = 0.7,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute professor-facing operational metrics.
 
     These metrics reflect real-world usage: how many wrong flags will
@@ -337,9 +337,9 @@ def compute_operational_metrics(
 
 
 def analyze_fpr_by_subgroup(
-    records: List[BenchmarkRecord],
+    records: list[BenchmarkRecord],
     subgroup_attribute: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Analyze false positive rate across subgroups.
 
     Critical for identifying when FPR spikes on smaller classes,
@@ -418,7 +418,7 @@ class StratifiedAnalyzer:
 
     def analyze(
         self,
-        records: List[BenchmarkRecord],
+        records: list[BenchmarkRecord],
         engine_name: str = "engine",
     ) -> StratifiedResults:
         """Perform stratified analysis.
@@ -470,8 +470,8 @@ class StratifiedAnalyzer:
         )
 
     def _analyze_by_clone_type(
-        self, records: List[BenchmarkRecord]
-    ) -> Dict[int, StratifiedMetrics]:
+        self, records: list[BenchmarkRecord]
+    ) -> dict[int, StratifiedMetrics]:
         """Analyze results by clone type.
 
         Args:
@@ -499,8 +499,8 @@ class StratifiedAnalyzer:
         return results
 
     def _analyze_by_difficulty(
-        self, records: List[BenchmarkRecord]
-    ) -> Dict[str, StratifiedMetrics]:
+        self, records: list[BenchmarkRecord]
+    ) -> dict[str, StratifiedMetrics]:
         """Analyze results by difficulty level.
 
         Args:
@@ -529,8 +529,8 @@ class StratifiedAnalyzer:
         return results
 
     def _analyze_by_language(
-        self, records: List[BenchmarkRecord]
-    ) -> Dict[str, StratifiedMetrics]:
+        self, records: list[BenchmarkRecord]
+    ) -> dict[str, StratifiedMetrics]:
         """Analyze results by programming language.
 
         Args:
@@ -560,9 +560,9 @@ class StratifiedAnalyzer:
 
     def _compute_degradation(
         self,
-        by_clone_type: Dict[int, StratifiedMetrics],
-        by_difficulty: Dict[str, StratifiedMetrics],
-    ) -> Dict[str, Any]:
+        by_clone_type: dict[int, StratifiedMetrics],
+        by_difficulty: dict[str, StratifiedMetrics],
+    ) -> dict[str, Any]:
         """Compute performance degradation analysis.
 
         Analyzes how performance degrades as clone type increases (Type I → IV)
@@ -620,7 +620,7 @@ class StratifiedAnalyzer:
 def compare_stratified_results(
     results_a: StratifiedResults,
     results_b: StratifiedResults,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compare stratified results between two engines.
 
     Args:

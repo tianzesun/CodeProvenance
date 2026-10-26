@@ -124,7 +124,7 @@ class _RestrictedUnpickler(pickle.Unpickler):
     (so no ``os.system``, ``eval``, ``subprocess``, ``builtins.getattr`` ...).
     """
 
-    def find_class(self, module: str, name: str):  # noqa: D102
+    def find_class(self, module: str, name: str):
         if module == "builtins" and name in _SAFE_BUILTINS:
             return super().find_class(module, name)
         if module.startswith(_SAFE_MODULE_PREFIXES) or module in ("sklearn", "numpy", "scipy"):
@@ -159,7 +159,7 @@ def apply_calibrator(calibrator: Any, raw: float, fallback: float) -> float:
     if callable(proba):
         try:
             value = float(proba([[raw]])[0][1])
-        except Exception:  # noqa: S110
+        except Exception:
             value = None
     if value is None:
         try:

@@ -5,11 +5,11 @@ Compares code using Abstract Syntax Tree structural analysis.
 from __future__ import annotations
 
 import re
-from typing import List, Dict, Any, Tuple
 from collections import defaultdict
+from typing import Any
 
 
-def extract_subtrees(ast_root: Any, max_depth: int = 3) -> List[str]:
+def extract_subtrees(ast_root: Any, max_depth: int = 3) -> list[str]:
     """Extract all subtrees up to max_depth from AST.
     
     Args:
@@ -54,7 +54,7 @@ def _node_to_string(node: Any) -> str:
     return str(type(node).__name__)
 
 
-def _get_children(node: Any) -> List[Any]:
+def _get_children(node: Any) -> list[Any]:
     """Get children of an AST node.
     
     Args:
@@ -70,7 +70,7 @@ def _get_children(node: Any) -> List[Any]:
     return []
 
 
-def compute_subtree_frequencies(subtrees: List[str]) -> Dict[str, int]:
+def compute_subtree_frequencies(subtrees: list[str]) -> dict[str, int]:
     """Compute frequency of each subtree type.
     
     Args:
@@ -85,7 +85,7 @@ def compute_subtree_frequencies(subtrees: List[str]) -> Dict[str, int]:
     return dict(freq)
 
 
-def ast_similarity(subtrees1: List[str], subtrees2: List[str]) -> float:
+def ast_similarity(subtrees1: list[str], subtrees2: list[str]) -> float:
     """Calculate AST-based structural similarity.
     
     Uses frequency-weighted Jaccard similarity.
@@ -146,7 +146,7 @@ def compare_ast_safe(code_a: str, code_b: str, max_depth: int = 3) -> float:
     return _feature_similarity(features_a, features_b)
 
 
-def _extract_structural_features(code: str) -> Dict[str, int]:
+def _extract_structural_features(code: str) -> dict[str, int]:
     """Extract structural features from code as a frequency map.
     
     Args:
@@ -155,7 +155,7 @@ def _extract_structural_features(code: str) -> Dict[str, int]:
     Returns:
         Dictionary mapping feature names to counts.
     """
-    features: Dict[str, int] = defaultdict(int)
+    features: dict[str, int] = defaultdict(int)
     
     # Count control flow structures
     control_patterns = {
@@ -200,8 +200,8 @@ def _extract_structural_features(code: str) -> Dict[str, int]:
 
 
 def _feature_similarity(
-    features_a: Dict[str, int],
-    features_b: Dict[str, int]
+    features_a: dict[str, int],
+    features_b: dict[str, int]
 ) -> float:
     """Compute similarity between two feature dictionaries.
     

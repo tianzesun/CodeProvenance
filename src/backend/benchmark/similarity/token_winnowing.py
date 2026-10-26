@@ -2,10 +2,9 @@
 
 Implementation of winnowing for plagiarism detection.
 """
-from typing import List, Set, Tuple
 
 
-def tokenize(code: str) -> List[str]:
+def tokenize(code: str) -> list[str]:
     """Tokenize source code into normalized tokens.
     
     Args:
@@ -18,7 +17,7 @@ def tokenize(code: str) -> List[str]:
     return code.lower().split()
 
 
-def generate_ngrams(tokens: List[str], k: int = 6) -> List[Tuple[str, ...]]:
+def generate_ngrams(tokens: list[str], k: int = 6) -> list[tuple[str, ...]]:
     """Generate k-grams from token list.
     
     Args:
@@ -33,7 +32,7 @@ def generate_ngrams(tokens: List[str], k: int = 6) -> List[Tuple[str, ...]]:
     return [tuple(tokens[i:i + k]) for i in range(len(tokens) - k + 1)]
 
 
-def hash_grams(grams: List[Tuple[str, ...]]) -> List[int]:
+def hash_grams(grams: list[tuple[str, ...]]) -> list[int]:
     """Hash each n-gram.
     
     Args:
@@ -45,7 +44,7 @@ def hash_grams(grams: List[Tuple[str, ...]]) -> List[int]:
     return [hash(gram) for gram in grams]
 
 
-def winnow(hashes: List[int], window_size: int = 4) -> List[int]:
+def winnow(hashes: list[int], window_size: int = 4) -> list[int]:
     """Apply winnowing to reduce fingerprint size.
     
     Args:

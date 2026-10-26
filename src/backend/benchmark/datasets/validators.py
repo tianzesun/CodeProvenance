@@ -19,7 +19,7 @@ Usage:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from src.backend.benchmark.datasets.schema import DatasetMetadata
 
@@ -37,7 +37,7 @@ class DatasetValidator:
     """
     
     @staticmethod
-    def validate_metadata(metadata: DatasetMetadata) -> List[str]:
+    def validate_metadata(metadata: DatasetMetadata) -> list[str]:
         """Validate metadata and return errors.
         
         Args:
@@ -83,7 +83,7 @@ class DatasetValidator:
         return errors
     
     @staticmethod
-    def validate_ground_truth(pairs: List[Dict[str, Any]]) -> List[str]:
+    def validate_ground_truth(pairs: list[dict[str, Any]]) -> list[str]:
         """Validate ground truth format.
         
         Args:
@@ -103,7 +103,7 @@ class DatasetValidator:
         return errors
     
     @staticmethod
-    def validate_clone_types(metadata: DatasetMetadata) -> List[str]:
+    def validate_clone_types(metadata: DatasetMetadata) -> list[str]:
         """Validate clone types.
         
         Args:
@@ -120,7 +120,7 @@ class DatasetValidator:
         return errors
     
     @staticmethod
-    def validate_all(metadata: DatasetMetadata, pairs: List[Dict[str, Any]] = None) -> List[str]:
+    def validate_all(metadata: DatasetMetadata, pairs: list[dict[str, Any]] = None) -> list[str]:
         """Validate all aspects of a dataset.
         
         Args:

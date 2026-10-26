@@ -11,14 +11,12 @@ generalization can be evaluated properly.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
-
 
 # =============================================================================
 # Multi-language algorithm templates (same logic, different syntax)
 # =============================================================================
 
-PYTHON_SAMPLES: List[str] = [
+PYTHON_SAMPLES: list[str] = [
     # 0: Linear search
     '''def linear_search(arr, target):
     """Search for target using linear search."""
@@ -118,7 +116,7 @@ PYTHON_SAMPLES: List[str] = [
 ''',
 ]
 
-JAVA_SAMPLES: List[str] = [
+JAVA_SAMPLES: list[str] = [
     # 0: Linear search
     '''public static int linearSearch(int[] arr, int target) {
     // Search for target using linear search
@@ -241,7 +239,7 @@ JAVA_SAMPLES: List[str] = [
 ''',
 ]
 
-JAVASCRIPT_SAMPLES: List[str] = [
+JAVASCRIPT_SAMPLES: list[str] = [
     # 0: Linear search
     '''function linearSearch(arr, target) {
     // Search for target using linear search
@@ -369,26 +367,26 @@ JAVASCRIPT_SAMPLES: List[str] = [
 @dataclass
 class MultiLangDataset:
     """Container for multi-language code samples."""
-    python: Dict[str, str]
-    java: Dict[str, str]
-    javascript: Dict[str, str]
+    python: dict[str, str]
+    java: dict[str, str]
+    javascript: dict[str, str]
     
     @property
-    def languages(self) -> List[str]:
+    def languages(self) -> list[str]:
         return [k for k in [
             "python" if self.python else None,
             "java" if self.java else None,
             "javascript" if self.javascript else None,
         ] if k]
     
-    def get_pairs(self, lang_a: str, lang_b: str) -> List[Tuple[str, str]]:
+    def get_pairs(self, lang_a: str, lang_b: str) -> list[tuple[str, str]]:
         """Get semantically aligned code pairs across languages."""
         samples_a = getattr(self, lang_a, {})
         samples_b = getattr(self, lang_b, {})
         common_keys = set(samples_a.keys()) & set(samples_b.keys())
         return [(samples_a[k], samples_b[k]) for k in sorted(common_keys)]
     
-    def get_single_language(self, lang: str) -> List[str]:
+    def get_single_language(self, lang: str) -> list[str]:
         """Get all samples for a single language."""
         return list(getattr(self, lang, {}).values())
 
@@ -399,7 +397,7 @@ class MultiLangLoader:
     Returns semantically equivalent code in Python, Java, and JavaScript.
     """
     
-    def __init__(self, include_types: Optional[List[str]] = None):
+    def __init__(self, include_types: list[str] | None = None):
         """Initialize loader.
         
         Args:
@@ -407,9 +405,9 @@ class MultiLangLoader:
                 If None, all 10 algorithms are included.
         """
         self._include_types = include_types
-        self._dataset: Optional[MultiLangDataset] = None
+        self._dataset: MultiLangDataset | None = None
     
-    def _indices(self) -> List[int]:
+    def _indices(self) -> list[int]:
         if self._include_types:
             # allow indices or names
             mapping = {
@@ -438,7 +436,7 @@ class MultiLangLoader:
         return self._dataset
     
     @property
-    def dataset(self) -> Optional[MultiLangDataset]:
+    def dataset(self) -> MultiLangDataset | None:
         return self._dataset
 
 
@@ -448,8 +446,8 @@ class MultiLangLoader:
 
 
 def get_multilang_samples(
-    include: Optional[List[str]] = None
-) -> List[Tuple[str, List[str]]]:
+    include: list[str] | None = None
+) -> list[tuple[str, list[str]]]:
     """Return language, samples tuples for Layer 3 evaluation.
     
     Args:

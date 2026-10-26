@@ -7,10 +7,20 @@ Provides extended evaluation metrics:
 """
 from __future__ import annotations
 
-from .roc_auc import (
-    compute_roc_auc,
-    compute_roc_curve,
-    compute_average_precision,
+from .basic import (
+    accuracy,
+    compute_confusion_matrix,
+    compute_metrics,
+    compute_metrics_from_confusion,
+    f1_score,
+    false_positive_rate,
+    mean_average_precision,
+    mean_reciprocal_rank,
+    ndcg_at_k,
+    precision,
+    recall,
+    top_k_precision,
+    true_positive_rate,
 )
 from .calibration import (
     compute_calibration_error,
@@ -18,20 +28,10 @@ from .calibration import (
     compute_maximum_calibration_error,
     plot_calibration_curve,
 )
-from .basic import (
-    precision,
-    recall,
-    false_positive_rate,
-    true_positive_rate,
-    f1_score,
-    accuracy,
-    compute_confusion_matrix,
-    compute_metrics_from_confusion,
-    compute_metrics,
-    mean_average_precision,
-    mean_reciprocal_rank,
-    ndcg_at_k,
-    top_k_precision,
+from .roc_auc import (
+    compute_average_precision,
+    compute_roc_auc,
+    compute_roc_curve,
 )
 
 __all__ = [

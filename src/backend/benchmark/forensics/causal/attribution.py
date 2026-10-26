@@ -19,8 +19,9 @@ Usage:
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 
 @dataclass
@@ -42,7 +43,7 @@ class RootCause:
     predicted_score: float
     error: float
     primary_cause: str
-    component_contributions: Dict[str, float] = field(default_factory=dict)
+    component_contributions: dict[str, float] = field(default_factory=dict)
     confidence: float = 1.0
     clone_type: int = 0
     
@@ -75,7 +76,7 @@ class ComponentEffectiveness:
     name: str
     correlation: float = 0.0
     discrimination: float = 0.0
-    clone_type_sensitivity: Dict[int, float] = field(default_factory=dict)
+    clone_type_sensitivity: dict[int, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -101,19 +102,19 @@ class RootCauseReport:
     true_negatives: int = 0
     
     # Per-component aggregate loss
-    component_losses: Dict[str, float] = field(default_factory=dict)
+    component_losses: dict[str, float] = field(default_factory=dict)
     
     # Primary cause distribution
-    primary_cause_distribution: Dict[str, int] = field(default_factory=dict)
+    primary_cause_distribution: dict[str, int] = field(default_factory=dict)
     
     # Per-component effectiveness
-    component_effectiveness: Dict[str, ComponentEffectiveness] = field(default_factory=dict)
+    component_effectiveness: dict[str, ComponentEffectiveness] = field(default_factory=dict)
     
     # Top failure patterns
-    top_failures: List[RootCause] = field(default_factory=list)
+    top_failures: list[RootCause] = field(default_factory=list)
     
     # Per-clone-type breakdown
-    by_clone_type: Dict[int, Dict[str, Any]] = field(default_factory=dict)
+    by_clone_type: dict[int, dict[str, Any]] = field(default_factory=dict)
     
     def summary(self) -> str:
         """Generate human-readable summary.
@@ -175,7 +176,7 @@ class RootCauseReport:
         lines.append("=" * 70)
         return "\n".join(lines)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary.
         
         Returns:
@@ -219,8 +220,8 @@ class RootCauseAttributor:
     
     def __init__(
         self,
-        component_engines: Optional[Dict[str, Callable[[str, str], float]]] = None,
-        engine_weights: Optional[Dict[str, float]] = None,
+        component_engines: dict[str, Callable[[str, str], float]] | None = None,
+        engine_weights: dict[str, float] | None = None,
     ):
         """Initialize the root cause attributor.
         
@@ -239,13 +240,13 @@ class RootCauseAttributor:
     
     def _default_components(
         self
-    ) -> Dict[str, Callable[[str, str], float]]:
+    ) -> dict[str, Callable[[str, str], float]]:
         """Create default component similarity functions.
         
         Returns:
             Dict of component name to similarity function.
         """
-        from src.backend.benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine
+        from src.backend.benchmark.similarity.engines import ASTEngine, TokenWinnowingEngine
         
         token_engine = TokenWinnowingEngine()
         ast_engine = ASTEngine()
@@ -268,9 +269,9 @@ class RootCauseAttributor:
         """
         import re
         
-        def extract_features(code: str) -> Dict[str, float]:
+        def extract_features(code: str) -> dict[str, float]:
             """Extract normalized structural features."""
-            features: Dict[str, float] = {}
+            features: dict[str, float] = {}
             
             # Control flow counts
             control_keywords = [
@@ -332,7 +333,7 @@ class RootCauseAttributor:
     
     def analyze(
         self,
-        pairs: List[Any],
+        pairs: list[Any],
         main_engine: Any = None,
         threshold: float = 0.5,
     ) -> RootCauseReport:
@@ -349,10 +350,10 @@ class RootCauseAttributor:
         report = RootCauseReport()
         report.total_pairs = len(pairs)
         
-        all_attributions: List[RootCause] = []
+        all_attributions: list[RootCause] = []
         
         # Track component effectiveness
-        component_gt: Dict[str, List[Tuple[float, float]]] = {
+        component_gt: dict[str, list[tuple[float, float]]] = {
             comp: [] for comp in self.component_engines
         }
         
@@ -375,7 +376,7 @@ class RootCauseAttributor:
                 report.false_negatives += 1
             
             # Compute component scores
-            component_scores: Dict[str, float] = {}
+            component_scores: dict[str, float] = {}
             for comp_name, comp_func in self.component_engines.items():
                 try:
                     score = comp_func(pair.code_a, pair.code_b)
@@ -422,7 +423,7 @@ class RootCauseAttributor:
                 )
         
         # Per-clone-type breakdown
-        type_attributions: Dict[int, List[RootCause]] = {}
+        type_attributions: dict[int, list[RootCause]] = {}
         for a in all_attributions:
             type_attributions.setdefault(a.clone_type, []).append(a)
         
@@ -457,10 +458,10 @@ class RootCauseAttributor:
     
     def _decompose_loss(
         self,
-        component_scores: Dict[str, float],
+        component_scores: dict[str, float],
         error: float,
         ground_truth: float,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Decompose similarity error into component contributions.
         
         Uses weighted component contribution to final score.
@@ -484,7 +485,7 @@ class RootCauseAttributor:
         if total_weight == 0:
             return {comp: 0.0 for comp in self.component_engines}
         
-        loss_contribution: Dict[str, float] = {}
+        loss_contribution: dict[str, float] = {}
         for comp, comp_score in component_scores.items():
             weight = self.engine_weights.get(comp, 1.0) / total_weight
             
@@ -511,7 +512,7 @@ class RootCauseAttributor:
     
     def _find_primary_cause(
         self,
-        loss_contribution: Dict[str, float],
+        loss_contribution: dict[str, float],
         error: float,
     ) -> str:
         """Find the primary cause of error.
@@ -531,7 +532,7 @@ class RootCauseAttributor:
     
     def _compute_confidence(
         self,
-        loss_contribution: Dict[str, float],
+        loss_contribution: dict[str, float],
         error: float,
     ) -> float:
         """Compute confidence in attribution.
@@ -565,7 +566,7 @@ class RootCauseAttributor:
     def _compute_component_effectiveness(
         self,
         comp_name: str,
-        scores: List[Tuple[float, float]],
+        scores: list[tuple[float, float]],
     ) -> ComponentEffectiveness:
         """Compute effectiveness metrics for a component.
         

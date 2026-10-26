@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from src.backend.benchmark.datasets.task_loader import DatasetTaskLoader, TaskLoaderError
+from src.backend.benchmark.datasets.task_loader import DatasetTaskLoader
 
 
 @dataclass

@@ -15,15 +15,14 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
-from .adapters import ExternalToolAdapter, ALL_COMPETITOR_ADAPTERS
-
+from .adapters import ALL_COMPETITOR_ADAPTERS, ExternalToolAdapter
 
 # ======================================================================
 # Data structures
@@ -60,12 +59,12 @@ class ToolMetrics:
     fn: int = 0
 
     # Per-clone-type recall
-    type_recall: Dict[int, float] = field(default_factory=dict)
+    type_recall: dict[int, float] = field(default_factory=dict)
 
     # Confidence intervals (bootstrap)
-    precision_ci: Tuple[float, float] = (0.0, 0.0)
-    recall_ci: Tuple[float, float] = (0.0, 0.0)
-    f1_ci: Tuple[float, float] = (0.0, 0.0)
+    precision_ci: tuple[float, float] = (0.0, 0.0)
+    recall_ci: tuple[float, float] = (0.0, 0.0)
+    f1_ci: tuple[float, float] = (0.0, 0.0)
 
     # Extra capabilities
     ai_detection: bool = False
@@ -79,7 +78,7 @@ class ToolMetrics:
     optimal_threshold: float = 0.5
     optimal_f1: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["precision_ci"] = list(self.precision_ci)
         d["recall_ci"] = list(self.recall_ci)
@@ -96,7 +95,7 @@ class SignificanceResult:
     p_value: float
     significant: bool       # at alpha=0.05
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -105,13 +104,13 @@ class CompetitorBenchmarkResult:
     """Full result of a competitor benchmark run."""
     run_id: str
     timestamp: str
-    dataset_info: Dict[str, Any]
-    tool_metrics: List[ToolMetrics]
-    significance_tests: List[SignificanceResult]
-    rankings: Dict[str, List[str]]  # metric -> ranked tool names
+    dataset_info: dict[str, Any]
+    tool_metrics: list[ToolMetrics]
+    significance_tests: list[SignificanceResult]
+    rankings: dict[str, list[str]]  # metric -> ranked tool names
     seed: int = 42
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
             "timestamp": self.timestamp,
@@ -157,9 +156,9 @@ class SyntheticBenchmarkDataset:
         n_type3: int = 50,
         n_type4: int = 50,
         n_negative: int = 200,
-    ) -> List[BenchmarkPair]:
+    ) -> list[BenchmarkPair]:
         """Generate labelled pairs."""
-        pairs: List[BenchmarkPair] = []
+        pairs: list[BenchmarkPair] = []
         idx = 0
 
         # Type-1: Exact clones (whitespace / comment changes only)
@@ -200,7 +199,7 @@ class SyntheticBenchmarkDataset:
 
     # ---- Transforms ----
 
-    def _pick_template(self, exclude: Optional[str] = None) -> str:
+    def _pick_template(self, exclude: str | None = None) -> str:
         candidates = [t for t in self._TEMPLATES if t != exclude] if exclude else self._TEMPLATES
         return self._py_rng.choice(candidates)
 
@@ -217,7 +216,7 @@ class SyntheticBenchmarkDataset:
         keywords = {"def", "if", "else", "for", "while", "return", "in", "range",
                      "len", "not", "and", "or", "True", "False", "None", "import",
                      "from", "class", "try", "except", "with", "as", "is", "int"}
-        id_map: Dict[str, str] = {}
+        id_map: dict[str, str] = {}
         counter = [0]
 
         def _replace(m):
@@ -239,7 +238,7 @@ class SyntheticBenchmarkDataset:
         lines.insert(pos, dead_code)
         return "\n".join(lines)
 
-    def _type4_pair(self) -> Tuple[str, str]:
+    def _type4_pair(self) -> tuple[str, str]:
         """Return two semantically equivalent but structurally different implementations."""
         a = (
             "def compute_sum(numbers):\n"
@@ -294,7 +293,8 @@ class IntegrityDeskAdapter:
         self, code_a: str, code_b: str, clone_type: int, label: int
     ) -> float:
         """IntegrityDesk simulated performance (our targets)."""
-        import hashlib, random as _rand
+        import hashlib
+        import random as _rand
         h = hashlib.sha256((code_a + "||" + code_b).encode()).hexdigest()
         rng = _rand.Random(int(h[:8], 16))
 
@@ -332,7 +332,7 @@ class CompetitorBenchmarkRunner:
 
     def __init__(
         self,
-        competitors: Optional[List[ExternalToolAdapter]] = None,
+        competitors: list[ExternalToolAdapter] | None = None,
         output_dir: str = "reports/competitor",
         threshold: float = 0.50,
     ):
@@ -366,16 +366,16 @@ class CompetitorBenchmarkRunner:
         print("\n[2/5] Evaluating tools...")
         integritydesk = IntegrityDeskAdapter()
 
-        all_tools: List[Tuple[str, str, Any]] = [
+        all_tools: list[tuple[str, str, Any]] = [
             (integritydesk.NAME, integritydesk.VERSION, integritydesk),
         ]
         for adapter in self.competitors:
             all_tools.append((adapter.name, adapter.version, adapter))
 
         # Collect raw scores and predictions
-        tool_scores: Dict[str, List[float]] = {}
-        tool_preds: Dict[str, np.ndarray] = {}
-        tool_times: Dict[str, float] = {}
+        tool_scores: dict[str, list[float]] = {}
+        tool_preds: dict[str, np.ndarray] = {}
+        tool_times: dict[str, float] = {}
 
         y_true = np.array([p.label for p in pairs])
         clone_types = [p.clone_type for p in pairs]
@@ -399,7 +399,7 @@ class CompetitorBenchmarkRunner:
 
         # 3. Compute metrics for each tool
         print("\n[3/5] Computing metrics...")
-        all_metrics: List[ToolMetrics] = []
+        all_metrics: list[ToolMetrics] = []
 
         for tool_name, tool_version, tool_obj in all_tools:
             scores_arr = np.array(tool_scores[tool_name])
@@ -423,7 +423,7 @@ class CompetitorBenchmarkRunner:
             avg_prec = self._compute_average_precision(y_true, scores_arr)
 
             # Per-clone-type recall
-            type_recall: Dict[int, float] = {}
+            type_recall: dict[int, float] = {}
             for ct in [1, 2, 3, 4]:
                 ct_mask = np.array([clone_types[i] == ct for i in range(total_pairs)])
                 ct_positives = np.sum(ct_mask & (y_true == 1))
@@ -473,7 +473,7 @@ class CompetitorBenchmarkRunner:
 
         # 4. Significance tests (IntegrityDesk vs each competitor)
         print("\n[4/5] Running McNemar significance tests...")
-        significance_results: List[SignificanceResult] = []
+        significance_results: list[SignificanceResult] = []
         id_preds = tool_preds.get("IntegrityDesk")
 
         if id_preds is not None:
@@ -493,7 +493,7 @@ class CompetitorBenchmarkRunner:
 
         # 5. Rankings
         print("\n[5/5] Computing rankings...")
-        rankings: Dict[str, List[str]] = {}
+        rankings: dict[str, list[str]] = {}
         for metric in ["f1", "precision", "recall", "roc_auc"]:
             ranked = sorted(all_metrics, key=lambda m: getattr(m, metric, 0), reverse=True)
             rankings[metric] = [m.tool_name for m in ranked]
@@ -558,7 +558,7 @@ class CompetitorBenchmarkRunner:
         metric_fn,
         n_bootstrap: int = 1000,
         seed: int = 42,
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         rng = np.random.RandomState(seed)
         n = len(y_true)
         scores = np.zeros(n_bootstrap)
@@ -595,7 +595,7 @@ class CompetitorBenchmarkRunner:
     @staticmethod
     def _mcnemar_test(
         y_true: np.ndarray, pred_a: np.ndarray, pred_b: np.ndarray
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """McNemar's test (chi-square with continuity correction)."""
         correct_a = (pred_a == y_true)
         correct_b = (pred_b == y_true)
@@ -613,7 +613,7 @@ class CompetitorBenchmarkRunner:
     @staticmethod
     def _find_optimal_threshold(
         y_true: np.ndarray, scores: np.ndarray
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """Sweep thresholds to find optimal F1."""
         best_t, best_f1 = 0.5, 0.0
         for t_int in range(5, 96):

@@ -11,16 +11,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Generic, List, Optional, TypeVar, Union
+from typing import Any, Generic, TypeVar
 
 from contracts import (
     ValidationGate,
-    ValidationResult,
     validate_evaluation_result,
-    validate_enriched_pair,
 )
 from contracts.schema_registry import registry
-from src.backend.benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
+
+from src.backend.benchmark.contracts.evaluation_result import EnrichedPair, EvaluationResult
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -34,8 +33,8 @@ class PipelineContext:
         config: Configuration dictionary.
         metadata: Additional metadata.
     """
-    config: Dict[str, Any]
-    metadata: Dict[str, Any]
+    config: dict[str, Any]
+    metadata: dict[str, Any]
     
     def get(self, key: str, default: Any = None) -> Any:
         """Get config value."""
@@ -55,18 +54,15 @@ class TypedStage(ABC, Generic[T, U]):
     @abstractmethod
     def input_schema(self) -> str:
         """Return input schema name."""
-        pass
     
     @property
     @abstractmethod
     def output_schema(self) -> str:
         """Return output schema name."""
-        pass
     
     @abstractmethod
     def execute(self, input_data: T, context: PipelineContext) -> U:
         """Execute the stage."""
-        pass
     
     def validate_input(self, data: Any) -> T:
         """Validate input data."""
@@ -110,7 +106,7 @@ class TypedPipeline:
     
     def __init__(self) -> None:
         """Initialize pipeline."""
-        self.stages: List[TypedStage[Any, Any]] = []
+        self.stages: list[TypedStage[Any, Any]] = []
         self.validation_gate = ValidationGate()
     
     def add_stage(self, stage: TypedStage[Any, Any]) -> TypedPipeline:
@@ -152,7 +148,7 @@ class AdapterIsolationLayer:
         self,
         pair: EnrichedPair,
         raw_score: float,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> EvaluationResult:
         """Translate raw score to EvaluationResult.
         

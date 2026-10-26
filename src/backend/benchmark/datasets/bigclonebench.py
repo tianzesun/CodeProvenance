@@ -15,19 +15,18 @@ Dataset structure after extraction:
     ├── bcb.h2.db              # H2 database (5.5GB) with clone metadata
     └── bcb.trace.db           # H2 trace file
 """
-from typing import Dict, List, Any, Optional, Tuple
-from pathlib import Path
-import json
 import random
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 from src.backend.benchmark.datasets.schema import (
+    CanonicalDataset,
+    CloneType,
+    CodePair,
     DatasetContract,
     DatasetMetadata,
-    CloneType,
     Difficulty,
-    CodePair,
-    CanonicalDataset,
 )
 
 
@@ -63,12 +62,12 @@ class NonClonePair:
 @dataclass
 class BCBSample:
     """A loaded sample with source code for each pair."""
-    clone_pairs: List[ClonePair]
-    non_clone_pairs: List[NonClonePair]
-    clone_counts: Dict[int, int] = field(default_factory=dict)
-    source_codes: Dict[str, str] = field(default_factory=dict)
+    clone_pairs: list[ClonePair]
+    non_clone_pairs: list[NonClonePair]
+    clone_counts: dict[int, int] = field(default_factory=dict)
+    source_codes: dict[str, str] = field(default_factory=dict)
 
-    def to_ground_truth_format(self) -> Dict[str, Any]:
+    def to_ground_truth_format(self) -> dict[str, Any]:
         """Convert to ground truth JSON format."""
         pairs = []
         for cp in self.clone_pairs:
@@ -110,9 +109,9 @@ class BigCloneBenchDataset(DatasetContract):
         self.bcb_reduced_dir = data_dir / "bcb_reduced"
         self.clones_dir = data_dir / "metadata"
         self.h2_db = data_dir / "bcb.h2.db"
-        self._pairs_cache: List[ClonePair] = []
-        self._non_clone_pairs_cache: List[NonClonePair] = []
-        self._source_cache: Dict[str, str] = {}
+        self._pairs_cache: list[ClonePair] = []
+        self._non_clone_pairs_cache: list[NonClonePair] = []
+        self._source_cache: dict[str, str] = {}
     
     @property
     def metadata(self) -> DatasetMetadata:
@@ -139,8 +138,8 @@ class BigCloneBenchDataset(DatasetContract):
             description="Industry-standard Java clone detection benchmark with 55,000+ pairs across 4 clone types"
         )
 
-    def load(self, clone_types: Optional[List[int]] = None,
-             max_pairs: Optional[int] = None,
+    def load(self, clone_types: list[int] | None = None,
+             max_pairs: int | None = None,
              max_non_clones: int = 10000,
              **kwargs) -> CanonicalDataset:
         """Load clone pairs and non-clone pairs from the dataset.
@@ -158,7 +157,7 @@ class BigCloneBenchDataset(DatasetContract):
         non_clone_pairs_raw = self.load_non_clones(max_non_clones)
         
         # Convert to CodePair format
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         
         # Add clone pairs
         for cp in clone_pairs_raw:
@@ -193,8 +192,8 @@ class BigCloneBenchDataset(DatasetContract):
             metadata=self.metadata,
         )
 
-    def load_clone_pairs(self, clone_types: Optional[List[int]] = None,
-                         max_pairs: Optional[int] = None) -> List[ClonePair]:
+    def load_clone_pairs(self, clone_types: list[int] | None = None,
+                         max_pairs: int | None = None) -> list[ClonePair]:
         """Load clone pairs from CSV or generate from structure.
 
         Priority:
@@ -210,8 +209,8 @@ class BigCloneBenchDataset(DatasetContract):
         return self._generate_clone_pairs_from_structure(clone_types, max_pairs)
 
     def _load_clone_pairs_from_csv(self, pairs_file: Path,
-                                   clone_types: Optional[List[int]] = None,
-                                   max_pairs: Optional[int] = None) -> List[ClonePair]:
+                                   clone_types: list[int] | None = None,
+                                   max_pairs: int | None = None) -> list[ClonePair]:
         """Load from processed CSV file."""
         pairs = []
         with open(pairs_file, 'r', encoding='utf-8') as f:
@@ -243,9 +242,9 @@ class BigCloneBenchDataset(DatasetContract):
         return pairs
 
     def _generate_clone_pairs_from_structure(
-        self, clone_types: Optional[List[int]] = None,
-        max_pairs: Optional[int] = None
-    ) -> List[ClonePair]:
+        self, clone_types: list[int] | None = None,
+        max_pairs: int | None = None
+    ) -> list[ClonePair]:
         """Generate sample clone pairs from bcb_reduced directory structure.
 
         Files in the same functionality directory are considered clones.
@@ -257,8 +256,8 @@ class BigCloneBenchDataset(DatasetContract):
             d for d in self.bcb_reduced_dir.iterdir() if d.is_dir()
         ]
 
-        clone_pairs: List[ClonePair] = []
-        non_clone_pairs: List[NonClonePair] = []
+        clone_pairs: list[ClonePair] = []
+        non_clone_pairs: list[NonClonePair] = []
 
         for func_dir in functionalities:
             # Collect all Java files in this functionality
@@ -299,7 +298,7 @@ class BigCloneBenchDataset(DatasetContract):
         self._non_clone_pairs_cache = non_clone_pairs
         return clone_pairs
 
-    def load_non_clones(self, max_pairs: int = 10000) -> List[NonClonePair]:
+    def load_non_clones(self, max_pairs: int = 10000) -> list[NonClonePair]:
         """Load non-clone pairs for negative samples."""
         if self._non_clone_pairs_cache:
             return self._non_clone_pairs_cache[:max_pairs]
@@ -307,7 +306,7 @@ class BigCloneBenchDataset(DatasetContract):
         if not self.bcb_reduced_dir.exists():
             return []
 
-        pairs: List[NonClonePair] = []
+        pairs: list[NonClonePair] = []
         all_files = list(self.bcb_reduced_dir.rglob("*.java"))
 
         if len(all_files) < 2:
@@ -330,7 +329,7 @@ class BigCloneBenchDataset(DatasetContract):
         return pairs
 
     def get_source_code(self, file_path: str, start_line: int = -1,
-                        end_line: int = -1) -> Optional[str]:
+                        end_line: int = -1) -> str | None:
         """Extract source code for a file.
 
         Args:
@@ -360,7 +359,7 @@ class BigCloneBenchDataset(DatasetContract):
         self._source_cache[file_path] = code
         return code
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         stats = {
             "name": "BigCloneBench",
@@ -389,7 +388,7 @@ class BigCloneBenchDataset(DatasetContract):
 
         return stats
 
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check which parts of the dataset are available."""
         return {
             "data_dir": self.data_dir.exists(),

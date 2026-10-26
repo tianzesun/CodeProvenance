@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 
 @dataclass
@@ -43,8 +43,8 @@ class CanonicalizationResult:
     """Result of canonicalization."""
     original: str
     canonical: str
-    identifier_map: Dict[str, str] = field(default_factory=dict)
-    literal_map: Dict[str, str] = field(default_factory=dict)
+    identifier_map: dict[str, str] = field(default_factory=dict)
+    literal_map: dict[str, str] = field(default_factory=dict)
     num_identifiers_normalized: int = 0
     num_literals_abstracted: int = 0
 
@@ -94,7 +94,7 @@ class Canonicalizer:
         'tuple', 'bool', 'type', 'isinstance', 'issubclass', 'hasattr',
         'getattr', 'setattr', 'enumerate', 'zip', 'map', 'filter', 'sorted',
         'print', 'open', 'input', 'super', 'min', 'max', 'sum', 'abs',
-        'round', 'len', 'append', 'extend', 'insert', 'remove', 'pop',
+        'round', 'append', 'extend', 'insert', 'remove', 'pop',
         'clear', 'index', 'count', 'sort', 'reverse', 'copy',
     }
     
@@ -102,19 +102,19 @@ class Canonicalizer:
         'System', 'String', 'Integer', 'Double', 'Boolean', 'List',
         'ArrayList', 'HashMap', 'Map', 'Set', 'Iterator', 'Arrays',
         'Math', 'Class', 'Object', 'Exception', 'RuntimeException',
-        'StringBuilder', 'Arrays', 'Collections', 'Optional', 'Stream',
+        'StringBuilder', 'Collections', 'Optional', 'Stream',
     }
     
-    def __init__(self, config: Optional[CanonicalizationConfig] = None):
+    def __init__(self, config: CanonicalizationConfig | None = None):
         """Initialize canonicalizer.
         
         Args:
             config: Canonicalization configuration.
         """
         self.config = config or CanonicalizationConfig()
-        self._keywords: Set[str] = set()
+        self._keywords: set[str] = set()
     
-    def set_language(self, language: str) -> "Canonicalizer":
+    def set_language(self, language: str) -> Canonicalizer:
         """Set language for keyword recognition.
         
         Args:
@@ -197,7 +197,7 @@ class Canonicalizer:
         code = re.sub(r"'''.*?'''", '', code, flags=re.DOTALL)
         return code
     
-    def _abstract_literals(self, code: str) -> Tuple[str, Dict[str, str]]:
+    def _abstract_literals(self, code: str) -> tuple[str, dict[str, str]]:
         """Replace literal values with abstract tokens.
         
         Args:
@@ -206,7 +206,7 @@ class Canonicalizer:
         Returns:
             Tuple of (code with abstracted literals, literal map).
         """
-        literal_map: Dict[str, str] = {}
+        literal_map: dict[str, str] = {}
         counter = 0
         
         # Integer literals (handle hex, octal, binary)
@@ -253,7 +253,7 @@ class Canonicalizer:
         
         return code, literal_map
     
-    def _normalize_identifiers(self, code: str) -> Tuple[str, Dict[str, str]]:
+    def _normalize_identifiers(self, code: str) -> tuple[str, dict[str, str]]:
         """Replace identifiers with canonical names.
         
         Variables are renamed to v_1, v_2, etc. based on first occurrence order.
@@ -266,14 +266,14 @@ class Canonicalizer:
             Tuple of (code with normalized identifiers, identifier map).
         """
         # Extract all identifiers
-        all_idents: List[str] = []
+        all_idents: list[str] = []
         for match in re.finditer(r'\b([a-zA-Z_]\w*)\b', code):
             ident = match.group(1)
             if ident not in self._keywords and ident not in all_idents:
                 all_idents.append(ident)
         
         # Create mapping: first occurrence order -> canonical name
-        ident_map: Dict[str, str] = {}
+        ident_map: dict[str, str] = {}
         for i, ident in enumerate(all_idents, 1):
             ident_map[ident] = f"v_{i}"
         
@@ -343,7 +343,7 @@ class CanonicalComparePipeline:
     def __init__(
         self,
         engine,  # Any engine with compare(code_a, code_b) -> float
-        canonicalizer: Optional[Canonicalizer] = None,
+        canonicalizer: Canonicalizer | None = None,
     ):
         """Initialize pipeline.
         
@@ -375,7 +375,7 @@ class CanonicalComparePipeline:
     
     def compare_with_canonicals(
         self, code_a: str, code_b: str
-    ) -> Tuple[float, CanonicalizationResult, CanonicalizationResult]:
+    ) -> tuple[float, CanonicalizationResult, CanonicalizationResult]:
         """Compare and return canonicalized code.
         
         Args:
@@ -391,7 +391,7 @@ class CanonicalComparePipeline:
         return score, canon_a, canon_b
 
 
-def create_canonical_engines(engines: Dict[str, Any]) -> Dict[str, Any]:
+def create_canonical_engines(engines: dict[str, Any]) -> dict[str, Any]:
     """Create canonicalized versions of engines.
     
     Args:

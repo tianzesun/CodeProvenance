@@ -512,7 +512,7 @@ class StylometryExtractor:
 
 
 def _clamp01(x: float) -> float:
-    return 0.0 if x < 0.0 else 1.0 if x > 1.0 else x
+    return 0.0 if x < 0.0 else min(x, 1.0)
 
 
 #: Each scaler maps a raw feature value to [0, 1], where 1 = "most AI-like".

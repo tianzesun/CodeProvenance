@@ -8,9 +8,9 @@ This is the scientific enforcement of consistency.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from src.backend.benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
+from src.backend.benchmark.contracts.evaluation_result import EnrichedPair, EvaluationResult
 
 
 class BaseAdapter(ABC):
@@ -31,7 +31,6 @@ class BaseAdapter(ABC):
         Returns:
             Adapter name (e.g., "jplag", "moss", "nicad").
         """
-        pass
 
     @property
     def version(self) -> str:
@@ -55,9 +54,8 @@ class BaseAdapter(ABC):
         Raises:
             NotImplementedError: If not implemented.
         """
-        pass
 
-    def evaluate_batch(self, pairs: List[EnrichedPair]) -> List[EvaluationResult]:
+    def evaluate_batch(self, pairs: list[EnrichedPair]) -> list[EvaluationResult]:
         """Evaluate a batch of code pairs.
 
         Default implementation calls evaluate() for each pair.
@@ -107,8 +105,8 @@ class BaseAdapter(ABC):
         pair: EnrichedPair,
         score: float,
         threshold: float = 0.5,
-        confidence: Optional[float] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        confidence: float | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> EvaluationResult:
         """Helper to create EvaluationResult.
 

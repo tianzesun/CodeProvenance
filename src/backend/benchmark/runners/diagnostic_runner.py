@@ -5,11 +5,15 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from src.backend.benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
-from src.backend.benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine, HybridEngine
-from src.backend.benchmark.forensics import ErrorAttributionModel, ThresholdStabilityAnalyzer, FailureClusterAnalyzer
+from src.backend.benchmark.forensics import (
+    ErrorAttributionModel,
+    FailureClusterAnalyzer,
+    ThresholdStabilityAnalyzer,
+)
+from src.backend.benchmark.similarity.engines import ASTEngine, HybridEngine, TokenWinnowingEngine
 
 
 class DiagnosticBenchmarkRunner:
@@ -26,7 +30,7 @@ class DiagnosticBenchmarkRunner:
         type4: int = 50,
         non_clone: int = 200,
         seed: int = 42,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run full diagnostic benchmark."""
         generator = SyntheticDatasetGenerator(seed=seed)
         dataset = generator.generate_pair_count(type1, type2, type3, type4, non_clone)
@@ -38,7 +42,7 @@ class DiagnosticBenchmarkRunner:
         }
 
         eam = ErrorAttributionModel()
-        all_engine_results: Dict[str, Dict[str, Any]] = {}
+        all_engine_results: dict[str, dict[str, Any]] = {}
 
         for engine_name, engine in engines.items():
             eam_report = eam.analyze(dataset.pairs, engine)

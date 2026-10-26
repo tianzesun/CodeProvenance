@@ -4,10 +4,11 @@ Creates labeled code pair datasets for evaluating plagiarism detectors
 using formal metrics: precision, recall, F1, ROC-AUC, PR-AUC, and robustness.
 """
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple
-from pathlib import Path
+
 import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 from src.backend.benchmark.datasets.schema import CodePair
 
@@ -33,20 +34,20 @@ class BenchmarkGroundTruth:
     name: str
     version: str
     language: str
-    pairs: List[CodePair] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    pairs: list[CodePair] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
     
     @property
-    def binary_labels(self) -> List[int]:
+    def binary_labels(self) -> list[int]:
         """Convert to binary: clone (1) vs non-clone (0)."""
         return [1 if p.label >= Label.SEMANTIC_CLONE else 0 for p in self.pairs]
     
     @property
-    def multi_class_labels(self) -> List[int]:
+    def multi_class_labels(self) -> list[int]:
         """Multi-class labels (0-3)."""
         return [p.label for p in self.pairs]
     
-    def get_scores_by_label(self) -> Dict[int, List[int]]:
+    def get_scores_by_label(self) -> dict[int, list[int]]:
         """Group labels for analysis."""
         result = {0: [], 1: [], 2: [], 3: []}
         for p in self.pairs:
@@ -74,7 +75,7 @@ class BenchmarkGroundTruth:
         path.write_text(json.dumps(data, indent=2))
     
     @classmethod
-    def load(cls, path: Path) -> 'BenchmarkGroundTruth':
+    def load(cls, path: Path) -> BenchmarkGroundTruth:
         """Load from JSON."""
         data = json.loads(path.read_text())
         pairs = [

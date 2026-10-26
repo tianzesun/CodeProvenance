@@ -11,10 +11,11 @@ import contextvars
 import json
 import logging
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
-from typing import Any, Callable, Iterable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -410,10 +411,6 @@ class BatchDetectionService:
             - Parallel (8 workers): ~0.4-1s per pair (3-5x faster)
             - Recommended for >10 submissions (>45 pairs)
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from src.backend.engines.similarity.code_matching import CodeHighlighter
-        import os
-        import threading
 
         if self.infer_common_code:
             from src.backend.engines.mvp.starter_code import StarterCodeRemover
@@ -489,10 +486,11 @@ class BatchDetectionService:
         Achieves 3-5x speedup by comparing multiple pairs concurrently.
         Thread-safe: each pair gets its own CodeHighlighter instance.
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from src.backend.engines.similarity.code_matching import CodeHighlighter
         import os
         import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        from src.backend.engines.similarity.code_matching import CodeHighlighter
 
         # Auto-configure workers: min(8, CPU count) for balanced throughput
         if max_workers is None:

@@ -3,10 +3,9 @@
 Generates real-time dashboards, performance metrics, and operational insights
 for system monitoring and decision-making.
 """
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timedelta
 import json
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -14,10 +13,10 @@ class PerformanceMetric:
     """A single performance metric with trend information."""
     name: str
     current_value: float
-    previous_value: Optional[float] = None
+    previous_value: float | None = None
     unit: str = ""
-    threshold_warning: Optional[float] = None
-    threshold_critical: Optional[float] = None
+    threshold_warning: float | None = None
+    threshold_critical: float | None = None
 
     @property
     def trend(self) -> str:
@@ -31,7 +30,7 @@ class PerformanceMetric:
         return "stable"
 
     @property
-    def trend_percentage(self) -> Optional[float]:
+    def trend_percentage(self) -> float | None:
         """Calculate trend percentage change."""
         if self.previous_value is None or self.previous_value == 0:
             return None
@@ -46,7 +45,7 @@ class PerformanceMetric:
             return "warning"
         return "healthy"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "name": self.name,
@@ -65,13 +64,13 @@ class EngineStatus:
     engine_name: str
     engine_version: str
     is_active: bool
-    last_execution: Optional[str] = None
+    last_execution: str | None = None
     success_rate: float = 100.0
     avg_execution_time_ms: float = 0.0
     error_count: int = 0
-    metrics: List[PerformanceMetric] = field(default_factory=list)
+    metrics: list[PerformanceMetric] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "engine_name": self.engine_name,
@@ -97,7 +96,7 @@ class SystemHealth:
     total_engines: int
     last_updated: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "status": self.status,
@@ -123,10 +122,10 @@ class OperationalReport:
         report_id: str,
         timestamp: str,
         system_health: SystemHealth,
-        engine_statuses: List[EngineStatus],
-        performance_metrics: List[PerformanceMetric],
-        alerts: Optional[List[Dict[str, Any]]] = None,
-        recommendations: Optional[List[str]] = None
+        engine_statuses: list[EngineStatus],
+        performance_metrics: list[PerformanceMetric],
+        alerts: list[dict[str, Any]] | None = None,
+        recommendations: list[str] | None = None
     ):
         """Initialize operational report.
 
@@ -147,7 +146,7 @@ class OperationalReport:
         self.alerts = alerts or []
         self.recommendations = recommendations or []
 
-    def get_engine_by_name(self, name: str) -> Optional[EngineStatus]:
+    def get_engine_by_name(self, name: str) -> EngineStatus | None:
         """Get engine status by name.
 
         Args:
@@ -161,7 +160,7 @@ class OperationalReport:
                 return engine
         return None
 
-    def get_critical_alerts(self) -> List[Dict[str, Any]]:
+    def get_critical_alerts(self) -> list[dict[str, Any]]:
         """Get only critical alerts.
 
         Returns:
@@ -169,7 +168,7 @@ class OperationalReport:
         """
         return [a for a in self.alerts if a.get("severity") == "critical"]
 
-    def get_warning_alerts(self) -> List[Dict[str, Any]]:
+    def get_warning_alerts(self) -> list[dict[str, Any]]:
         """Get only warning alerts.
 
         Returns:
@@ -201,7 +200,7 @@ class OperationalReport:
         }
         return json.dumps(dashboard_data, indent=2)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary.
 
         Returns:
@@ -218,7 +217,7 @@ class OperationalReport:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'OperationalReport':
+    def from_dict(cls, data: dict[str, Any]) -> 'OperationalReport':
         """Create report from dictionary.
 
         Args:

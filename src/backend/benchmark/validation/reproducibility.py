@@ -5,14 +5,14 @@ versions, seeds, and checksums needed to recreate a run.
 """
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import platform
 import sys
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Dict, Any, List, Optional
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -20,7 +20,7 @@ class DependencyInfo:
     """Information about a single dependency."""
     name: str
     version: str
-    location: Optional[str] = None
+    location: str | None = None
 
 
 @dataclass
@@ -28,8 +28,8 @@ class ToolVersionInfo:
     """Version information for a plagiarism detection tool."""
     tool_id: str
     version: str
-    git_hash: Optional[str] = None
-    configuration: Dict[str, Any] = field(default_factory=dict)
+    git_hash: str | None = None
+    configuration: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: int = 300
     memory_limit_mb: int = 4096
 
@@ -39,9 +39,9 @@ class RandomSeedInfo:
     """Random seeds used in the benchmark run."""
     numpy_seed: int = 42
     python_seed: int = 42
-    torch_seed: Optional[int] = None
-    tensorflow_seed: Optional[int] = None
-    tool_specific_seeds: Dict[str, int] = field(default_factory=dict)
+    torch_seed: int | None = None
+    tensorflow_seed: int | None = None
+    tool_specific_seeds: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -64,7 +64,7 @@ class BenchmarkParameters:
     embedding_device: str = "auto"  # "auto", "cuda", "cpu"
     embedding_batch_size: int = 32
     max_workers: int = 4
-    custom_params: Dict[str, Any] = field(default_factory=dict)
+    custom_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -87,23 +87,23 @@ class ReproducibilityManifest:
     platform_release: str = ""
 
     # Dependencies
-    dependencies: List[DependencyInfo] = field(default_factory=list)
+    dependencies: list[DependencyInfo] = field(default_factory=list)
 
     # Tool versions
-    tool_versions: List[ToolVersionInfo] = field(default_factory=list)
+    tool_versions: list[ToolVersionInfo] = field(default_factory=list)
 
     # Random seeds
     random_seeds: RandomSeedInfo = field(default_factory=RandomSeedInfo)
 
     # Dataset information
-    dataset_checksums: List[DatasetChecksum] = field(default_factory=list)
+    dataset_checksums: list[DatasetChecksum] = field(default_factory=list)
 
     # Benchmark parameters
     parameters: BenchmarkParameters = field(default_factory=BenchmarkParameters)
 
     # Results location
     results_path: str = ""
-    results_checksum: Optional[str] = None
+    results_checksum: str | None = None
 
     # Metadata
     created_by: str = "benchmark-system"
@@ -140,7 +140,7 @@ class ReproducibilityManifest:
         self,
         name: str,
         version: str,
-        location: Optional[str] = None,
+        location: str | None = None,
     ) -> None:
         """Add a dependency to the manifest.
 
@@ -157,8 +157,8 @@ class ReproducibilityManifest:
         self,
         tool_id: str,
         version: str,
-        git_hash: Optional[str] = None,
-        configuration: Optional[Dict[str, Any]] = None,
+        git_hash: str | None = None,
+        configuration: dict[str, Any] | None = None,
         timeout_seconds: int = 300,
         memory_limit_mb: int = 4096,
     ) -> None:
@@ -210,7 +210,7 @@ class ReproducibilityManifest:
             )
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert manifest to dictionary.
 
         Returns:

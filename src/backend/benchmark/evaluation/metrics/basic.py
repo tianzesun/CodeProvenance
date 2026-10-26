@@ -4,7 +4,6 @@ Provides standard precision, recall, F1, and accuracy metrics.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 
 
@@ -110,7 +109,7 @@ def accuracy(tp: int, tn: int, fp: int, fn: int) -> float:
 def compute_confusion_matrix(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Compute confusion matrix from binary labels.
     
     Args:
@@ -129,8 +128,8 @@ def compute_confusion_matrix(
 
 
 def compute_metrics_from_confusion(
-    confusion: Dict[str, int],
-) -> Dict[str, float]:
+    confusion: dict[str, int],
+) -> dict[str, float]:
     """Compute all metrics from confusion matrix.
 
     Reports both ROC-convention rates so the benchmark taxonomy's §1 metrics
@@ -172,7 +171,7 @@ def compute_metrics_from_confusion(
 def compute_metrics(
     y_true: np.ndarray,
     y_pred: np.ndarray,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Compute all classification metrics from binary labels.
     
     Args:

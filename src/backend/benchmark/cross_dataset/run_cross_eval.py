@@ -84,10 +84,10 @@ def main():
     )
     args = parser.parse_args()
 
-    from src.backend.benchmark.cross_dataset.dataset_registry import DatasetRegistry
-    from src.backend.benchmark.cross_dataset.dataset_catalog import DatasetCatalog
-    from src.backend.benchmark.cross_dataset.tool_adapters import ALL_TOOLS
     from src.backend.benchmark.cross_dataset.cross_eval import CrossDatasetEvaluator
+    from src.backend.benchmark.cross_dataset.dataset_catalog import DatasetCatalog
+    from src.backend.benchmark.cross_dataset.dataset_registry import DatasetRegistry
+    from src.backend.benchmark.cross_dataset.tool_adapters import ALL_TOOLS
 
     DatasetCatalog.register_all()
 

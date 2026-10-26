@@ -16,8 +16,7 @@ Usage:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -35,7 +34,7 @@ class HeatmapConfig:
         max_tokens: Maximum number of tokens to display.
         output_format: Output format (png, pdf, svg).
     """
-    figsize: Tuple[int, int] = (15, 6)
+    figsize: tuple[int, int] = (15, 6)
     dpi: int = 150
     colormap: str = "YlOrRd"
     highlight_threshold: float = 0.8
@@ -55,7 +54,7 @@ class TokenHeatmapGenerator:
         generator.generate(code_a, code_b, similarity_matrix, "output.png")
     """
     
-    def __init__(self, config: Optional[HeatmapConfig] = None):
+    def __init__(self, config: HeatmapConfig | None = None):
         """Initialize heatmap generator.
         
         Args:
@@ -159,7 +158,7 @@ class TokenHeatmapGenerator:
         
         return output_path
     
-    def _tokenize(self, code: str) -> List[str]:
+    def _tokenize(self, code: str) -> list[str]:
         """Tokenize code string.
         
         Args:
@@ -199,9 +198,9 @@ class TokenHeatmapGenerator:
     
     def generate_comparison(
         self,
-        code_pairs: List[Tuple[str, str, str]],
+        code_pairs: list[tuple[str, str, str]],
         output_dir: str,
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate heatmaps for multiple code pairs.
         
         Args:

@@ -17,7 +17,7 @@ import csv
 import os
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.backend.benchmark.pipeline.loader import CanonicalDataset, CodePair
 
@@ -34,7 +34,7 @@ class ExternalDatasetLoader:
         """
         self._data_root = Path(data_root)
         self._rng = random.Random(seed)
-        self._dataset_cache: Dict[str, Any] = {}
+        self._dataset_cache: dict[str, Any] = {}
 
     def _load_hf_dataset(self, dataset_path: str) -> Any:
         """Load HuggingFace dataset from local disk.
@@ -61,7 +61,7 @@ class ExternalDatasetLoader:
         return load_from_disk(dataset_path)
 
     def load_poj104(
-        self, split: str = "test", max_pairs: Optional[int] = None
+        self, split: str = "test", max_pairs: int | None = None
     ) -> CanonicalDataset:
         """Load POJ-104 dataset (Java programs from PKU Online Judge).
 
@@ -83,12 +83,12 @@ class ExternalDatasetLoader:
             self._dataset_cache[cache_key] = ds[split]
             data = self._dataset_cache[cache_key]
 
-        by_label: Dict[int, List[Any]] = {}
+        by_label: dict[int, list[Any]] = {}
         for item in data:
             label_val = int(item.get("label", 0))
             by_label.setdefault(label_val, []).append(item)
 
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         pair_id = 0
 
         if max_pairs:
@@ -147,7 +147,7 @@ class ExternalDatasetLoader:
         )
 
     def load_codexglue_clone(
-        self, split: str = "test", max_pairs: Optional[int] = None
+        self, split: str = "test", max_pairs: int | None = None
     ) -> CanonicalDataset:
         """Load CodeXGLUE Clone Detection dataset (BigCloneBench subset).
 
@@ -164,7 +164,7 @@ class ExternalDatasetLoader:
         ds = self._load_hf_dataset(dataset_path)
         data = ds[split]
 
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         for idx, item in enumerate(data):
             if max_pairs and idx >= max_pairs:
                 break
@@ -185,7 +185,7 @@ class ExternalDatasetLoader:
         )
 
     def load_codexglue_defect(
-        self, split: str = "test", max_pairs: Optional[int] = None
+        self, split: str = "test", max_pairs: int | None = None
     ) -> CanonicalDataset:
         """Load CodeXGLUE Defect Detection dataset (C code).
 
@@ -202,11 +202,11 @@ class ExternalDatasetLoader:
         ds = self._load_hf_dataset(dataset_path)
         data = ds[split]
 
-        by_target: Dict[int, List[Dict[str, Any]]] = {0: [], 1: []}
+        by_target: dict[int, list[dict[str, Any]]] = {0: [], 1: []}
         for item in data:
             by_target.setdefault(int(item.get("target", 0)), []).append(item)
 
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         pair_id = 0
         limit_each = (max_pairs // 4) if max_pairs else 100
 
@@ -279,7 +279,7 @@ class ExternalDatasetLoader:
         samples = [item for item in data if item.get("language") == language]
         samples = samples[:max_functions]
 
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         pair_id = 0
         for i, item_a in enumerate(samples):
             pairs.append(
@@ -316,7 +316,7 @@ class ExternalDatasetLoader:
         )
 
     def load_kaggle_student_code(
-        self, max_pairs: Optional[int] = None
+        self, max_pairs: int | None = None
     ) -> CanonicalDataset:
         """Load Kaggle Student Code Similarity dataset.
 
@@ -330,7 +330,7 @@ class ExternalDatasetLoader:
         if not dataset_path.exists():
             raise FileNotFoundError(f"Kaggle dataset not found at {dataset_path}")
 
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         pair_id = 0
         # Try different CSV file names
         csv_files = [
@@ -426,7 +426,7 @@ class ExternalDatasetLoader:
         )
 
     def load_human_eval(
-        self, split: str = "test", max_pairs: Optional[int] = None
+        self, split: str = "test", max_pairs: int | None = None
     ) -> CanonicalDataset:
         """Load HumanEval dataset (Python coding problems).
 
@@ -444,7 +444,7 @@ class ExternalDatasetLoader:
         ds = self._load_hf_dataset(dataset_path)
         data = ds[split]
 
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         pair_id = 0
 
         # Create positive pairs from problems with similar prompts
@@ -499,7 +499,7 @@ class ExternalDatasetLoader:
         )
 
     def load_mbpp(
-        self, split: str = "test", max_pairs: Optional[int] = None
+        self, split: str = "test", max_pairs: int | None = None
     ) -> CanonicalDataset:
         """Load MBPP dataset (Python programming problems).
 
@@ -516,7 +516,7 @@ class ExternalDatasetLoader:
         ds = self._load_hf_dataset(dataset_path)
         data = ds[split]
 
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         pair_id = 0
 
         # Create pairs from different problems (mostly negative)
@@ -546,7 +546,7 @@ class ExternalDatasetLoader:
         )
 
     def load_bigclonebench(
-        self, split: str = "test", max_pairs: Optional[int] = None
+        self, split: str = "test", max_pairs: int | None = None
     ) -> CanonicalDataset:
         """Load BigCloneBench subset (Java clone pairs).
 
@@ -577,27 +577,27 @@ class ExternalDatasetLoader:
             )
 
     def _load_bigclonebench_local(
-        self, path: str, split: str, max_pairs: Optional[int]
+        self, path: str, split: str, max_pairs: int | None
     ) -> CanonicalDataset:
         ds = self._load_hf_dataset(path)
         data = ds[split]
         return self._build_bigclonebench_pairs(data, max_pairs)
 
     def _load_bigclonebench_hf(
-        self, ds, split: str, max_pairs: Optional[int]
+        self, ds, split: str, max_pairs: int | None
     ) -> CanonicalDataset:
         data = ds[split]
         return self._build_bigclonebench_pairs(data, max_pairs)
 
     def _build_bigclonebench_pairs(
-        self, data, max_pairs: Optional[int]
+        self, data, max_pairs: int | None
     ) -> CanonicalDataset:
-        by_label: Dict[int, List[Any]] = {}
+        by_label: dict[int, list[Any]] = {}
         for item in data:
             label_val = int(item.get("label", 0))
             by_label.setdefault(label_val, []).append(item)
 
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         pair_id = 0
 
         if max_pairs:
@@ -664,7 +664,7 @@ class ExternalDatasetLoader:
     def load_poolc_600k_python(
         self,
         split: str = "test",
-        max_pairs: Optional[int] = None,
+        max_pairs: int | None = None,
         streaming: bool = False,
     ) -> CanonicalDataset:
         """Load PoolC 600k Python clone detection dataset.
@@ -698,14 +698,14 @@ class ExternalDatasetLoader:
             )
 
     def _load_poolc_local(
-        self, path: str, split: str, max_pairs: Optional[int]
+        self, path: str, split: str, max_pairs: int | None
     ) -> CanonicalDataset:
         ds = self._load_hf_dataset(path)
         data = ds[split]
         return self._build_poolc_pairs(data, max_pairs)
 
-    def _build_poolc_pairs(self, data, max_pairs: Optional[int]) -> CanonicalDataset:
-        pairs: List[CodePair] = []
+    def _build_poolc_pairs(self, data, max_pairs: int | None) -> CanonicalDataset:
+        pairs: list[CodePair] = []
         pair_id = 0
 
         if max_pairs:
@@ -729,7 +729,7 @@ class ExternalDatasetLoader:
         )
 
     def load_google_codejam(
-        self, split: str = "test", max_pairs: Optional[int] = None
+        self, split: str = "test", max_pairs: int | None = None
     ) -> CanonicalDataset:
         """Load Google Code Jam dataset (Python solutions).
 
@@ -760,27 +760,27 @@ class ExternalDatasetLoader:
             )
 
     def _load_codejam_local(
-        self, path: str, split: str, max_pairs: Optional[int]
+        self, path: str, split: str, max_pairs: int | None
     ) -> CanonicalDataset:
         ds = self._load_hf_dataset(path)
         data = ds[split]
         return self._build_codejam_pairs(data, max_pairs)
 
     def _load_codejam_hf(
-        self, ds, split: str, max_pairs: Optional[int]
+        self, ds, split: str, max_pairs: int | None
     ) -> CanonicalDataset:
         data = list(ds) if hasattr(ds, "__iter__") else ds[split]
         return self._build_codejam_pairs(data, max_pairs)
 
-    def _build_codejam_pairs(self, data, max_pairs: Optional[int]) -> CanonicalDataset:
-        solutions: Dict[str, List[str]] = {}
+    def _build_codejam_pairs(self, data, max_pairs: int | None) -> CanonicalDataset:
+        solutions: dict[str, list[str]] = {}
         for item in data:
             problem = item.get("name", item.get("problem_id", "unknown"))
             code = item.get("solution", item.get("code", ""))
             if code.strip():
                 solutions.setdefault(problem, []).append(code)
 
-        pairs: List[CodePair] = []
+        pairs: list[CodePair] = []
         pair_id = 0
         for problem, codes in solutions.items():
             if max_pairs and pair_id >= max_pairs:
@@ -815,7 +815,7 @@ class ExternalDatasetLoader:
         self,
         name: str,
         split: str = "test",
-        max_pairs: Optional[int] = None,
+        max_pairs: int | None = None,
     ) -> CanonicalDataset:
         """Load dataset by name (dispatches to appropriate loader).
 

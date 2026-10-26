@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from src.backend.benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
-from src.backend.benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine, HybridEngine
 from src.backend.benchmark.normalizer.canonicalizer import CanonicalComparePipeline, Canonicalizer
+from src.backend.benchmark.similarity.engines import ASTEngine, HybridEngine, TokenWinnowingEngine
 
 
 class ComparativeBenchmarkRunner:
@@ -26,7 +26,7 @@ class ComparativeBenchmarkRunner:
         type4: int = 30,
         non_clone: int = 100,
         seed: int = 42,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run comparative benchmark."""
         generator = SyntheticDatasetGenerator(seed=seed)
         dataset = generator.generate_pair_count(type1, type2, type3, type4, non_clone)
@@ -43,13 +43,13 @@ class ComparativeBenchmarkRunner:
             for name, engine in base_engines.items()
         }
 
-        all_engines: Dict[str, Any] = {**base_engines, **canon_engines}
-        results: Dict[str, Dict[str, Any]] = {}
+        all_engines: dict[str, Any] = {**base_engines, **canon_engines}
+        results: dict[str, dict[str, Any]] = {}
 
         for engine_name, engine in all_engines.items():
             tp = fp = tn = fn = 0
-            type_tp: Dict[int, int] = {}
-            type_fn: Dict[int, int] = {}
+            type_tp: dict[int, int] = {}
+            type_fn: dict[int, int] = {}
 
             for pair in dataset.pairs:
                 score = engine.compare(pair.code_a, pair.code_b)
@@ -70,12 +70,12 @@ class ComparativeBenchmarkRunner:
             rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
             f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
 
-            type_pairs: Dict[int, int] = {}
+            type_pairs: dict[int, int] = {}
             for p in dataset.pairs:
                 if p.label == 1:
                     type_pairs[p.clone_type] = type_pairs.get(p.clone_type, 0) + 1
 
-            type_recall: Dict[int, float] = {}
+            type_recall: dict[int, float] = {}
             for ct, total in type_pairs.items():
                 ct_tp = type_tp.get(ct, 0)
                 type_recall[ct] = ct_tp / total if total > 0 else 0.0

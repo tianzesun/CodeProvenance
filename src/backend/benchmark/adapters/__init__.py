@@ -4,19 +4,18 @@ Adapters wrap external tools to make them compatible with the benchmark interfac
 """
 
 # Legacy adapter (backward compatibility)
+from .adapter_registry import adapter_registry, initialize_registry
+from .ast_baseline import ASTBaselineAdapter
 from .codeprovenance_engine import CodeProvenanceAdapter as CodeProvenanceEngine
+from .dolos_adapter import DolosBenchmarkEngine
 
 # New registry-based adapters (versioned strategy pattern)
-
 # External tool adapters
 from .jplag_adapter import JPlagAdapter as JPlagBenchmarkEngine
+from .lexical_baseline import LexicalBaselineAdapter
+from .moss_adapter import MossAdapter as MossBenchmarkEngine
 from .nicad_adapter import NiCadAdapter as NiCadBenchmarkEngine
 from .pmd_adapter import PMDBenchmarkEngine
-from .moss_adapter import MossAdapter as MossBenchmarkEngine
-from .dolos_adapter import DolosBenchmarkEngine
-from .lexical_baseline import LexicalBaselineAdapter
-from .ast_baseline import ASTBaselineAdapter
-from .adapter_registry import adapter_registry, initialize_registry
 
 _REGISTRY_READY = False
 

@@ -18,21 +18,20 @@ Paper-ready evaluation protocol:
 - Inter-tool agreement metrics
 """
 from __future__ import annotations
-import ast
+
 import random
-import numpy as np
-from typing import Dict, List, Tuple, Any, Optional, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 from src.backend.benchmark.generators.utils.rename_utils import rename_identifiers
 from src.backend.benchmark.generators.utils.transform_utils import (
-    reorder_statements,
     add_dead_code,
     convert_loops,
+    reorder_statements,
 )
-from src.backend.benchmark.generators.utils.ast_utils import parse_code, unparse_code
-
 
 TRANSFORMATIONS = {
     "T1": rename_identifiers,
@@ -53,12 +52,12 @@ TRANSFORMATION_NAMES = {
 class RobustnessResult:
     """Result of robustness testing."""
     original_score: float
-    transformed_scores: Dict[str, float]
+    transformed_scores: dict[str, float]
     variance: float
     robustness_score: float
-    transformation_impact: Dict[str, float]
+    transformation_impact: dict[str, float]
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "original_score": round(self.original_score, 4),
             "transformed_scores": {k: round(v, 4) for k, v in self.transformed_scores.items()},
@@ -75,11 +74,11 @@ class ClonePair:
     code_b: str
     label: int  # 0-4 following taxonomy: C0-C4
     clone_type: str
-    transformations: List[str] = field(default_factory=list)
+    transformations: list[str] = field(default_factory=list)
     
     def apply_transformations(self, 
-                              transformations: List[str], 
-                              seed: int = 42) -> 'ClonePair':
+                              transformations: list[str], 
+                              seed: int = 42) -> ClonePair:
         """Apply transformations to code_b."""
         rng = random.Random(seed)
         transformed = self.code_b
@@ -96,7 +95,7 @@ class ClonePair:
             transformations=transformations
         )
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "code_a": self.code_a,
             "code_b": self.code_b,
@@ -110,7 +109,7 @@ class RobustnessTester:
     """Tests detector robustness under semantic-preserving transformations."""
     
     def __init__(self, detector: Callable[[str, str], float], 
-                 transformations: Optional[List[str]] = None):
+                 transformations: list[str] | None = None):
         """
         Args:
             detector: Function that takes two code strings and returns similarity score
@@ -152,7 +151,7 @@ class RobustnessTester:
             transformation_impact=transformation_impact
         )
     
-    def test_dataset(self, pairs: List[ClonePair]) -> Dict[str, Any]:
+    def test_dataset(self, pairs: list[ClonePair]) -> dict[str, Any]:
         """Test robustness across an entire dataset."""
         results = []
         per_transformation_impact = {t: [] for t in self.transformations}
@@ -181,7 +180,7 @@ class RobustnessTester:
 
 
 def generate_transformed_clone(original: str, 
-                               transformation_chain: List[str],
+                               transformation_chain: list[str],
                                seed: int = 42) -> str:
     """Generate a transformed version of code by applying a chain of transformations."""
     result = original
@@ -194,8 +193,8 @@ def generate_transformed_clone(original: str,
     return result
 
 
-def balanced_sample_pairs(pairs: List[ClonePair], 
-                          positive_ratio: float = 0.5) -> List[ClonePair]:
+def balanced_sample_pairs(pairs: list[ClonePair], 
+                          positive_ratio: float = 0.5) -> list[ClonePair]:
     """Sample balanced dataset with given positive/negative ratio."""
     positives = [p for p in pairs if p.label >= 2]  # C2+ are positive
     negatives = [p for p in pairs if p.label < 2]   # C0/C1 are negative
@@ -213,9 +212,9 @@ def balanced_sample_pairs(pairs: List[ClonePair],
     return sampled
 
 
-def stratified_evaluation(scores: List[float], 
-                          labels: List[int],
-                          thresholds: Optional[List[float]] = None) -> Dict[str, Any]:
+def stratified_evaluation(scores: list[float], 
+                          labels: list[int],
+                          thresholds: list[float] | None = None) -> dict[str, Any]:
     """
     Paper-ready stratified evaluation.
     
@@ -226,10 +225,9 @@ def stratified_evaluation(scores: List[float],
     - Per-clone-type performance
     """
     from sklearn.metrics import (
-        precision_recall_curve,
-        roc_auc_score,
         average_precision_score,
         confusion_matrix,
+        roc_auc_score,
     )
     
     if thresholds is None:

@@ -2,10 +2,9 @@
 
 Provides human-readable HTML reports for visualization and sharing.
 """
-from pathlib import Path
-from typing import Dict, Any, List
 from datetime import datetime
-
+from pathlib import Path
+from typing import Any
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html>
@@ -53,8 +52,8 @@ class HTMLReportWriter:
     def write(
         self,
         title: str,
-        results: Dict[str, Any],
-        metadata: Dict[str, Any] = None
+        results: dict[str, Any],
+        metadata: dict[str, Any] = None
     ) -> str:
         """Write results to HTML file.
         
@@ -85,7 +84,7 @@ class HTMLReportWriter:
         
         return str(self.output_path)
     
-    def _build_summary_metrics(self, metrics: Dict[str, float]) -> str:
+    def _build_summary_metrics(self, metrics: dict[str, float]) -> str:
         """Build summary metrics HTML."""
         items = []
         for name, value in metrics.items():
@@ -98,7 +97,7 @@ class HTMLReportWriter:
                 )
         return "".join(items)
     
-    def _build_results_table(self, engine_results: List[Dict[str, Any]]) -> str:
+    def _build_results_table(self, engine_results: list[dict[str, Any]]) -> str:
         """Build results table HTML."""
         if not engine_results:
             return "<p>No engine results available.</p>"

@@ -6,9 +6,9 @@ Used as an intermediate reference baseline for benchmark validation.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
 import ast
 from collections import Counter
+from typing import Any
 
 from .base_adapter import BaseAdapter
 
@@ -22,7 +22,7 @@ class ASTBaselineAdapter(BaseAdapter):
     name = "ast_baseline"
     version = "1.0.0"
 
-    def run(self, dataset: Any) -> Dict[str, Any]:
+    def run(self, dataset: Any) -> dict[str, Any]:
         """Run AST baseline detection on dataset."""
         predictions = {}
 
@@ -54,7 +54,7 @@ class ASTBaselineAdapter(BaseAdapter):
 
         return total_intersection / total_union if total_union > 0 else 0.0
 
-    def _flatten_ast_types(self, node: ast.AST) -> List[str]:
+    def _flatten_ast_types(self, node: ast.AST) -> list[str]:
         """Recursively flatten AST into node type names."""
         types = [type(node).__name__]
 

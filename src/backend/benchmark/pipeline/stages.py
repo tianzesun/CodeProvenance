@@ -4,9 +4,8 @@ Each stage is a pure function: output = stage(input, config) -> output
 No backward dependencies. Only forward flow allowed.
 """
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass, field
-
+from typing import Any
 
 # =============================================================================
 # Data structures for pipeline flow
@@ -16,10 +15,10 @@ from dataclasses import dataclass, field
 class ParsedCode:
     """Structured representation of parsed code."""
     code_id: str
-    tokens: List[str] = field(default_factory=list)
+    tokens: list[str] = field(default_factory=list)
     ast: Any = None
     raw_code: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     
     def is_valid(self) -> bool:
         """Check if parsed code is valid."""
@@ -32,7 +31,7 @@ class SimilarityResult:
     id_a: str
     id_b: str
     score: float  # [0, 1]
-    label: Optional[int] = None
+    label: int | None = None
     engine_name: str = ""
     clone_type: int = 0  # 1-4 for clones, 0 for non-clone
 
@@ -74,10 +73,9 @@ class PipelineStage(ABC):
     @abstractmethod
     def name(self) -> str:
         """Return stage name."""
-        pass
     
     @abstractmethod
-    def execute(self, input_data: Any, config: Dict[str, Any]) -> Any:
+    def execute(self, input_data: Any, config: dict[str, Any]) -> Any:
         """Execute stage with input data.
         
         Args:
@@ -87,7 +85,6 @@ class PipelineStage(ABC):
         Returns:
             Output for next stage.
         """
-        pass
 
 
 # =============================================================================
@@ -113,7 +110,7 @@ class NormalizerStage(PipelineStage):
     def __init__(self, normalizer_func=None):
         self._normalizer_func = normalizer_func
     
-    def execute(self, input_data: List[str], config: Dict[str, Any]) -> List[str]:
+    def execute(self, input_data: list[str], config: dict[str, Any]) -> list[str]:
         if self._normalizer_func:
             return [self._normalizer_func(code) for code in input_data]
         # Default: strip whitespace
@@ -134,7 +131,7 @@ class ParserStage(PipelineStage):
     def name(self) -> str:
         return "parser"
     
-    def execute(self, input_data: Tuple[str, str], config: Dict[str, Any]) -> ParsedCode:
+    def execute(self, input_data: tuple[str, str], config: dict[str, Any]) -> ParsedCode:
         code_id, code = input_data
         # Parse into tokens and AST
         return ParsedCode(
@@ -162,8 +159,8 @@ class SimilarityStage(PipelineStage):
     
     def execute(
         self,
-        input_data: Tuple[ParsedCode, ParsedCode, Any],
-        config: Dict[str, Any]
+        input_data: tuple[ParsedCode, ParsedCode, Any],
+        config: dict[str, Any]
     ) -> SimilarityResult:
         code_a, code_b, engine = input_data
         
@@ -201,7 +198,7 @@ class SimilarityStage(PipelineStage):
         
         engine_name = ""
         if hasattr(engine, 'name'):
-            name_attr = getattr(engine, 'name')
+            name_attr = engine.name
             engine_name = name_attr() if callable(name_attr) else name_attr
         
         clone_type = config.get("clone_type", 0)
@@ -236,9 +233,9 @@ class EvaluationStage(PipelineStage):
     
     def execute(
         self,
-        input_data: Tuple[List[SimilarityResult], Dict[Tuple[str, str], int]],
-        config: Dict[str, Any]
-    ) -> List[SimilarityResult]:
+        input_data: tuple[list[SimilarityResult], dict[tuple[str, str], int]],
+        config: dict[str, Any]
+    ) -> list[SimilarityResult]:
         results, ground_truth = input_data
         
         evaluated = []
@@ -274,10 +271,10 @@ class MetricsStage(PipelineStage):
     
     def execute(
         self,
-        input_data: List[SimilarityResult],
-        config: Dict[str, Any]
+        input_data: list[SimilarityResult],
+        config: dict[str, Any]
     ) -> MetricsResult:
-        from src.backend.benchmark.evaluation.metrics import precision, recall, f1_score, accuracy
+        from src.backend.benchmark.evaluation.metrics import accuracy, f1_score, precision, recall
         
         threshold = config.get("threshold", 0.5)
         
@@ -360,9 +357,9 @@ class ReportingStage(PipelineStage):
     
     def execute(
         self,
-        input_data: Tuple[MetricsResult, Dict[str, Any]],
-        config: Dict[str, Any]
-    ) -> Dict[str, str]:
+        input_data: tuple[MetricsResult, dict[str, Any]],
+        config: dict[str, Any]
+    ) -> dict[str, str]:
         from datetime import datetime
         
         metrics, extra_info = input_data

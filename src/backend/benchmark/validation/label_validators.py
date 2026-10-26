@@ -12,8 +12,10 @@ Validation methods:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 import numpy as np
+
 
 @dataclass(frozen=True)
 class LabelValidationResult:
@@ -31,14 +33,14 @@ class LabelValidationResult:
     """
     total_pairs: int
     cohen_kappa: float
-    label_distribution: Dict[int, int]
+    label_distribution: dict[int, int]
     is_balanced: bool
-    suspicious_pairs: List[int]
+    suspicious_pairs: list[int]
     quality_score: float
     is_valid: bool
-    issues: List[str]
+    issues: list[str]
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "total_pairs": self.total_pairs,
@@ -65,9 +67,9 @@ class LabelValidator:
     
     def validate(
         self,
-        labels: List[int],
-        rater1: Optional[List[int]] = None,
-        rater2: Optional[List[int]] = None,
+        labels: list[int],
+        rater1: list[int] | None = None,
+        rater2: list[int] | None = None,
     ) -> LabelValidationResult:
         """Validate label quality.
         
@@ -80,7 +82,7 @@ class LabelValidator:
             LabelValidationResult with quality metrics.
         """
         labels_arr = np.array(labels)
-        issues: List[str] = []
+        issues: list[str] = []
         
         # Check label distribution
         unique, counts = np.unique(labels_arr, return_counts=True)
@@ -138,8 +140,8 @@ class LabelValidator:
     def _compute_cohen_kappa(
         self,
         labels: np.ndarray,
-        rater1: Optional[List[int]],
-        rater2: Optional[List[int]],
+        rater1: list[int] | None,
+        rater2: list[int] | None,
     ) -> float:
         """Compute Cohen's kappa between three raters.
         
@@ -183,8 +185,8 @@ class LabelValidator:
     
     @staticmethod
     def calculate_cohens_kappa(
-        rater1: List[int],
-        rater2: List[int],
+        rater1: list[int],
+        rater2: list[int],
     ) -> float:
         """Static method to calculate Cohen's kappa between two raters.
         
@@ -221,7 +223,7 @@ class LabelValidator:
     
     @staticmethod
     def check_label_consistency(
-        labels_by_pair: Dict[str, List[int]],
+        labels_by_pair: dict[str, list[int]],
         tolerance: float = 0.0,
     ) -> Any:
         """Check label consistency across pairs.
@@ -253,7 +255,7 @@ class LabelValidator:
     
     @staticmethod
     def check_class_balance(
-        labels: List[int],
+        labels: list[int],
         min_minority_rate: float = 0.3,
     ) -> Any:
         """Check class balance in labels.
@@ -284,7 +286,7 @@ class LabelValidator:
         return BalanceResult(passed, min_fraction)
     
     @staticmethod
-    def check_duplicate_pairs(pair_ids: List[str]) -> Any:
+    def check_duplicate_pairs(pair_ids: list[str]) -> Any:
         """Check for duplicate pair IDs.
         
         Args:
@@ -307,9 +309,9 @@ class LabelValidator:
     def _detect_suspicious_pairs(
         self,
         labels: np.ndarray,
-        rater1: Optional[List[int]] = None,
-        rater2: Optional[List[int]] = None,
-    ) -> List[int]:
+        rater1: list[int] | None = None,
+        rater2: list[int] | None = None,
+    ) -> list[int]:
         """Detect potentially mislabeled pairs.
         
         Args:
@@ -320,7 +322,7 @@ class LabelValidator:
         Returns:
             Indices of suspicious pairs.
         """
-        suspicious: List[int] = []
+        suspicious: list[int] = []
         
         # Check for disagreement between raters
         if rater1 is not None and rater2 is not None:
@@ -328,11 +330,8 @@ class LabelValidator:
             rater2_arr = np.array(rater2)
             
             for i, (label, r1, r2) in enumerate(zip(labels, rater1_arr, rater2_arr)):
-                # If all three disagree, flag as suspicious
-                if label != r1 and label != r2 and r1 != r2:
-                    suspicious.append(i)
-                # If 2-out-of-3 agree but primary label disagrees
-                elif (r1 == r2 and r1 != label):
+                # Flag if all three disagree, or if 2-out-of-3 agree but primary label disagrees
+                if (label != r1 and label != r2 and r1 != r2) or (r1 == r2 and r1 != label):
                     suspicious.append(i)
         
         return suspicious
@@ -380,12 +379,12 @@ class LabelValidationReport:
     """
     dataset_id: str
     total_pairs: int
-    results: List[LabelValidationResult]
+    results: list[LabelValidationResult]
     all_passed: bool
     certification_level: float
     summary: str
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "dataset_id": self.dataset_id,
@@ -403,10 +402,10 @@ class LabelValidatorWithComplete:
     @staticmethod
     def validate_complete_dataset(
         dataset_id: str,
-        pairs: List[Dict[str, Any]],
-        labels: List[int],
-        pair_ids: List[str],
-        inter_rater_labels: Optional[Dict[str, List[int]]] = None,
+        pairs: list[dict[str, Any]],
+        labels: list[int],
+        pair_ids: list[str],
+        inter_rater_labels: dict[str, list[int]] | None = None,
     ) -> LabelValidationReport:
         """Validate a complete dataset with all checks.
         
@@ -420,7 +419,7 @@ class LabelValidatorWithComplete:
         Returns:
             LabelValidationReport with all validation results.
         """
-        results: List[LabelValidationResult] = []
+        results: list[LabelValidationResult] = []
         
         # Convert pairs to tuples
         code_pairs = [(p["code_a"], p["code_b"]) for p in pairs]
@@ -468,9 +467,9 @@ class DatasetLabelValidator:
     
     @staticmethod
     def validate_dataset(
-        pairs: List[Tuple[str, str]],
-        labels: List[int],
-        alternative_labels: Optional[List[List[int]]] = None,
+        pairs: list[tuple[str, str]],
+        labels: list[int],
+        alternative_labels: list[list[int]] | None = None,
     ) -> LabelValidationResult:
         """Validate labels for a dataset of code pairs.
         

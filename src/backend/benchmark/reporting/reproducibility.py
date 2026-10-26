@@ -5,10 +5,10 @@ Required for publishable, reproducible research.
 """
 import json
 import subprocess
-from pathlib import Path
-from typing import Dict, Any, Optional
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -73,7 +73,7 @@ class ReproducibilityMetadata:
     engine_version: str = ""
     dataset_name: str = ""
     dataset_version: str = ""
-    config_snapshot: Dict[str, Any] = field(default_factory=dict)
+    config_snapshot: dict[str, Any] = field(default_factory=dict)
     python_version: str = ""
     platform: str = ""
     
@@ -88,7 +88,7 @@ class ReproducibilityMetadata:
         engine_version: str = "",
         dataset_name: str = "",
         dataset_version: str = "",
-        config: Optional[Dict[str, Any]] = None
+        config: dict[str, Any] | None = None
     ) -> "ReproducibilityMetadata":
         """Capture full reproducibility metadata.
         
@@ -102,8 +102,8 @@ class ReproducibilityMetadata:
         Returns:
             ReproducibilityMetadata instance.
         """
-        import sys
         import platform as plat
+        import sys
         
         return cls(
             engine_name=engine_name,
@@ -116,7 +116,7 @@ class ReproducibilityMetadata:
             platform=plat.platform()
         )
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary.
         
         Returns:

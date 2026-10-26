@@ -1,9 +1,10 @@
 """MOSS Parser - parses HTML output to StandardOutput."""
-from typing import List, Dict, Any, Optional
-from pathlib import Path
-import re
 import html as html_mod
-from src.backend.benchmark.parsers.base_parser import BaseToolParser, StandardOutput, ParserError
+import re
+from pathlib import Path
+from typing import Any
+
+from src.backend.benchmark.parsers.base_parser import BaseToolParser, ParserError, StandardOutput
 
 
 class MossParser(BaseToolParser):
@@ -34,7 +35,7 @@ class MossParser(BaseToolParser):
         pairs = self.filter_pairs(pairs, self.threshold)
         return StandardOutput(tool=self.tool_name, dataset=self.dataset, pairs=pairs)
     
-    def _find_html_file(self, path: Path) -> Optional[Path]:
+    def _find_html_file(self, path: Path) -> Path | None:
         if path.is_file() and path.suffix in (".html", ".htm"):
             return path
         if path.is_dir():
@@ -44,7 +45,7 @@ class MossParser(BaseToolParser):
                         return f
         return None
     
-    def _parse_html(self, html_path: Path) -> List[Dict[str, Any]]:
+    def _parse_html(self, html_path: Path) -> list[dict[str, Any]]:
         with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
         pairs = []
@@ -62,7 +63,7 @@ class MossParser(BaseToolParser):
                 pairs.append(self.make_pair(info1["file"], info2["file"], sim))
         return pairs
     
-    def _extract_info(self, cell: str) -> Optional[Dict[str, Any]]:
+    def _extract_info(self, cell: str) -> dict[str, Any] | None:
         txt = html_mod.unescape(cell)
         pct = re.search(r'(\d+(?:\.\d+)?)\s*%', txt)
         if not pct:
@@ -77,7 +78,7 @@ class MossParser(BaseToolParser):
         fp = self.normalize_path(fp)
         return {"file": fp, "sim": float(pct.group(1))} if fp else None
     
-    def _parse_regex(self, html_path: Path) -> List[Dict[str, Any]]:
+    def _parse_regex(self, html_path: Path) -> list[dict[str, Any]]:
         with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
         pairs = []

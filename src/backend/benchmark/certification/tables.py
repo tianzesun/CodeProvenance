@@ -9,24 +9,22 @@ Generates publication-grade tables for:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
-
-import numpy as np
+from typing import Any
 
 
 @dataclass
 class ResultsTable:
     """Table for main results comparison."""
-    engines: List[str] = field(default_factory=list)
-    metrics: Dict[str, List[float]] = field(default_factory=dict)
-    confidence_intervals: Dict[str, List[Tuple[float, float]]] = field(default_factory=dict)
+    engines: list[str] = field(default_factory=list)
+    metrics: dict[str, list[float]] = field(default_factory=dict)
+    confidence_intervals: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
     title: str = "Main Results"
 
     def add_engine(
         self,
         engine_name: str,
-        metrics: Dict[str, float],
-        confidence_intervals: Optional[Dict[str, Tuple[float, float]]] = None,
+        metrics: dict[str, float],
+        confidence_intervals: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         """Add an engine to the table."""
         self.engines.append(engine_name)
@@ -103,7 +101,7 @@ class ResultsTable:
         html.extend(["</tbody>", "</table>"])
         return "\n".join(html)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "title": self.title,
@@ -116,11 +114,11 @@ class ResultsTable:
 @dataclass
 class SignificanceTable:
     """Table for statistical significance tests."""
-    comparisons: List[str] = field(default_factory=list)
-    mcnemar_pvalues: List[float] = field(default_factory=list)
-    wilcoxon_pvalues: List[float] = field(default_factory=list)
-    effect_sizes: List[float] = field(default_factory=list)
-    significant: List[bool] = field(default_factory=list)
+    comparisons: list[str] = field(default_factory=list)
+    mcnemar_pvalues: list[float] = field(default_factory=list)
+    wilcoxon_pvalues: list[float] = field(default_factory=list)
+    effect_sizes: list[float] = field(default_factory=list)
+    significant: list[bool] = field(default_factory=list)
     title: str = "Statistical Significance"
 
     def add_comparison(self, comparison_name: str, mcnemar_pvalue: float, wilcoxon_pvalue: float, effect_size: float, significant: bool) -> None:
@@ -167,7 +165,7 @@ class SignificanceTable:
         html.extend(["</tbody>", "</table>"])
         return "\n".join(html)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {"title": self.title, "comparisons": self.comparisons, "mcnemar_pvalues": self.mcnemar_pvalues, "wilcoxon_pvalues": self.wilcoxon_pvalues, "effect_sizes": self.effect_sizes, "significant": self.significant}
 
@@ -176,12 +174,12 @@ class SignificanceTable:
 class StratifiedTable:
     """Table for stratified analysis results."""
     stratum_name: str = "Stratum"
-    strata: List[Union[int, str]] = field(default_factory=list)
-    metrics: Dict[str, List[float]] = field(default_factory=dict)
-    sample_sizes: List[int] = field(default_factory=list)
+    strata: list[int | str] = field(default_factory=list)
+    metrics: dict[str, list[float]] = field(default_factory=dict)
+    sample_sizes: list[int] = field(default_factory=list)
     title: str = "Stratified Results"
 
-    def add_stratum(self, stratum_value: Union[int, str], metrics: Dict[str, float], sample_size: int = 0) -> None:
+    def add_stratum(self, stratum_value: int | str, metrics: dict[str, float], sample_size: int = 0) -> None:
         """Add a stratum to the table."""
         self.strata.append(stratum_value)
         self.sample_sizes.append(sample_size)
@@ -237,7 +235,7 @@ class StratifiedTable:
         html.extend(["</tbody>", "</table>"])
         return "\n".join(html)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {"title": self.title, "stratum_name": self.stratum_name, "strata": self.strata, "sample_sizes": self.sample_sizes, "metrics": self.metrics}
 

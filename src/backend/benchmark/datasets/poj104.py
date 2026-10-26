@@ -7,9 +7,9 @@ Used for code clone detection and plagiarism detection.
 
 Reference: https://huggingface.co/datasets/code_x_glue_cc_clone_detection_poj104
 """
-from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
 from pathlib import Path
-from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -45,10 +45,10 @@ class POJ104Dataset:
     def __init__(self, data_dir: Path = Path("benchmark/data/poj104")):
         self.data_dir = data_dir
         self.hf_dir = data_dir / "huggingface"
-        self._samples: List[POJ104Sample] = []
+        self._samples: list[POJ104Sample] = []
         self._dataset = None
     
-    def load(self, split: str = "train", max_samples: Optional[int] = None) -> List[POJ104Sample]:
+    def load(self, split: str = "train", max_samples: int | None = None) -> list[POJ104Sample]:
         """
         Load POJ-104 samples from HuggingFace Arrow format.
         
@@ -94,13 +94,13 @@ class POJ104Dataset:
         self._samples = samples
         return samples
     
-    def _get_available_splits(self) -> List[str]:
+    def _get_available_splits(self) -> list[str]:
         """Get available dataset splits."""
         if not self.hf_dir.exists():
             return []
         return [d.name for d in self.hf_dir.iterdir() if d.is_dir()]
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         stats = {
             "name": "POJ-104",
@@ -134,7 +134,7 @@ class POJ104Dataset:
         
         return stats
     
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check dataset availability."""
         return {
             "data_dir": self.data_dir.exists(),

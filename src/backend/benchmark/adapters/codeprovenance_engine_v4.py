@@ -8,7 +8,6 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
 
 from src.backend.benchmark.similarity.base_engine import BaseSimilarityEngine
 
@@ -27,9 +26,9 @@ class Evidence:
     lines_a: int = 0
     lines_b: int = 0
     code_size_ratio: float = 0.0
-    shared_apis: Set[str] = field(default_factory=set)
-    control_flow_a: List[str] = field(default_factory=list)
-    control_flow_b: List[str] = field(default_factory=list)
+    shared_apis: set[str] = field(default_factory=set)
+    control_flow_a: list[str] = field(default_factory=list)
+    control_flow_b: list[str] = field(default_factory=list)
 
     @property
     def is_short_function(self) -> bool:
@@ -49,11 +48,11 @@ class MultiJudgeResult:
     accept: bool
     final_score: float
     risk_level: str
-    rejections: List[str] = field(default_factory=list)
-    judge_results: Dict[str, Judgment] = field(default_factory=dict)
+    rejections: list[str] = field(default_factory=list)
+    judge_results: dict[str, Judgment] = field(default_factory=dict)
 
 
-def extract_apis(code: str) -> Set[str]:
+def extract_apis(code: str) -> set[str]:
     pattern = re.compile(r'\b([a-zA-Z_]\w*)\s*\(')
     exclude = {'if', 'while', 'for', 'switch', 'return', 'def', 'class',
                'lambda', 'with', 'print', 'len', 'range', 'int', 'str', 'float',
@@ -61,17 +60,17 @@ def extract_apis(code: str) -> Set[str]:
     return {m.group(1) for m in pattern.finditer(code) if m.group(1) not in exclude}
 
 
-def extract_control_flow(code: str) -> List[str]:
+def extract_control_flow(code: str) -> list[str]:
     return re.findall(r'\b(if|elif|else|for|while|return|try|except|break|continue|raise|yield)\b', code)
 
 
-def extract_literals(code: str) -> Set[str]:
+def extract_literals(code: str) -> set[str]:
     strings = re.findall(r'["\']([^"\']*)["\']', code)
     numbers = re.findall(r'\b(\d+\.?\d*)\b', code)
     return set(strings) | set(numbers)
 
 
-def extract_identifiers(code: str) -> Set[str]:
+def extract_identifiers(code: str) -> set[str]:
     return set(re.findall(r'\b([a-zA-Z_]\w*)\b', code)) - {
         'def', 'class', 'return', 'if', 'else', 'elif', 'for', 'while',
         'import', 'from', 'try', 'except', 'finally', 'with', 'as',
@@ -79,7 +78,7 @@ def extract_identifiers(code: str) -> Set[str]:
     }
 
 
-def control_flow_similarity(cf_a: List[str], cf_b: List[str]) -> float:
+def control_flow_similarity(cf_a: list[str], cf_b: list[str]) -> float:
     if not cf_a and not cf_b:
         return 1.0
     counter_a = Counter(cf_a)
@@ -95,7 +94,7 @@ def control_flow_similarity(cf_a: List[str], cf_b: List[str]) -> float:
     return 1.0 - (sum(diffs) / len(diffs))
 
 
-def sequence_overlap(seq_a: List[str], seq_b: List[str]) -> float:
+def sequence_overlap(seq_a: list[str], seq_b: list[str]) -> float:
     if not seq_a and not seq_b:
         return 1.0
     set_a, set_b = set(seq_a), set(seq_b)
@@ -106,7 +105,7 @@ def sequence_overlap(seq_a: List[str], seq_b: List[str]) -> float:
     return len(intersection) / len(union) if union else 0.0
 
 
-def compute_semantic_roles(code: str) -> Set[str]:
+def compute_semantic_roles(code: str) -> set[str]:
     roles = set()
     code_lower = code.lower()
     role_patterns = {
@@ -223,7 +222,7 @@ class BehaviorJudge:
         if evidence.control_flow_sim < 0.3:
             rejections.append(f"Behavior divergent (CF={evidence.control_flow_sim:.2f})")
         if evidence.call_graph_sim < 0.2 and evidence.token_sim < 0.2 and evidence.ast_sim < 0.2:
-            rejections.append(f"Call graph mismatch")
+            rejections.append("Call graph mismatch")
         # Only reject semantic role mismatch when structure doesn't match
         if evidence.semantic_role_sim < 0.5 and evidence.control_flow_sim < 0.5:
             if evidence.ast_sim < 0.5:
@@ -354,7 +353,7 @@ class PRLv3:
         self.threshold = AdaptiveThresholdV2()
 
     def evaluate(self, code_a: str, code_b: str,
-                 token_sim: float, ast_sim: float, embedding_sim: float) -> Tuple[bool, float]:
+                 token_sim: float, ast_sim: float, embedding_sim: float) -> tuple[bool, float]:
         evidence = self.extractor.extract(code_a, code_b, token_sim, ast_sim, embedding_sim)
 
         # Fast accept: very strong signals

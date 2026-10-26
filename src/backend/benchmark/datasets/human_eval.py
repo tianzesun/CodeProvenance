@@ -6,9 +6,9 @@ Contains 164 Python programming tasks with prompts, tests, and canonical solutio
 
 Reference: https://huggingface.co/datasets/openai_humaneval
 """
-from typing import Dict, List, Any, Optional
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -43,12 +43,12 @@ class HumanEvalDataset:
     def __init__(self, data_dir: Path = Path("benchmark/data/human_eval")):
         self.data_dir = data_dir
         self.hf_dir = data_dir / "huggingface"
-        self._samples: List[HumanEvalSample] = []
+        self._samples: list[HumanEvalSample] = []
         self._dataset = None
 
     def load(
-        self, split: str = "test", max_samples: Optional[int] = None
-    ) -> List[HumanEvalSample]:
+        self, split: str = "test", max_samples: int | None = None
+    ) -> list[HumanEvalSample]:
         """
         Load HumanEval samples from HuggingFace Arrow format.
 
@@ -94,13 +94,13 @@ class HumanEvalDataset:
         self._samples = samples
         return samples
 
-    def _get_available_splits(self) -> List[str]:
+    def _get_available_splits(self) -> list[str]:
         """Get available dataset splits."""
         if not self.hf_dir.exists():
             return []
         return [d.name for d in self.hf_dir.iterdir() if d.is_dir()]
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         stats = {
             "name": "HumanEval",
@@ -124,7 +124,7 @@ class HumanEvalDataset:
 
         return stats
 
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check dataset availability."""
         return {
             "data_dir": self.data_dir.exists(),

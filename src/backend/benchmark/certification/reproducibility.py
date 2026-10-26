@@ -13,14 +13,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import platform
 import subprocess
 import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import numpy as np
 
@@ -50,9 +49,9 @@ class ReproducibilityInfo:
     scipy_version: str = ""
     platform: str = ""
     timestamp: str = ""
-    environment: Dict[str, str] = field(default_factory=dict)
+    environment: dict[str, str] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
 
@@ -87,7 +86,7 @@ class ReproducibilityInfo:
         return "\n".join(lines)
 
 
-def compute_file_hash(file_path: Union[str, Path], algorithm: str = "sha256") -> str:
+def compute_file_hash(file_path: str | Path, algorithm: str = "sha256") -> str:
     """Compute hash of a file.
 
     Args:
@@ -113,7 +112,7 @@ def compute_file_hash(file_path: Union[str, Path], algorithm: str = "sha256") ->
 
 
 def compute_directory_hash(
-    directory: Union[str, Path],
+    directory: str | Path,
     pattern: str = "*.py",
     algorithm: str = "sha256",
 ) -> str:
@@ -145,7 +144,7 @@ def compute_directory_hash(
     return hasher.hexdigest()
 
 
-def compute_config_hash(config: Dict[str, Any], algorithm: str = "sha256") -> str:
+def compute_config_hash(config: dict[str, Any], algorithm: str = "sha256") -> str:
     """Compute hash of configuration dictionary.
 
     Args:
@@ -161,7 +160,7 @@ def compute_config_hash(config: Dict[str, Any], algorithm: str = "sha256") -> st
 
 
 def compute_data_hash(
-    data: Union[np.ndarray, List[Any]],
+    data: np.ndarray | list[Any],
     algorithm: str = "sha256",
 ) -> str:
     """Compute hash of data array or list.
@@ -242,7 +241,7 @@ def get_package_version(package_name: str) -> str:
     return ""
 
 
-def collect_environment_info() -> Dict[str, str]:
+def collect_environment_info() -> dict[str, str]:
     """Collect environment information.
 
     Returns:
@@ -278,7 +277,7 @@ def collect_environment_info() -> Dict[str, str]:
 
 def compute_reproducibility_hash(
     dataset_hash: str = "",
-    config: Optional[Dict[str, Any]] = None,
+    config: dict[str, Any] | None = None,
     random_seed: int = 42,
 ) -> str:
     """Compute combined reproducibility hash.
@@ -312,10 +311,10 @@ def compute_reproducibility_hash(
 
 def collect_reproducibility_info(
     dataset_hash: str = "",
-    config: Optional[Dict[str, Any]] = None,
+    config: dict[str, Any] | None = None,
     random_seed: int = 42,
     include_code_hash: bool = True,
-    code_directory: Optional[Union[str, Path]] = None,
+    code_directory: str | Path | None = None,
 ) -> ReproducibilityInfo:
     """Collect complete reproducibility information.
 
@@ -381,9 +380,9 @@ def collect_reproducibility_info(
 
 def verify_reproducibility(
     info: ReproducibilityInfo,
-    current_config: Optional[Dict[str, Any]] = None,
+    current_config: dict[str, Any] | None = None,
     current_seed: int = 42,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Verify that current environment matches reproducibility info.
 
     Args:

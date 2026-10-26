@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Optional
-from uuid import UUID
-
 from sqlalchemy.orm import Session
 
-from src.backend.models.database import Student, Enrollment, Course, Assignment
+from src.backend.models.database import Enrollment, Student
 
 
 class StudentService:
@@ -19,7 +16,7 @@ class StudentService:
         organization_id: str,
         email: str,
         full_name: str,
-        student_number: Optional[str] = None,
+        student_number: str | None = None,
     ) -> Student:
         """Create a new student profile."""
         student = Student(
@@ -36,7 +33,7 @@ class StudentService:
     @staticmethod
     def get_student_by_email(
         db: Session, organization_id: str, email: str
-    ) -> Optional[Student]:
+    ) -> Student | None:
         """Get student by email within organization."""
         return (
             db.query(Student)
@@ -47,7 +44,7 @@ class StudentService:
     @staticmethod
     def get_student_by_number(
         db: Session, organization_id: str, student_number: str
-    ) -> Optional[Student]:
+    ) -> Student | None:
         """Get student by student number within organization."""
         return (
             db.query(Student)
@@ -64,7 +61,7 @@ class StudentService:
         organization_id: str,
         email: str,
         full_name: str,
-        student_number: Optional[str] = None,
+        student_number: str | None = None,
     ) -> Student:
         """Get existing student or create new one."""
         # Try email first
@@ -101,7 +98,7 @@ class StudentService:
     @staticmethod
     def get_enrollment(
         db: Session, course_id: str, student_id: str
-    ) -> Optional[Enrollment]:
+    ) -> Enrollment | None:
         """Get enrollment for student in course."""
         return (
             db.query(Enrollment)
@@ -132,10 +129,10 @@ class AssignmentVersionService:
         course_id: str,
         version: int,
         name: str,
-        description: Optional[str] = None,
-        starter_files: Optional[dict] = None,
-        settings: Optional[dict] = None,
-    ) -> "AssignmentVersion":
+        description: str | None = None,
+        starter_files: dict | None = None,
+        settings: dict | None = None,
+    ) -> AssignmentVersion:
         from src.backend.models.database import AssignmentVersion
 
         av = AssignmentVersion(
@@ -153,9 +150,7 @@ class AssignmentVersionService:
         return av
 
     @staticmethod
-    def get_active_version(
-        db: Session, assignment_id: str
-    ) -> Optional["AssignmentVersion"]:
+    def get_active_version(db: Session, assignment_id: str) -> AssignmentVersion | None:
         """Return the single active version of an assignment, if any."""
         from src.backend.models.database import AssignmentVersion
 
@@ -171,7 +166,7 @@ class AssignmentVersionService:
     @staticmethod
     def get_versions_for_assignment(
         db: Session, assignment_id: str
-    ) -> list["AssignmentVersion"]:
+    ) -> list[AssignmentVersion]:
         """Return every version of one assignment, newest version first."""
         from src.backend.models.database import AssignmentVersion
 
@@ -183,9 +178,7 @@ class AssignmentVersionService:
         )
 
     @staticmethod
-    def get_versions_for_course(
-        db: Session, course_id: str
-    ) -> list["AssignmentVersion"]:
+    def get_versions_for_course(db: Session, course_id: str) -> list[AssignmentVersion]:
         """Return every version belonging to one course, newest first."""
         from src.backend.models.database import AssignmentVersion
 
@@ -199,7 +192,7 @@ class AssignmentVersionService:
     @staticmethod
     def get_version(
         db: Session, assignment_id: str, version: int
-    ) -> Optional["AssignmentVersion"]:
+    ) -> AssignmentVersion | None:
         from src.backend.models.database import AssignmentVersion
 
         return (

@@ -142,7 +142,7 @@ class PluginRegistry:
             return cls._names()
 
     @classmethod
-    def list(cls) -> list[str]:  # noqa: A003 (kept for existing callers)
+    def list(cls) -> list[str]:
         """List all registered plugin names (alias of :meth:`names`)."""
         return cls.names()
 

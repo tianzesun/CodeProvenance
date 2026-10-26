@@ -19,7 +19,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 @dataclass
@@ -37,7 +37,7 @@ class ErrorCategory:
     count: int = 0
     avg_score: float = 0.0
     avg_error: float = 0.0
-    examples: List[str] = field(default_factory=list)
+    examples: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -74,12 +74,12 @@ class ErrorReport:
     f1: float = 0.0
     
     # Error breakdown
-    errors_by_type: Dict[str, ErrorCategory] = field(default_factory=dict)
-    errors_by_confidence: Dict[str, ErrorCategory] = field(default_factory=dict)
-    errors_by_characteristic: Dict[str, ErrorCategory] = field(default_factory=dict)
+    errors_by_type: dict[str, ErrorCategory] = field(default_factory=dict)
+    errors_by_confidence: dict[str, ErrorCategory] = field(default_factory=dict)
+    errors_by_characteristic: dict[str, ErrorCategory] = field(default_factory=dict)
     
     # Recommendations
-    recommendations: List[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
     
     def summary(self) -> str:
         """Generate human-readable summary.
@@ -154,7 +154,7 @@ class ErrorReport:
         lines.append("=" * 70)
         return "\n".join(lines)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary.
         
         Returns:
@@ -215,7 +215,7 @@ class ErrorAnalyzer:
         self,
         engine_name: str,
         dataset_name: str,
-        results: List[Tuple[float, int, int, str, str]],
+        results: list[tuple[float, int, int, str, str]],
         threshold: float = 0.5,
     ) -> ErrorReport:
         """Analyze errors from benchmark results.
@@ -239,11 +239,11 @@ class ErrorAnalyzer:
         report.total_cases = total
         
         tp = fp = tn = fn = 0
-        fp_cases: List[Tuple[float, int, int, str, str]] = []
-        fn_cases: List[Tuple[float, int, int, str, str]] = []
-        tp_by_type: Dict[int, int] = {}
-        fp_by_type: Dict[int, int] = {}
-        fn_by_type: Dict[int, int] = {}
+        fp_cases: list[tuple[float, int, int, str, str]] = []
+        fn_cases: list[tuple[float, int, int, str, str]] = []
+        tp_by_type: dict[int, int] = {}
+        fp_by_type: dict[int, int] = {}
+        fn_by_type: dict[int, int] = {}
         
         for i, (score, label, clone_type, code_a, code_b) in enumerate(results):
             predicted = 1 if score >= threshold else 0
@@ -384,7 +384,7 @@ class ErrorAnalyzer:
         
         return report
     
-    def _generate_recommendations(self, report: ErrorReport) -> List[str]:
+    def _generate_recommendations(self, report: ErrorReport) -> list[str]:
         """Generate improvement recommendations based on analysis.
         
         Args:
@@ -393,7 +393,7 @@ class ErrorAnalyzer:
         Returns:
             List of recommendation strings.
         """
-        recommendations: List[str] = []
+        recommendations: list[str] = []
         
         # Type-specific recommendations
         for name, cat in report.errors_by_characteristic.items():

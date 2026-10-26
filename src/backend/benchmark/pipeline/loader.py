@@ -4,11 +4,11 @@ All dataset loaders must implement the CanonicalDataset interface.
 This ensures datasets are pluggable and comparable.
 """
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass, field
+from typing import Any
 
 # Re-export canonical definitions from schema.py
-from src.backend.benchmark.datasets.schema import CodePair, CanonicalDataset
+from src.backend.benchmark.datasets.schema import CanonicalDataset, CodePair
 
 
 @dataclass
@@ -17,7 +17,7 @@ class CodeSample:
     id: str
     code: str
     language: str = "java"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class DatasetLoader(ABC):
@@ -41,12 +41,10 @@ class DatasetLoader(ABC):
     @abstractmethod
     def name(self) -> str:
         """Return dataset name."""
-        pass
     
     @abstractmethod
     def version(self) -> str:
         """Return dataset version."""
-        pass
     
     @abstractmethod
     def load(self, path: str) -> CanonicalDataset:
@@ -58,9 +56,8 @@ class DatasetLoader(ABC):
         Returns:
             CanonicalDataset with pairs and/or submissions.
         """
-        pass
     
-    def load_submissions(self, path: str) -> List[CodeSample]:
+    def load_submissions(self, path: str) -> list[CodeSample]:
         """Load individual submissions (optional).
         
         Args:
@@ -71,7 +68,7 @@ class DatasetLoader(ABC):
         """
         return []
     
-    def load_pairs(self, path: str) -> List[CodePair]:
+    def load_pairs(self, path: str) -> list[CodePair]:
         """Load code pairs with labels.
         
         Args:

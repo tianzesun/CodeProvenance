@@ -6,12 +6,9 @@ a tool's performance meets minimum acceptable standards for the benchmark.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple, Callable
 from dataclasses import dataclass
 from enum import Enum
-
-from ..evaluation.metrics import calculate_precision_recall_f1
-from ..evaluation.statistics import confidence_interval
+from typing import Any
 
 
 class ValidationRuleType(Enum):
@@ -35,7 +32,7 @@ class ValidationRule:
     confidence_level: float = 0.95
     description: str = ""
 
-    def evaluate(self, tool_result: Dict[str, Any], baseline_results: Dict[str, Dict[str, Any]] = None) -> Tuple[bool, Dict[str, Any]]:
+    def evaluate(self, tool_result: dict[str, Any], baseline_results: dict[str, dict[str, Any]] = None) -> tuple[bool, dict[str, Any]]:
         """
         Evaluate this rule against tool results.
 
@@ -92,10 +89,10 @@ class BenchmarkPassFailValidator:
     an overall pass/fail outcome for a candidate tool.
     """
 
-    def __init__(self, rules: List[ValidationRule]):
+    def __init__(self, rules: list[ValidationRule]):
         self.rules = rules
 
-    def validate(self, tool_result: Dict[str, Any], baseline_results: Dict[str, Dict[str, Any]] = None) -> Tuple[bool, List[Dict[str, Any]]]:
+    def validate(self, tool_result: dict[str, Any], baseline_results: dict[str, dict[str, Any]] = None) -> tuple[bool, list[dict[str, Any]]]:
         """
         Run all validation rules against the tool result.
 

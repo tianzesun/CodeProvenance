@@ -6,9 +6,9 @@ Contains 1,016,504 functions across 4 languages.
 
 Reference: https://huggingface.co/datasets/code_search_net
 """
-from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
 from pathlib import Path
-from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -49,15 +49,15 @@ class CodeSearchNetMiscDataset:
     def __init__(self, data_dir: Path = Path("benchmark/data/codesearchnet_misc")):
         self.data_dir = data_dir
         self.hf_dir = data_dir / "huggingface"
-        self._samples: List[CodeSearchNetMiscSample] = []
+        self._samples: list[CodeSearchNetMiscSample] = []
         self._dataset = None
     
     def load(
         self,
-        language: Optional[str] = None,
+        language: str | None = None,
         split: str = "train",
-        max_samples: Optional[int] = None
-    ) -> List[CodeSearchNetMiscSample]:
+        max_samples: int | None = None
+    ) -> list[CodeSearchNetMiscSample]:
         """
         Load CodeSearchNet samples from HuggingFace Arrow format.
         
@@ -123,20 +123,20 @@ class CodeSearchNetMiscDataset:
         self._samples = samples
         return samples
     
-    def _get_available_languages(self) -> List[str]:
+    def _get_available_languages(self) -> list[str]:
         """Get available language directories."""
         if not self.hf_dir.exists():
             return []
         return [d.name for d in self.hf_dir.iterdir() if d.is_dir()]
     
-    def _get_available_splits(self, language: str) -> List[str]:
+    def _get_available_splits(self, language: str) -> list[str]:
         """Get available splits for a language."""
         lang_dir = self.hf_dir / language
         if not lang_dir.exists():
             return []
         return [d.name for d in lang_dir.iterdir() if d.is_dir()]
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         stats = {
             "name": "CodeSearchNet (Multi-language)",
@@ -155,7 +155,7 @@ class CodeSearchNetMiscDataset:
         
         return stats
     
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check dataset availability."""
         available_langs = self._get_available_languages()
         return {

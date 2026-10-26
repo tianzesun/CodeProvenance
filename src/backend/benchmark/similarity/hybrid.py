@@ -2,7 +2,7 @@
 
 Provides weighted combination of multiple similarity measures.
 """
-from typing import Dict, List, Any, Optional
+from typing import Any
 
 
 class HybridSimilarityConfig:
@@ -33,7 +33,7 @@ class HybridSimilarity:
         score = hybrid.compare(code1, code2)
     """
     
-    def __init__(self, config: Optional[HybridSimilarityConfig] = None):
+    def __init__(self, config: HybridSimilarityConfig | None = None):
         self.config = config or HybridSimilarityConfig()
     
     def compare(
@@ -79,8 +79,8 @@ class HybridSimilarity:
     
     def _weighted_sum(
         self,
-        scores: Dict[str, float],
-        weights: Dict[str, float]
+        scores: dict[str, float],
+        weights: dict[str, float]
     ) -> float:
         """Calculate weighted sum of scores.
         
@@ -103,7 +103,7 @@ class HybridSimilarity:
         code2: str,
         ast1: Any = None,
         ast2: Any = None
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Get individual component scores.
         
         Args:

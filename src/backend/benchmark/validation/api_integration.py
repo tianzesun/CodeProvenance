@@ -4,24 +4,18 @@ Provides endpoints and utilities for validating benchmark runs through the API.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 import json
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from typing import Any
 
-from src.backend.benchmark.validation.metric_validators import (
-    MetricValidator,
-    MetricValidationReport,
-)
 from src.backend.benchmark.validation.label_validators import (
-    LabelValidator,
-    LabelValidationResult,
-    DatasetLabelValidator,
     LabelValidationReport,
+    LabelValidator,
 )
-from src.backend.benchmark.validation.tool_validators import (
-    ToolValidator,
-    ToolValidationReport,
+from src.backend.benchmark.validation.metric_validators import (
+    MetricValidationReport,
+    MetricValidator,
 )
 from src.backend.benchmark.validation.reproducibility import (
     ReproducibilityManifest,
@@ -30,10 +24,14 @@ from src.backend.benchmark.validation.statistical_rigor import (
     StatisticalAnalyzer,
     StatisticalReport,
 )
+from src.backend.benchmark.validation.tool_validators import (
+    ToolValidationReport,
+    ToolValidator,
+)
 from src.backend.evaluation.pan_metrics import (
     Detection,
-    TextSpan,
     PANMetrics,
+    TextSpan,
 )
 
 
@@ -42,7 +40,7 @@ class BenchmarkValidationRequest:
     """Request to validate a benchmark run."""
     run_id: str
     dataset_id: str
-    tool_ids: List[str]
+    tool_ids: list[str]
     validate_metrics: bool = True
     validate_labels: bool = True
     validate_tools: bool = True
@@ -58,19 +56,19 @@ class BenchmarkValidationResponse:
     run_id: str
     timestamp: str
     validation_status: str  # "passed", "failed", "partial"
-    metric_validation: Optional[Dict[str, Any]] = None
-    label_validation: Optional[Dict[str, Any]] = None
-    tool_validations: Optional[Dict[str, Dict[str, Any]]] = None
-    reproducibility_manifest: Optional[Dict[str, Any]] = None
-    statistical_analysis: Optional[Dict[str, Any]] = None
+    metric_validation: dict[str, Any] | None = None
+    label_validation: dict[str, Any] | None = None
+    tool_validations: dict[str, dict[str, Any]] | None = None
+    reproducibility_manifest: dict[str, Any] | None = None
+    statistical_analysis: dict[str, Any] | None = None
     summary: str = ""
-    errors: List[str] = None
+    errors: list[str] = None
 
     def __post_init__(self):
         if self.errors is None:
             self.errors = []
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert response to dictionary."""
         return asdict(self)
 
@@ -84,8 +82,8 @@ class BenchmarkValidationService:
 
     @staticmethod
     def validate_metrics(
-        ground_truth: List[Detection],
-        predictions: List[Detection],
+        ground_truth: list[Detection],
+        predictions: list[Detection],
         expected_metrics: PANMetrics,
     ) -> MetricValidationReport:
         """Validate metrics for a benchmark run.
@@ -105,10 +103,10 @@ class BenchmarkValidationService:
     @staticmethod
     def validate_dataset(
         dataset_id: str,
-        pairs: List[Dict[str, Any]],
-        labels: List[int],
-        pair_ids: List[str],
-        inter_rater_labels: Optional[Dict[str, List[int]]] = None,
+        pairs: list[dict[str, Any]],
+        labels: list[int],
+        pair_ids: list[str],
+        inter_rater_labels: dict[str, list[int]] | None = None,
     ) -> LabelValidationReport:
         """Validate dataset labels.
 
@@ -129,7 +127,7 @@ class BenchmarkValidationService:
     @staticmethod
     def validate_tool_output(
         tool_id: str,
-        output: Dict[str, Any],
+        output: dict[str, Any],
     ) -> ToolValidationReport:
         """Validate tool output.
 
@@ -145,7 +143,7 @@ class BenchmarkValidationService:
     @staticmethod
     def validate_tool_determinism(
         tool_id: str,
-        outputs: List[Dict[str, Any]],
+        outputs: list[dict[str, Any]],
     ) -> ToolValidationReport:
         """Validate tool determinism.
 
@@ -180,7 +178,7 @@ class BenchmarkValidationService:
 
     @staticmethod
     def analyze_statistics(
-        metrics_list: List[PANMetrics],
+        metrics_list: list[PANMetrics],
         confidence: float = 0.95,
         alpha: float = 0.05,
     ) -> StatisticalReport:
@@ -201,14 +199,14 @@ class BenchmarkValidationService:
     @staticmethod
     def validate_benchmark_run(
         request: BenchmarkValidationRequest,
-        ground_truth: List[Detection],
-        predictions: List[Detection],
+        ground_truth: list[Detection],
+        predictions: list[Detection],
         expected_metrics: PANMetrics,
-        pairs: List[Dict[str, Any]],
-        labels: List[int],
-        pair_ids: List[str],
-        tool_outputs: Dict[str, List[Dict[str, Any]]],
-        metrics_list: List[PANMetrics],
+        pairs: list[dict[str, Any]],
+        labels: list[int],
+        pair_ids: list[str],
+        tool_outputs: dict[str, list[dict[str, Any]]],
+        metrics_list: list[PANMetrics],
     ) -> BenchmarkValidationResponse:
         """Validate complete benchmark run.
 
@@ -328,7 +326,7 @@ class BenchmarkValidationService:
         except Exception as e:
             response.validation_status = "failed"
             response.errors.append(str(e))
-            response.summary = f"Validation failed: {str(e)}"
+            response.summary = f"Validation failed: {e!s}"
 
         return response
 
@@ -340,15 +338,15 @@ class ValidationAPIEndpoints:
     def validate_benchmark_endpoint(
         run_id: str,
         dataset_id: str,
-        tool_ids: List[str],
-        ground_truth: List[Dict[str, Any]],
-        predictions: List[Dict[str, Any]],
-        expected_metrics: Dict[str, float],
-        pairs: List[Dict[str, Any]],
-        labels: List[int],
-        pair_ids: List[str],
-        tool_outputs: Dict[str, List[Dict[str, Any]]],
-        metrics_list: List[Dict[str, float]],
+        tool_ids: list[str],
+        ground_truth: list[dict[str, Any]],
+        predictions: list[dict[str, Any]],
+        expected_metrics: dict[str, float],
+        pairs: list[dict[str, Any]],
+        labels: list[int],
+        pair_ids: list[str],
+        tool_outputs: dict[str, list[dict[str, Any]]],
+        metrics_list: list[dict[str, float]],
     ) -> BenchmarkValidationResponse:
         """Endpoint to validate a benchmark run.
 
@@ -423,7 +421,7 @@ class ValidationAPIEndpoints:
         )
 
     @staticmethod
-    def get_validation_status_endpoint(run_id: str) -> Dict[str, Any]:
+    def get_validation_status_endpoint(run_id: str) -> dict[str, Any]:
         """Endpoint to get validation status of a run.
 
         Args:
@@ -440,7 +438,7 @@ class ValidationAPIEndpoints:
         }
 
     @staticmethod
-    def get_validation_report_endpoint(run_id: str) -> Dict[str, Any]:
+    def get_validation_report_endpoint(run_id: str) -> dict[str, Any]:
         """Endpoint to get full validation report.
 
         Args:
@@ -459,9 +457,9 @@ class ValidationAPIEndpoints:
     def compare_tools_endpoint(
         tool1_id: str,
         tool2_id: str,
-        metrics1: List[Dict[str, float]],
-        metrics2: List[Dict[str, float]],
-    ) -> Dict[str, Any]:
+        metrics1: list[dict[str, float]],
+        metrics2: list[dict[str, float]],
+    ) -> dict[str, Any]:
         """Endpoint to compare two tools statistically.
 
         Args:

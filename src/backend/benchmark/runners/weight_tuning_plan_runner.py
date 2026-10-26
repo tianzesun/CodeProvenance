@@ -14,11 +14,11 @@ import itertools
 import json
 import random
 import time
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Sequence
-
+from typing import Any
 
 ENGINE_NAMES: tuple[str, ...] = (
     "ast",

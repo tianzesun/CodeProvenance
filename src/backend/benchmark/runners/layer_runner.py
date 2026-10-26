@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from src.backend.benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
+from src.backend.benchmark.pipeline.evaluation_framework import (
+    ThreeLayerBenchmarkRunner as ThreeLayerFramework,
+)
 from src.backend.benchmark.registry import registry
-from src.backend.benchmark.pipeline.evaluation_framework import ThreeLayerBenchmarkRunner as ThreeLayerFramework
 
 
 class ThreeLayerBenchmarkRunner:
@@ -17,7 +19,7 @@ class ThreeLayerBenchmarkRunner:
     def __init__(self, output_dir: str = "reports/three_layer"):
         self.output_dir = output_dir
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         """Run full three-layer benchmark for all registered engines."""
         gen = SyntheticDatasetGenerator(seed=42)
         base_codes = gen._get_default_templates("python")

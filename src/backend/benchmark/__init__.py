@@ -4,23 +4,23 @@ The benchmark system is the evaluation engine that drives improvement
 of the similarity detection algorithms through scientific measurement.
 """
 
-from .registry import EngineRegistry, registry, DetectionEngine
-from .similarity.base_engine import BaseSimilarityEngine
-from .similarity.engines import (
-    TokenWinnowingEngine,
-    ASTEngine,
-    HybridEngine,
-)
+from .adapters.ast_baseline import ASTBaselineAdapter
 from .adapters.codeprovenance_engine import CodeProvenanceAdapter as CodeProvenanceEngine
 from .adapters.codeprovenance_engine_v3 import CodeProvenanceAdapterV3
 from .adapters.codeprovenance_engine_v4 import CodeProvenanceAdapterV4
+from .adapters.dolos_adapter import DolosBenchmarkEngine
 from .adapters.jplag_adapter import JPlagAdapter as JPlagBenchmarkEngine
+from .adapters.lexical_baseline import LexicalBaselineAdapter
+from .adapters.moss_adapter import MossAdapter as MossBenchmarkEngine
 from .adapters.nicad_adapter import NiCadAdapter as NiCadBenchmarkEngine
 from .adapters.pmd_adapter import PMDBenchmarkEngine
-from .adapters.moss_adapter import MossAdapter as MossBenchmarkEngine
-from .adapters.dolos_adapter import DolosBenchmarkEngine
-from .adapters.lexical_baseline import LexicalBaselineAdapter
-from .adapters.ast_baseline import ASTBaselineAdapter
+from .registry import DetectionEngine, EngineRegistry, registry
+from .similarity.base_engine import BaseSimilarityEngine
+from .similarity.engines import (
+    ASTEngine,
+    HybridEngine,
+    TokenWinnowingEngine,
+)
 
 # Benchmark suites
 from .suites.official import OfficialBenchmarkSuite, SuiteConfig

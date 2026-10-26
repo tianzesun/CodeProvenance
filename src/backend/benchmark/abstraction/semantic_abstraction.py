@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 
 @dataclass
@@ -35,11 +35,11 @@ class SemanticAbstractionResult:
     """Result of semantic abstraction."""
     original: str
     semantic_form: str
-    control_patterns: List[str] = field(default_factory=list)
-    data_patterns: List[str] = field(default_factory=list)
-    api_calls: List[str] = field(default_factory=list)
+    control_patterns: list[str] = field(default_factory=list)
+    data_patterns: list[str] = field(default_factory=list)
+    api_calls: list[str] = field(default_factory=list)
     semantic_fingerprint: str = ""
-    complexity_metrics: Dict[str, int] = field(default_factory=dict)
+    complexity_metrics: dict[str, int] = field(default_factory=dict)
 
 
 class SemanticAbstractor:
@@ -195,7 +195,7 @@ class SemanticAbstractor:
         
         return score / weight_sum if weight_sum > 0 else 0.0
     
-    def _extract_control_patterns(self, code: str) -> List[str]:
+    def _extract_control_patterns(self, code: str) -> list[str]:
         """Extract control flow patterns from code.
         
         Args:
@@ -250,7 +250,7 @@ class SemanticAbstractor:
         
         return patterns
     
-    def _extract_data_patterns(self, code: str) -> List[str]:
+    def _extract_data_patterns(self, code: str) -> list[str]:
         """Extract data flow patterns.
         
         Args:
@@ -295,7 +295,7 @@ class SemanticAbstractor:
         
         return patterns
     
-    def _extract_api_calls(self, code: str) -> List[str]:
+    def _extract_api_calls(self, code: str) -> list[str]:
         """Extract normalized API call patterns.
         
         Args:
@@ -412,7 +412,7 @@ class SemanticAbstractor:
         parts.extend(sorted(result.api_calls))
         return '|'.join(parts)
     
-    def _compute_complexity(self, code: str) -> Dict[str, int]:
+    def _compute_complexity(self, code: str) -> dict[str, int]:
         """Compute code complexity metrics.
         
         Args:
@@ -454,7 +454,7 @@ class SemanticComparePipeline:
     def __init__(
         self,
         engine,
-        abstractor: Optional[SemanticAbstractor] = None,
+        abstractor: SemanticAbstractor | None = None,
     ):
         """Initialize semantic pipeline.
         
@@ -494,7 +494,7 @@ class SemanticComparePipeline:
     
     def compare_with_details(
         self, code_a: str, code_b: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Compare with detailed breakdown.
         
         Args:
@@ -519,7 +519,7 @@ class SemanticComparePipeline:
         }
 
 
-def create_semantic_engines(engines: Dict[str, Any]) -> Dict[str, Any]:
+def create_semantic_engines(engines: dict[str, Any]) -> dict[str, Any]:
     """Create semantic-aware versions of engines.
     
     Args:

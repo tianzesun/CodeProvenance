@@ -6,11 +6,9 @@ Same structure but different names.
 from __future__ import annotations
 
 import random
-from typing import Optional
 
-from src.backend.benchmark.generators.base_loader import CodePool
-from src.backend.benchmark.generators.utils.rename_utils import rename_identifiers
 from src.backend.benchmark.generators.utils.ast_utils import is_valid_python
+from src.backend.benchmark.generators.utils.rename_utils import rename_identifiers
 
 
 class Type2Generator:

@@ -30,10 +30,11 @@ import time
 import uuid
 import zipfile
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path as PathLib
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse
 
 import numpy as np
@@ -56,16 +57,18 @@ from fastapi.responses import (
     JSONResponse,
 )
 from jose import JWTError, jwt
-from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import joinedload
 
-from src.backend.api.middleware.auth import AuthMiddleware, setup_default_keys
+from src.backend.api.middleware.auth import (
+    AuthMiddleware,
+    api_key_manager,
+    setup_default_keys,
+)
 from src.backend.api.middleware.request_id import RequestIdMiddleware
-from src.backend.api.middleware.auth import api_key_manager
 from src.backend.api.routes import auth, cases, users
-from src.backend.api.routes import settings as settings_router
+from src.backend.application.services import previous_term
 from src.backend.application.services.batch_detection_service import (
     MIN_EVIDENCE_TOKENS,
     BatchDetectionService,
@@ -77,7 +80,6 @@ from src.backend.config.settings import (
     settings,
     workspace_overrides,
 )
-from src.backend.application.services import previous_term
 from src.backend.infrastructure import secret_box
 from src.backend.infrastructure.security import (
     hash_password as _hash_password,
@@ -109,7 +111,6 @@ from src.backend.models.database import (
     Course,
     CourseInstructor,
     Enrollment,
-    FprValidationRun,
     Job,
     Report,
     SimilarityResult,
@@ -243,52 +244,26 @@ app.include_router(cases.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 
 # Cache administration routes
-from src.backend.api.routes import cache_admin  # noqa: E402
+from src.backend.api.routes import cache_admin
 
 app.include_router(cache_admin.router)
 # Public REST API (documented in docs/product/API_REFERENCE.md). Submissions
 # are processed by the same background pipeline as the upload flow.
-from src.backend.api.routes import analyze as analyze_router  # noqa: E402
+from src.backend.api.routes import analyze as analyze_router
 
 app.include_router(analyze_router.router, prefix="/api")
-from src.backend.api.routes import benchmark as benchmark_router  # noqa: E402
+from src.backend.api.routes import benchmark as benchmark_router
 
 app.include_router(benchmark_router.router)
-from src.backend.api.routes import reviews as reviews_router  # noqa: E402
+from src.backend.api.routes import reviews as reviews_router
 
 app.include_router(reviews_router.router)
 
 # Re-export benchmark route handlers so existing unit tests that import them
 # directly from `server` (e.g. `server.get_benchmark_datasets()`) keep working.
-from src.backend.api.routes.benchmark import (  # noqa: E402
-    get_benchmark_datasets,
-    get_benchmark_tools,
-    get_benchmark_presets,
-    get_benchmark_history,
-    get_error_analysis,
-    get_benchmark_audit,
-    run_benchmark,
-    stream_benchmark,
-    start_benchmark_job,
-    get_benchmark_job_status,
+from src.backend.api.routes.benchmark import (  # noqa: F401
     apply_benchmark_optimization,
     compute_real_fpr_on_clean_corpus,
-    save_fpr_validation_run,
-    list_fpr_validation_runs,
-    get_fpr_validation_run,
-    delete_fpr_validation_run,
-    download_benchmark_csv,
-    download_benchmark_pdf,
-    export_benchmark_pdf,
-    get_tool_radar_data,
-    create_demo_dataset,
-)
-
-# Backward-compatible aliases for functions moved to benchmark router module.
-# These allow existing tests and imports that reference server.get_benchmark_datasets,
-# server.run_benchmark, etc. to keep working without modification.
-from src.backend.api.routes.benchmark import (  # noqa: E402
-    apply_benchmark_optimization,
     create_demo_dataset,
     delete_fpr_validation_run,
     download_benchmark_csv,
@@ -300,11 +275,14 @@ from src.backend.api.routes.benchmark import (  # noqa: E402
     get_benchmark_job_status,
     get_benchmark_presets,
     get_benchmark_tools,
+    get_error_analysis,
+    get_fpr_validation_run,
     get_tool_radar_data,
     list_fpr_validation_runs,
     run_benchmark,
     save_fpr_validation_run,
     start_benchmark_job,
+    stream_benchmark,
 )
 
 REPORTS_DIR = project_root / "reports"

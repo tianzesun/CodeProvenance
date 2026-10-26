@@ -1,9 +1,9 @@
 """Base runner class for benchmark execution."""
+import time
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
-import time
+from typing import Any
 
 
 @dataclass
@@ -13,8 +13,8 @@ class BenchmarkPair:
     code_b: str
     language: str
     is_clone: bool
-    clone_type: Optional[int] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    clone_type: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -27,7 +27,7 @@ class BenchmarkResult:
     false_negatives: int
     true_negatives: int
     execution_time: float
-    predictions: List[Tuple[str, float, bool]] = field(default_factory=list)
+    predictions: list[tuple[str, float, bool]] = field(default_factory=list)
 
     @property
     def precision(self) -> float:
@@ -54,7 +54,7 @@ class BenchmarkResult:
             return 0.0
         return (self.true_positives + self.true_negatives) / total
 
-    def summary_dict(self) -> Dict[str, Any]:
+    def summary_dict(self) -> dict[str, Any]:
         return {
             'benchmark_name': self.benchmark_name,
             'tool_name': self.tool_name,
@@ -77,7 +77,7 @@ class BaseRunner(ABC):
         self.threshold = threshold
 
     @abstractmethod
-    def load_dataset(self, dataset_path: Path) -> List[BenchmarkPair]:
+    def load_dataset(self, dataset_path: Path) -> list[BenchmarkPair]:
         pass
 
     @abstractmethod
@@ -88,7 +88,7 @@ class BaseRunner(ABC):
     def run_comparison(self, pair: BenchmarkPair, similarity_threshold: float = 0.5) -> float:
         pass
 
-    def evaluate(self, pairs: List[BenchmarkPair], threshold: Optional[float] = None) -> BenchmarkResult:
+    def evaluate(self, pairs: list[BenchmarkPair], threshold: float | None = None) -> BenchmarkResult:
         threshold = threshold or self.threshold
         start_time = time.time()
         tp = fp = fn = tn = 0

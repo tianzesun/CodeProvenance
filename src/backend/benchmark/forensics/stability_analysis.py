@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 @dataclass
@@ -53,8 +53,8 @@ class ClusterReport:
     """
     num_clusters: int = 0
     total_failures: int = 0
-    attack_surfaces: Dict[str, int] = field(default_factory=dict)
-    clusters: List[FailureCluster] = field(default_factory=list)
+    attack_surfaces: dict[str, int] = field(default_factory=dict)
+    clusters: list[FailureCluster] = field(default_factory=list)
 
 
 class ThresholdStabilityAnalyzer:
@@ -63,7 +63,7 @@ class ThresholdStabilityAnalyzer:
     Tests how sensitive the model is to threshold changes and finds optimal threshold.
     """
     
-    def __init__(self, results: List[Tuple[float, int, int, str, str]]):
+    def __init__(self, results: list[tuple[float, int, int, str, str]]):
         """Initialize analyzer with benchmark results.
         
         Args:
@@ -124,7 +124,7 @@ class ThresholdStabilityAnalyzer:
             avg_sensitivity=avg_sensitivity,
         )
     
-    def _compute_metrics(self, threshold: float) -> Tuple[float, float, float]:
+    def _compute_metrics(self, threshold: float) -> tuple[float, float, float]:
         """Compute precision, recall, F1 at given threshold.
         
         Args:
@@ -170,7 +170,7 @@ class FailureClusterAnalyzer:
         "template_similarity": "Both codes use same template/boilerplate",
     }
     
-    def __init__(self, results: List[Tuple[float, int, int, str, str]]):
+    def __init__(self, results: list[tuple[float, int, int, str, str]]):
         """Initialize analyzer with benchmark results.
         
         Args:
@@ -208,7 +208,7 @@ class FailureClusterAnalyzer:
             return ClusterReport(num_clusters=0, total_failures=0)
         
         # Cluster failures by pattern
-        pattern_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        pattern_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
         
         for failure in failures:
             pattern = self._classify_failure(failure)
@@ -246,7 +246,7 @@ class FailureClusterAnalyzer:
             clusters=clusters,
         )
     
-    def _classify_failure(self, failure: Dict[str, Any]) -> str:
+    def _classify_failure(self, failure: dict[str, Any]) -> str:
         """Classify a failure into a pattern.
         
         Args:

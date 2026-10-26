@@ -3,9 +3,9 @@
 Generates visual heatmaps showing token-level similarity between code pairs,
 highlighting matching regions and similarity scores.
 """
-from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -19,7 +19,7 @@ class HeatmapConfig:
     font_size: int = 10
     output_format: str = "png"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "width": self.width,
@@ -39,7 +39,7 @@ class TokenHeatmapGenerator:
     highlighting regions of high similarity for forensic analysis.
     """
 
-    def __init__(self, config: Optional[HeatmapConfig] = None):
+    def __init__(self, config: HeatmapConfig | None = None):
         """Initialize heatmap generator.
 
         Args:
@@ -47,7 +47,7 @@ class TokenHeatmapGenerator:
         """
         self.config = config or HeatmapConfig()
 
-    def tokenize(self, code: str) -> List[str]:
+    def tokenize(self, code: str) -> list[str]:
         """Tokenize code into individual tokens.
 
         Args:
@@ -62,9 +62,9 @@ class TokenHeatmapGenerator:
 
     def compute_similarity_matrix(
         self,
-        tokens_a: List[str],
-        tokens_b: List[str]
-    ) -> List[List[float]]:
+        tokens_a: list[str],
+        tokens_b: list[str]
+    ) -> list[list[float]]:
         """Compute similarity matrix between two token lists.
 
         Args:
@@ -85,10 +85,10 @@ class TokenHeatmapGenerator:
 
     def find_high_similarity_regions(
         self,
-        similarity_matrix: List[List[float]],
-        tokens_a: List[str],
-        tokens_b: List[str]
-    ) -> List[Dict[str, Any]]:
+        similarity_matrix: list[list[float]],
+        tokens_a: list[str],
+        tokens_b: list[str]
+    ) -> list[dict[str, Any]]:
         """Find regions with high similarity.
 
         Args:
@@ -121,7 +121,7 @@ class TokenHeatmapGenerator:
         code_b: str,
         output_path: str,
         title: str = "Token Similarity Heatmap"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate heatmap visualization.
 
         Args:
@@ -163,7 +163,7 @@ class TokenHeatmapGenerator:
 
         return result
 
-    def to_json(self, result: Dict[str, Any]) -> str:
+    def to_json(self, result: dict[str, Any]) -> str:
         """Convert generation result to JSON.
 
         Args:

@@ -6,9 +6,9 @@ Used as a lower bound reference for benchmark validation.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
 import hashlib
 from collections import defaultdict
+from typing import Any
 
 from .base_adapter import BaseAdapter
 
@@ -26,7 +26,7 @@ class LexicalBaselineAdapter(BaseAdapter):
         self.ngram_size = ngram_size
         self.window_size = window_size
 
-    def run(self, dataset: Any) -> Dict[str, Any]:
+    def run(self, dataset: Any) -> dict[str, Any]:
         """Run lexical baseline detection on dataset."""
         predictions = defaultdict(float)
 
@@ -52,7 +52,7 @@ class LexicalBaselineAdapter(BaseAdapter):
 
         return intersection / union if union > 0 else 0.0
 
-    def _tokenize(self, code: str) -> List[str]:
+    def _tokenize(self, code: str) -> list[str]:
         """Simple whitespace and punctuation tokenizer."""
         tokens = []
         current = []
@@ -72,7 +72,7 @@ class LexicalBaselineAdapter(BaseAdapter):
 
         return tokens
 
-    def _winnowing_fingerprint(self, tokens: List[str]) -> set[int]:
+    def _winnowing_fingerprint(self, tokens: list[str]) -> set[int]:
         """Generate winnowing hash fingerprints."""
         fingerprints = set()
 

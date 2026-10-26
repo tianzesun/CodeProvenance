@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 class CloneType(Enum):
@@ -54,7 +54,7 @@ class CloneTypeResult:
     code_b: str
     detected_type: CloneType
     confidence: float = 1.0
-    features: Dict[str, Any] = field(default_factory=dict)
+    features: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -67,8 +67,8 @@ class CloneTypeReport:
         results: Individual classification results.
     """
     total_pairs: int = 0
-    type_distribution: Dict[str, int] = field(default_factory=dict)
-    results: List[CloneTypeResult] = field(default_factory=list)
+    type_distribution: dict[str, int] = field(default_factory=dict)
+    results: list[CloneTypeResult] = field(default_factory=list)
     
     def summary(self) -> str:
         """Generate human-readable summary.
@@ -98,7 +98,7 @@ class CloneTypeReport:
         lines.append("=" * 70)
         return "\n".join(lines)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary.
         
         Returns:
@@ -127,7 +127,7 @@ class CloneTypeClassifier:
     
     def classify(
         self,
-        code_pairs: List[Tuple[str, str, str]],
+        code_pairs: list[tuple[str, str, str]],
     ) -> CloneTypeReport:
         """Classify code pairs by clone type.
         
@@ -252,7 +252,7 @@ class CloneTypeClassifier:
         self,
         code_a: str,
         code_b: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Extract features for clone type classification.
         
         Args:
@@ -262,7 +262,7 @@ class CloneTypeClassifier:
         Returns:
             Dictionary of features.
         """
-        features: Dict[str, Any] = {}
+        features: dict[str, Any] = {}
         
         # Length comparison
         len_a = len(code_a)
@@ -314,7 +314,7 @@ class CloneTypeClassifier:
         self,
         code_a: str,
         code_b: str,
-        features: Dict[str, Any],
+        features: dict[str, Any],
     ) -> bool:
         """Check if code pair is Type-2 (renamed identifiers).
         
@@ -337,7 +337,7 @@ class CloneTypeClassifier:
         self,
         code_a: str,
         code_b: str,
-        features: Dict[str, Any],
+        features: dict[str, Any],
     ) -> bool:
         """Check if code pair is Type-3 (restructured code).
         
@@ -360,7 +360,7 @@ class CloneTypeClassifier:
         self,
         code_a: str,
         code_b: str,
-        features: Dict[str, Any],
+        features: dict[str, Any],
     ) -> bool:
         """Check if code pair is Type-4 (semantic clone).
         

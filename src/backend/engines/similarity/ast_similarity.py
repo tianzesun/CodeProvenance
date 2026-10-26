@@ -47,10 +47,14 @@ _MAX_DFG_VARIABLES = 200
 
 
 _SKIP_KEYWORDS = frozenset(
-    "if else elif for while switch case default do return def class import from try except "
-    "finally with as yield lambda pass break continue raise assert del global nonlocal in not "
-    "and or is True False None self cls range len print list dict set str int float bool object "
-    "type enumerate zip map filter all any sum min max sorted".split()
+    [
+        "if", "else", "elif", "for", "while", "switch", "case", "default", "do", "return", "def",
+        "class", "import", "from", "try", "except", "finally", "with", "as", "yield", "lambda",
+        "pass", "break", "continue", "raise", "assert", "del", "global", "nonlocal", "in", "not",
+        "and", "or", "is", "True", "False", "None", "self", "cls", "range", "len", "print", "list",
+        "dict", "set", "str", "int", "float", "bool", "object", "type", "enumerate", "zip", "map",
+        "filter", "all", "any", "sum", "min", "max", "sorted",
+    ]
 )
 _IDENTIFIER_NODES = frozenset({"IDENTIFIER", "VARIABLE", "FUNCTION_NAME", "CLASS_NAME", "PARAMETER"})
 
@@ -517,7 +521,7 @@ class TreeEditDistance:
 
         # One bottom-up hash per node (the forest is in post-order, so its last node
         # is the root). ``to_tuple()`` per node was quadratic in the tree size.
-        label = lambda n: f"{n.node_type}|{n.value}"  # noqa: E731
+        label = lambda n: f"{n.node_type}|{n.value}"
         hashes_a = tu.subtree_hashes(forest_a[-1], label)
         hashes_b = tu.subtree_hashes(forest_b[-1], label)
         tuples_a = [hashes_a[id(node)] for node in forest_a]

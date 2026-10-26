@@ -6,7 +6,7 @@ Provides component-level error attribution and clone type sensitivity analysis.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from src.backend.benchmark.forensics.attribution.error_analysis import ErrorAnalyzer, ErrorReport
 
@@ -27,8 +27,8 @@ class ErrorAttributionReport:
     false_positives: int = 0
     false_negatives: int = 0
     true_negatives: int = 0
-    primary_cause_distribution: Dict[str, int] = field(default_factory=dict)
-    component_losses: Dict[str, float] = field(default_factory=dict)
+    primary_cause_distribution: dict[str, int] = field(default_factory=dict)
+    component_losses: dict[str, float] = field(default_factory=dict)
 
 
 class ErrorAttributionModel:
@@ -43,7 +43,7 @@ class ErrorAttributionModel:
     
     def analyze(
         self,
-        pairs: List[Any],
+        pairs: list[Any],
         engine: Any,
         threshold: float = 0.5,
     ) -> ErrorAttributionReport:
@@ -99,10 +99,10 @@ class ErrorAttributionModel:
     
     def compute_clone_type_sensitivity(
         self,
-        pairs: List[Any],
-        engines: Dict[str, Any],
+        pairs: list[Any],
+        engines: dict[str, Any],
         threshold: float = 0.5,
-    ) -> Dict[str, Dict[str, float]]:
+    ) -> dict[str, dict[str, float]]:
         """Compute sensitivity matrix by clone type.
         
         Args:
@@ -119,7 +119,7 @@ class ErrorAttributionModel:
             type_recalls = {}
             
             # Group pairs by clone type
-            type_pairs: Dict[int, List[Any]] = {}
+            type_pairs: dict[int, list[Any]] = {}
             for pair in pairs:
                 clone_type = getattr(pair, 'clone_type', 0)
                 type_pairs.setdefault(clone_type, []).append(pair)
@@ -153,7 +153,7 @@ class ErrorAttributionModel:
         
         return sensitivity_matrix
     
-    def _compute_primary_causes(self, error_report: ErrorReport) -> Dict[str, int]:
+    def _compute_primary_causes(self, error_report: ErrorReport) -> dict[str, int]:
         """Compute primary failure causes from error report.
         
         Args:
@@ -162,7 +162,7 @@ class ErrorAttributionModel:
         Returns:
             Dictionary of cause name to count.
         """
-        causes: Dict[str, int] = {}
+        causes: dict[str, int] = {}
         
         # From characteristic errors
         for name, cat in error_report.errors_by_characteristic.items():
@@ -176,9 +176,9 @@ class ErrorAttributionModel:
     
     def _compute_component_losses(
         self,
-        results: List[Tuple[float, int, int, str, str]],
+        results: list[tuple[float, int, int, str, str]],
         engine: Any,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Compute loss metrics per component.
         
         Args:
@@ -188,7 +188,7 @@ class ErrorAttributionModel:
         Returns:
             Dictionary of component name to loss value.
         """
-        losses: Dict[str, float] = {}
+        losses: dict[str, float] = {}
         
         # Basic loss: mean absolute error
         total_error = 0.0

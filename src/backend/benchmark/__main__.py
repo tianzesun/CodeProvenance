@@ -7,7 +7,6 @@ import logging
 import sys
 import time
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -644,8 +643,8 @@ def main() -> int:
         runner.run()
 
     elif args.command == "competitor":
-        from src.backend.benchmark.competitors.runner import CompetitorBenchmarkRunner
         from src.backend.benchmark.competitors.report import CompetitorComparisonReport
+        from src.backend.benchmark.competitors.runner import CompetitorBenchmarkRunner
 
         runner = CompetitorBenchmarkRunner(
             output_dir=args.output,
@@ -685,10 +684,11 @@ def main() -> int:
         )
 
     elif args.command in {"pan", "run"}:
+        from pathlib import Path
+
         from src.backend.benchmark.runners.pan_benchmark_runner import (
             PANBenchmarkRunner,
         )
-        from pathlib import Path
 
         logger.info("Starting PAN benchmark runner")
         runner = PANBenchmarkRunner(
@@ -717,7 +717,7 @@ def main() -> int:
 
         print("\nPAN Benchmark Completed!\n")
         print(report.generate_comparison_table())
-        print("")
+        print()
 
         timestamp = int(time.time())
         if args.format in ("all", "markdown"):
@@ -731,6 +731,7 @@ def main() -> int:
 
     elif args.command == "fusion-optimize":
         from pathlib import Path
+
         from src.backend.benchmark.runners.fusion_optimization_runner import (
             run_fusion_optimization,
         )
@@ -786,6 +787,7 @@ def main() -> int:
 
     elif args.command == "fusion-train":
         from pathlib import Path
+
         from src.backend.benchmark.runners.fusion_training_runner import (
             run_supervised_fusion_training,
         )
@@ -822,6 +824,7 @@ def main() -> int:
 
     elif args.command == "engine-eval":
         from pathlib import Path
+
         from src.backend.benchmark.runners.engine_evaluation_runner import (
             run_engine_evaluation,
         )
@@ -867,6 +870,7 @@ def main() -> int:
 
     elif args.command == "fusion-train-learned":
         from pathlib import Path
+
         from src.backend.benchmark.runners.learned_fusion_training_runner import (
             run_learned_fusion_training,
         )

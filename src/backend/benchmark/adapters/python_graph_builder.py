@@ -13,10 +13,7 @@ Usage:
 from __future__ import annotations
 
 import ast
-import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
-
 
 # =============================================================================
 # CFG Data Structures
@@ -26,10 +23,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 class BasicBlock:
     """A basic block in the Control Flow Graph."""
     id: int
-    statements: List[str] = field(default_factory=list)
-    ast_nodes: List[ast.AST] = field(default_factory=list)
-    successors: List[int] = field(default_factory=list)
-    predecessors: List[int] = field(default_factory=list)
+    statements: list[str] = field(default_factory=list)
+    ast_nodes: list[ast.AST] = field(default_factory=list)
+    successors: list[int] = field(default_factory=list)
+    predecessors: list[int] = field(default_factory=list)
     block_type: str = "block"  # entry, exit, block, branch, loop, call, return
 
     @property
@@ -48,8 +45,8 @@ class BasicBlock:
 @dataclass
 class CFG:
     """Complete Control Flow Graph."""
-    nodes: Dict[int, BasicBlock] = field(default_factory=dict)
-    edges: List[Tuple[int, int, str]] = field(default_factory=list)
+    nodes: dict[int, BasicBlock] = field(default_factory=dict)
+    edges: list[tuple[int, int, str]] = field(default_factory=list)
     entry: int = 0
     exit_block: int = 1
 
@@ -87,12 +84,12 @@ class VarUse:
 @dataclass
 class DFG:
     """Complete Data Flow Graph."""
-    definitions: List[VarDef] = field(default_factory=list)
-    uses: List[VarUse] = field(default_factory=list)
-    edges: List[Tuple[int, int, str]] = field(default_factory=list)
+    definitions: list[VarDef] = field(default_factory=list)
+    uses: list[VarUse] = field(default_factory=list)
+    edges: list[tuple[int, int, str]] = field(default_factory=list)
 
 
-def build_python_graph(source_code: str) -> Tuple[CFG, DFG]:
+def build_python_graph(source_code: str) -> tuple[CFG, DFG]:
     """Build a lightweight CFG/DFG pair from Python source code.
 
     This implementation is intentionally conservative and deterministic:

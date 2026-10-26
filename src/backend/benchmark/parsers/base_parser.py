@@ -4,9 +4,9 @@ Base Parser - Abstract interface for tool output normalization.
 All parsers must output the same semantic model (StandardOutput).
 """
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -30,9 +30,9 @@ class StandardOutput:
     """
     tool: str
     dataset: str = ""
-    pairs: List[Dict[str, Any]] = field(default_factory=list)
+    pairs: list[dict[str, Any]] = field(default_factory=list)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"tool": self.tool, "dataset": self.dataset, "pairs": self.pairs}
 
 
@@ -77,12 +77,12 @@ class BaseToolParser(ABC):
             return min(1.0, max(0.0, raw_sim))
         return min(1.0, max(0.0, raw_sim / tool_max))
     
-    def make_pair(self, file1: str, file2: str, similarity: float) -> Dict[str, Any]:
+    def make_pair(self, file1: str, file2: str, similarity: float) -> dict[str, Any]:
         """Create normalized pair dict."""
         f1, f2 = self.canonicalize_pair(file1, file2)
         return {"file1": f1, "file2": f2, "similarity": round(similarity, 4), "matches": []}
     
-    def deduplicate_pairs(self, pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def deduplicate_pairs(self, pairs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Deduplicate pairs, keep highest similarity per pair."""
         seen = {}
         for p in pairs:
@@ -92,11 +92,10 @@ class BaseToolParser(ABC):
                 seen[key] = p
         return list(seen.values())
     
-    def filter_pairs(self, pairs: List[Dict[str, Any]], min_sim: float = 0.0) -> List[Dict[str, Any]]:
+    def filter_pairs(self, pairs: list[dict[str, Any]], min_sim: float = 0.0) -> list[dict[str, Any]]:
         """Filter pairs by min similarity."""
         return [p for p in pairs if p.get("similarity", 0) >= min_sim]
 
 
 class ParserError(Exception):
     """Error during tool output parsing."""
-    pass

@@ -12,16 +12,16 @@ from .bootstrap import (
     bootstrap_metric,
     paired_bootstrap_test,
 )
+from .confidence_interval import (
+    clopper_pearson_interval,
+    compute_confidence_interval,
+    normal_approximation_interval,
+    wilson_score_interval,
+)
 from .mcnemar import (
+    compute_mcnemar_table,
     mcnemar_test,
     mcnemar_test_with_correction,
-    compute_mcnemar_table,
-)
-from .confidence_interval import (
-    wilson_score_interval,
-    clopper_pearson_interval,
-    normal_approximation_interval,
-    compute_confidence_interval,
 )
 
 __all__ = [
