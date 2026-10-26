@@ -8,8 +8,9 @@ import shutil
 import subprocess
 import tempfile
 from collections import deque
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 from src.backend.benchmark.adapters.base_adapter import BaseAdapter
 from src.backend.benchmark.contracts.evaluation_result import (
@@ -58,16 +59,16 @@ class DolosBenchmarkEngine(BaseAdapter):
 
     def run_batch(
         self,
-        submissions: Dict[str, str],
+        submissions: dict[str, str],
         pairs: Iterable[tuple[str, str]],
         progress_cb=None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run Dolos for all submissions and return requested pair scores."""
         cli_path = self._find_cli()
         if not cli_path:
             return {"pairs": []}
 
-        similarity_by_pair: Dict[str, float] = {}
+        similarity_by_pair: dict[str, float] = {}
         with tempfile.TemporaryDirectory(prefix="dolos-adapter-") as temp_dir:
             source_root = Path(temp_dir) / "subs"
             report_dir = Path(temp_dir) / "report"
@@ -149,9 +150,9 @@ class DolosBenchmarkEngine(BaseAdapter):
         payload = self.run_batch({"a.py": code1, "b.py": code2}, [("a.py", "b.py")])
         return payload["pairs"][0]["score"] if payload.get("pairs") else 0.0
 
-    def _parse_pairs_csv(self, pairs_path: Path) -> Dict[str, float]:
+    def _parse_pairs_csv(self, pairs_path: Path) -> dict[str, float]:
         """Parse Dolos pairs.csv into pair scores."""
-        scores: Dict[str, float] = {}
+        scores: dict[str, float] = {}
         with pairs_path.open(newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle)
             for row in reader:
@@ -168,7 +169,7 @@ class DolosBenchmarkEngine(BaseAdapter):
                 )
         return scores
 
-    def _find_cli(self) -> Optional[Path]:
+    def _find_cli(self) -> Path | None:
         """Find the Dolos plagiarism CLI."""
         candidates = []
         for tool_dir in self.TOOL_DIRS:
@@ -207,7 +208,7 @@ class DolosBenchmarkEngine(BaseAdapter):
             or "--output-format" in help_text
         )
 
-    def _node_bin_dir(self, cli_path: Path) -> Optional[Path]:
+    def _node_bin_dir(self, cli_path: Path) -> Path | None:
         """Return a bundled Node runtime to put ahead of PATH, if there is one.
 
         Dolos is a Node script whose parsers are native modules compiled against
@@ -221,7 +222,7 @@ class DolosBenchmarkEngine(BaseAdapter):
                 return candidate
         return None
 
-    def _node_abi_advice(self, env: Dict[str, str]) -> str:
+    def _node_abi_advice(self, env: dict[str, str]) -> str:
         """Explain a native-parser ABI mismatch, naming the runtime in use.
 
         A copied ``node_modules`` and a pinned runtime can be rebuilt in either
@@ -258,10 +259,10 @@ class DolosBenchmarkEngine(BaseAdapter):
         )
 
     def _write_submissions(
-        self, target_dir: Path, submissions: Dict[str, str]
-    ) -> Dict[str, str]:
+        self, target_dir: Path, submissions: dict[str, str]
+    ) -> dict[str, str]:
         """Write submissions to a temporary directory."""
-        written_paths: Dict[str, str] = {}
+        written_paths: dict[str, str] = {}
         for filename, content in sorted(submissions.items()):
             file_path = target_dir / Path(filename).name
             file_path.write_text(content, encoding="utf-8")
@@ -274,9 +275,9 @@ class DolosBenchmarkEngine(BaseAdapter):
 
 
 def run_dolos_batch(
-    submissions: Dict[str, str],
+    submissions: dict[str, str],
     pairs: Iterable[tuple[str, str]],
     progress_cb=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run the canonical Dolos batch adapter used by benchmark APIs."""
     return DolosBenchmarkEngine().run_batch(submissions, pairs, progress_cb=progress_cb)

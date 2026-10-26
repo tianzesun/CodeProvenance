@@ -13,7 +13,7 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 from scipy import stats
@@ -40,7 +40,7 @@ class McNemarResult:
     c: int
     method: str
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "statistic": self.statistic,
@@ -57,7 +57,7 @@ def compute_mcnemar_table(
     y_true: np.ndarray,
     y_pred_a: np.ndarray,
     y_pred_b: np.ndarray,
-) -> Tuple[np.ndarray, int, int]:
+) -> tuple[np.ndarray, int, int]:
     """Compute the 2x2 contingency table for McNemar's test.
     
     The table compares the correctness of two classifiers:
@@ -175,9 +175,9 @@ def mcnemar_test_with_correction(
 
 def compare_classifiers_mcnemar(
     y_true: np.ndarray,
-    predictions: Dict[str, np.ndarray],
+    predictions: dict[str, np.ndarray],
     alpha: float = 0.05,
-) -> Dict[str, McNemarResult]:
+) -> dict[str, McNemarResult]:
     """Compare multiple classifiers pairwise using McNemar's test."""
     classifiers = list(predictions.keys())
     n_classifiers = len(classifiers)

@@ -19,11 +19,11 @@ import math
 import random
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Iterable, Optional
-
+from typing import Any
 
 LOGGER = logging.getLogger(__name__)
 
@@ -87,8 +87,8 @@ class ValidationSubmission:
     verdict: str
     language: str
     code_path: str
-    dsc_path: Optional[str]
-    cpg_path: Optional[str]
+    dsc_path: str | None
+    cpg_path: str | None
     code: str
 
 
@@ -283,7 +283,7 @@ class PROGpediaValidationDataset:
     def __init__(
         self,
         root: Path = Path("data/datasets/progpedia"),
-        verdicts: Optional[Iterable[str]] = None,
+        verdicts: Iterable[str] | None = None,
         max_submissions_per_problem_language: int = 4,
         max_positive_pairs_per_problem_language: int = 6,
         negative_ratio: float = 1.0,
@@ -413,9 +413,9 @@ class PROGpediaValidationDataset:
         problem_id: str,
         verdict: str,
         submission_dir: Path,
-    ) -> Optional[ValidationSubmission]:
+    ) -> ValidationSubmission | None:
         """Load one submission directory."""
-        code_file: Optional[Path] = None
+        code_file: Path | None = None
         for candidate in sorted(submission_dir.iterdir()):
             if candidate.is_file() and candidate.suffix in SUPPORTED_EXTENSIONS:
                 code_file = candidate
@@ -599,7 +599,7 @@ class PairSignalExtractor:
 
     @staticmethod
     def _read_dsc_features(
-        dsc_path: Optional[str],
+        dsc_path: str | None,
     ) -> tuple[dict[str, int], dict[str, int]]:
         """Read node-type and node-token histograms from a DSC CSV."""
         if not dsc_path:
@@ -621,7 +621,7 @@ class PairSignalExtractor:
         return node_types, node_tokens
 
     @staticmethod
-    def _read_edge_types(cpg_path: Optional[str]) -> dict[str, int]:
+    def _read_edge_types(cpg_path: str | None) -> dict[str, int]:
         """Read edge-type histogram from a CPG CSV."""
         if not cpg_path:
             return {}
@@ -690,7 +690,7 @@ class FusionOptimizationRunner:
         self,
         output_dir: Path,
         dataset_root: Path = Path("data/datasets/progpedia"),
-        verdicts: Optional[Iterable[str]] = None,
+        verdicts: Iterable[str] | None = None,
         trials: int = 80,
         threshold_step: float = 0.02,
         max_submissions_per_problem_language: int = 4,
@@ -987,7 +987,7 @@ class FusionOptimizationRunner:
         records: list[PairRecord],
         weights: dict[str, float],
         pool_mix: float = 0.0,
-        notes: Optional[list[str]] = None,
+        notes: list[str] | None = None,
     ) -> ExperimentResult:
         """Evaluate a weighted-average strategy."""
         scores = [
@@ -1065,7 +1065,7 @@ class FusionOptimizationRunner:
     def _evaluate_random_forest(
         self,
         records: list[PairRecord],
-    ) -> Optional[ExperimentResult]:
+    ) -> ExperimentResult | None:
         """Evaluate Random Forest fusion if scikit-learn is available."""
         if not self._module_available("sklearn"):
             return ExperimentResult(
@@ -1245,7 +1245,7 @@ class FusionOptimizationRunner:
 def run_fusion_optimization(
     output_dir: Path,
     dataset_root: Path = Path("data/datasets/progpedia"),
-    verdicts: Optional[Iterable[str]] = None,
+    verdicts: Iterable[str] | None = None,
     trials: int = 80,
     threshold_step: float = 0.02,
     max_submissions_per_problem_language: int = 4,

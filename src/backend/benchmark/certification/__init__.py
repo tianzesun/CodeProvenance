@@ -24,42 +24,42 @@ Architecture:
 """
 from __future__ import annotations
 
-from .report_builder import CertificationReportBuilder
-from .statistical_tests import (
-    mcnemar_test,
-    wilcoxon_signed_rank_test,
-    paired_statistical_tests,
-)
 from .confidence_intervals import (
     bootstrap_ci,
     compute_all_confidence_intervals,
 )
 from .effect_size import (
-    cohens_d,
     cliffs_delta,
+    cohens_d,
     interpret_effect_size,
 )
-from .tables import (
-    ResultsTable,
-    SignificanceTable,
-    StratifiedTable,
+from .models import (
+    BenchmarkRecord,
+    ComparisonResult,
+    EngineMetrics,
 )
 from .plots import (
-    ReliabilityDiagramPlotter,
     DegradationCurvePlotter,
+    ReliabilityDiagramPlotter,
 )
+from .report_builder import CertificationReportBuilder
 from .reproducibility import (
     ReproducibilityInfo,
     compute_reproducibility_hash,
+)
+from .statistical_tests import (
+    mcnemar_test,
+    paired_statistical_tests,
+    wilcoxon_signed_rank_test,
 )
 from .stratified import (
     StratifiedAnalyzer,
     StratifiedResults,
 )
-from .models import (
-    BenchmarkRecord,
-    EngineMetrics,
-    ComparisonResult,
+from .tables import (
+    ResultsTable,
+    SignificanceTable,
+    StratifiedTable,
 )
 
 __all__ = [

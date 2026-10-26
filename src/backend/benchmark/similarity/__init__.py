@@ -8,19 +8,19 @@ Core similarity detection algorithms:
 """
 
 # Raw algorithms
-from .token_winnowing import token_similarity
-from .ast_subtree import compare_ast, ast_similarity, compare_ast_safe
-from .hybrid import HybridSimilarity, HybridSimilarityConfig
+from .ast_subtree import ast_similarity, compare_ast, compare_ast_safe
 
 # Strict engine interface (THE contract - no engine allowed outside this)
 from .base_engine import BaseSimilarityEngine, SimilarityScore
 
 # Concrete engine implementations
 from .engines import (
-    TokenWinnowingEngine,
     ASTEngine,
     HybridEngine,
+    TokenWinnowingEngine,
 )
+from .hybrid import HybridSimilarity, HybridSimilarityConfig
+from .token_winnowing import token_similarity
 
 __all__ = [
     # Raw algorithms

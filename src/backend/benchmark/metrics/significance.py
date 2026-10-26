@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
 import random
-from typing import Any, Dict, Iterable, List, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ def bootstrap_confidence_interval(
     threshold: float = 0.5,
     n_bootstrap: int = 1000,
     seed: int = 42,
-) -> Dict[str, Dict[str, float]]:
+) -> dict[str, dict[str, float]]:
     """Compute simple bootstrap confidence intervals for binary metrics."""
     if not scores or not labels:
         zero = {"value": 0.0, "ci_lower": 0.0, "ci_upper": 0.0}
@@ -60,7 +61,7 @@ def bootstrap_confidence_interval(
         for name in samples:
             samples[name].append(metrics[name])
 
-    result: Dict[str, Dict[str, float]] = {}
+    result: dict[str, dict[str, float]] = {}
     for name, values in samples.items():
         values.sort()
         lower_index = int(0.025 * (len(values) - 1))
@@ -134,7 +135,7 @@ def add_significance_to_results(
     threshold: float = 0.5,
     n_bootstrap: int = 1000,
     seed: int = 42,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Attach confidence intervals to benchmark results."""
     return bootstrap_confidence_interval(
         scores,
@@ -145,7 +146,7 @@ def add_significance_to_results(
     )
 
 
-def _binary_metrics(predicted: Sequence[int], labels: Sequence[int]) -> Dict[str, float]:
+def _binary_metrics(predicted: Sequence[int], labels: Sequence[int]) -> dict[str, float]:
     tp = sum(1 for pred, label in zip(predicted, labels) if pred == 1 and label == 1)
     fp = sum(1 for pred, label in zip(predicted, labels) if pred == 1 and label == 0)
     fn = sum(1 for pred, label in zip(predicted, labels) if pred == 0 and label == 1)
@@ -162,6 +163,6 @@ def _exact_mcnemar_p_value(b: int, c: int) -> float:
         return 1.0
 
     tail = 0.0
-    for value in range(0, k + 1):
+    for value in range(k + 1):
         tail += math.comb(n, value) * (0.5 ** n)
     return min(1.0, 2 * tail)

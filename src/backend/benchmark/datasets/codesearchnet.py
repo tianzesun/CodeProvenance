@@ -6,9 +6,9 @@ Contains 457,461 Python functions with docstrings.
 
 Reference: https://huggingface.co/datasets/code_search_net
 """
-from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
 from pathlib import Path
-from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -39,10 +39,10 @@ class CodeSearchNetDataset:
     def __init__(self, data_dir: Path = Path("benchmark/data/codesearchnet")):
         self.data_dir = data_dir
         self.hf_dir = data_dir / "huggingface"
-        self._samples: List[CodeSearchNetSample] = []
+        self._samples: list[CodeSearchNetSample] = []
         self._dataset = None
     
-    def load(self, split: str = "train", max_samples: Optional[int] = None) -> List[CodeSearchNetSample]:
+    def load(self, split: str = "train", max_samples: int | None = None) -> list[CodeSearchNetSample]:
         """
         Load CodeSearchNet samples from HuggingFace Arrow format.
         
@@ -90,13 +90,13 @@ class CodeSearchNetDataset:
         self._samples = samples
         return samples
     
-    def _get_available_splits(self) -> List[str]:
+    def _get_available_splits(self) -> list[str]:
         """Get available dataset splits."""
         if not self.hf_dir.exists():
             return []
         return [d.name for d in self.hf_dir.iterdir() if d.is_dir()]
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         stats = {
             "name": "CodeSearchNet (Python)",
@@ -112,7 +112,7 @@ class CodeSearchNetDataset:
         
         return stats
     
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check dataset availability."""
         return {
             "data_dir": self.data_dir.exists(),

@@ -6,9 +6,10 @@ Only tools that appear in validation results are registered here.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Dict, List, Any, Optional
+import builtins
 from dataclasses import dataclass
+from enum import Enum
+from typing import Any
 
 
 class ToolCategory(Enum):
@@ -26,7 +27,7 @@ class AdapterMetadata:
     name: str
     adapter_class: Any
     category: ToolCategory
-    supported_languages: List[str]
+    supported_languages: list[str]
     is_external_dependency: bool
     enabled: bool
     description: str = ""
@@ -42,14 +43,14 @@ class AdapterRegistry:
     """
 
     def __init__(self) -> None:
-        self._adapters: Dict[str, AdapterMetadata] = {}
+        self._adapters: dict[str, AdapterMetadata] = {}
 
     def register(
         self,
         name: str,
         adapter_class: Any,
         category: ToolCategory,
-        supported_languages: List[str],
+        supported_languages: builtins.list[str],
         is_external_dependency: bool = False,
         enabled: bool = True,
         description: str = "",
@@ -67,18 +68,20 @@ class AdapterRegistry:
             reference_paper=reference_paper,
         )
 
-    def get(self, name: str) -> Optional[AdapterMetadata]:
+    def get(self, name: str) -> AdapterMetadata | None:
         """Get metadata for a registered adapter."""
         return self._adapters.get(name)
 
-    def list(self, category: Optional[ToolCategory] = None) -> List[AdapterMetadata]:
+    def list(
+        self, category: ToolCategory | None = None
+    ) -> builtins.list[AdapterMetadata]:
         """List all registered adapters, optionally filtered by category."""
         adapters = list(self._adapters.values())
         if category:
             adapters = [a for a in adapters if a.category == category]
         return [a for a in adapters if a.enabled]
 
-    def list_names(self, category: Optional[ToolCategory] = None) -> List[str]:
+    def list_names(self, category: ToolCategory | None = None) -> builtins.list[str]:
         """List names of registered adapters."""
         return [a.name for a in self.list(category)]
 
@@ -89,14 +92,14 @@ adapter_registry = AdapterRegistry()
 
 def initialize_registry() -> None:
     """Initialize registry with official benchmark participants."""
-    from .baselines.lexical_baseline import LexicalBaselineAdapter
     from .baselines.ast_baseline import ASTBaselineAdapter
-    from .moss_adapter import MossAdapter
-    from .jplag_adapter import JPlagAdapter
+    from .baselines.lexical_baseline import LexicalBaselineAdapter
     from .dolos_adapter import DolosBenchmarkEngine
     from .external.nicad_adapter import NiCadAdapter
-    from .pmd_adapter import PMDBenchmarkEngine
     from .internal.codeprovenance_engine import CodeProvenanceAdapter
+    from .jplag_adapter import JPlagAdapter
+    from .moss_adapter import MossAdapter
+    from .pmd_adapter import PMDBenchmarkEngine
 
     # Internal baselines
     adapter_registry.register(

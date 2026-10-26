@@ -7,26 +7,24 @@ variance/stability analysis.
 from __future__ import annotations
 
 import json
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
-from src.backend.benchmark.cross_dataset.unified_format import UnifiedBenchmarkDataset
 from src.backend.benchmark.cross_dataset.dataset_registry import DatasetRegistry
+from src.backend.benchmark.cross_dataset.eval_runner import EvaluationResult, EvaluationRunner
 from src.backend.benchmark.cross_dataset.tool_adapters import ToolAdapter
-from src.backend.benchmark.cross_dataset.eval_runner import EvaluationRunner, EvaluationResult
 
 
 @dataclass
 class DatasetRanking:
     """Tool rankings for a single dataset."""
     dataset_name: str
-    rankings: List[Dict[str, Any]] = field(default_factory=list)
+    rankings: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "dataset": self.dataset_name,
             "rankings": self.rankings,
@@ -50,9 +48,9 @@ class ToolAggregateStats:
     min_f1: float = 0.0
     max_f1: float = 0.0
     datasets_evaluated: int = 0
-    per_dataset: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    per_dataset: dict[str, dict[str, float]] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "tool": self.tool_name,
             "mean_f1": round(self.mean_f1, 4),
@@ -81,12 +79,12 @@ class CrossEvalReport:
     timestamp: str = ""
     num_datasets: int = 0
     num_tools: int = 0
-    per_dataset_rankings: List[DatasetRanking] = field(default_factory=list)
-    tool_aggregates: List[ToolAggregateStats] = field(default_factory=list)
-    all_results: List[EvaluationResult] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    per_dataset_rankings: list[DatasetRanking] = field(default_factory=list)
+    tool_aggregates: list[ToolAggregateStats] = field(default_factory=list)
+    all_results: list[EvaluationResult] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "timestamp": self.timestamp,
             "num_datasets": self.num_datasets,
@@ -153,18 +151,18 @@ class CrossDatasetEvaluator:
         report = evaluator.run(threshold=0.5)
     """
 
-    def __init__(self, registry: Optional[DatasetRegistry] = None):
+    def __init__(self, registry: DatasetRegistry | None = None):
         self._registry = registry or DatasetRegistry.get_instance()
-        self._tools: Dict[str, ToolAdapter] = {}
-        self._dataset_names: List[str] = []
-        self._tool_names: List[str] = []
+        self._tools: dict[str, ToolAdapter] = {}
+        self._dataset_names: list[str] = []
+        self._tool_names: list[str] = []
         self._eval_runner = EvaluationRunner()
 
     def register_dataset(
         self,
         name: str,
         loader: Any,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         self._registry.register(name, loader, metadata)
         if name not in self._dataset_names:
@@ -175,19 +173,19 @@ class CrossDatasetEvaluator:
         if name not in self._tool_names:
             self._tool_names.append(name)
 
-    def register_tool_from_engine(self, engine, name: Optional[str] = None, **kwargs) -> None:
+    def register_tool_from_engine(self, engine, name: str | None = None, **kwargs) -> None:
         from src.backend.benchmark.cross_dataset.tool_adapters import EngineToolAdapter
         adapter = EngineToolAdapter(engine, name=name, **kwargs)
         self.register_tool(adapter.name, adapter)
 
     def run(
         self,
-        dataset_names: Optional[List[str]] = None,
-        tool_names: Optional[List[str]] = None,
+        dataset_names: list[str] | None = None,
+        tool_names: list[str] | None = None,
         threshold: float = 0.5,
         optimize_thresholds: bool = False,
         threshold_strategy: str = "f1_max",
-        output_path: Optional[str] = None,
+        output_path: str | None = None,
         verbose: bool = True,
     ) -> CrossEvalReport:
         if dataset_names is None:
@@ -195,8 +193,8 @@ class CrossDatasetEvaluator:
         if tool_names is None:
             tool_names = self._tool_names
 
-        all_results: List[EvaluationResult] = []
-        per_dataset: Dict[str, List[EvaluationResult]] = {
+        all_results: list[EvaluationResult] = []
+        per_dataset: dict[str, list[EvaluationResult]] = {
             ds: [] for ds in dataset_names
         }
 
@@ -271,14 +269,14 @@ class CrossDatasetEvaluator:
 
     def _build_report(
         self,
-        dataset_names: List[str],
-        tool_names: List[str],
-        all_results: List[EvaluationResult],
-        per_dataset: Dict[str, List[EvaluationResult]],
+        dataset_names: list[str],
+        tool_names: list[str],
+        all_results: list[EvaluationResult],
+        per_dataset: dict[str, list[EvaluationResult]],
     ) -> CrossEvalReport:
         from datetime import datetime
 
-        per_dataset_rankings: List[DatasetRanking] = []
+        per_dataset_rankings: list[DatasetRanking] = []
         for ds_name in dataset_names:
             results = per_dataset.get(ds_name, [])
             ranked = sorted(results, key=lambda r: r.f1, reverse=True)
@@ -312,10 +310,10 @@ class CrossDatasetEvaluator:
 
     def _compute_aggregates(
         self,
-        all_results: List[EvaluationResult],
-        tool_names: List[str],
-    ) -> List[ToolAggregateStats]:
-        tool_results: Dict[str, List[EvaluationResult]] = {
+        all_results: list[EvaluationResult],
+        tool_names: list[str],
+    ) -> list[ToolAggregateStats]:
+        tool_results: dict[str, list[EvaluationResult]] = {
             t: [] for t in tool_names
         }
         for r in all_results:
@@ -365,7 +363,7 @@ class CrossDatasetEvaluator:
 
         return aggregates
 
-    def run_significance_tests(self, alpha: float = 0.05) -> List[Dict[str, Any]]:
+    def run_significance_tests(self, alpha: float = 0.05) -> list[dict[str, Any]]:
         """Run pairwise McNemar significance tests between all tools."""
         try:
             from scipy import stats

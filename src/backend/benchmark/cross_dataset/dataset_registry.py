@@ -4,8 +4,9 @@ Maintains a registry of all available datasets with lazy loading support.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Callable, Optional, Any
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from src.backend.benchmark.cross_dataset.unified_format import UnifiedDataset
 
@@ -21,15 +22,15 @@ class DatasetRegistry:
         - Singleton pattern via get_instance()
     """
 
-    _instance: Optional["DatasetRegistry"] = None
+    _instance: DatasetRegistry | None = None
 
     def __init__(self):
-        self._loaders: Dict[str, Callable[..., UnifiedDataset]] = {}
-        self._metadata: Dict[str, Dict[str, Any]] = {}
-        self._cache: Dict[str, UnifiedDataset] = {}
+        self._loaders: dict[str, Callable[..., UnifiedDataset]] = {}
+        self._metadata: dict[str, dict[str, Any]] = {}
+        self._cache: dict[str, UnifiedDataset] = {}
 
     @classmethod
-    def get_instance(cls) -> "DatasetRegistry":
+    def get_instance(cls) -> DatasetRegistry:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -42,7 +43,7 @@ class DatasetRegistry:
         self,
         name: str,
         loader: Callable[..., UnifiedDataset],
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         self._loaders[name] = loader
         self._metadata[name] = metadata or {}
@@ -52,8 +53,8 @@ class DatasetRegistry:
         name: str,
         data_root: str = "data/datasets",
         split: str = "test",
-        max_pairs: Optional[int] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        max_pairs: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Register an external dataset loader."""
         import importlib.util
@@ -85,7 +86,7 @@ class DatasetRegistry:
         self,
         name: str,
         canonical_loader: Callable,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         def loader(**kwargs) -> UnifiedDataset:
             canonical = canonical_loader(**kwargs)
@@ -111,26 +112,26 @@ class DatasetRegistry:
     def clear_cache(self) -> None:
         self._cache.clear()
 
-    def list_datasets(self) -> List[str]:
+    def list_datasets(self) -> list[str]:
         return sorted(self._loaders.keys())
 
     def has(self, name: str) -> bool:
         return name in self._loaders
 
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         return sorted(self._loaders.keys())
 
-    def get_metadata(self, name: str) -> Dict[str, Any]:
+    def get_metadata(self, name: str) -> dict[str, Any]:
         if name not in self._loaders:
             return {}
         return dict(self._metadata.get(name, {}))
 
     def load_all(
         self,
-        names: Optional[List[str]] = None,
+        names: list[str] | None = None,
         use_cache: bool = True,
         **kwargs,
-    ) -> Dict[str, UnifiedDataset]:
+    ) -> dict[str, UnifiedDataset]:
         if names is None:
             names = self.list_datasets()
         result = {}

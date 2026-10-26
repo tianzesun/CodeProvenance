@@ -31,10 +31,11 @@ import json
 import logging
 import random
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 from src.backend.benchmark.runners.engine_evaluation_runner import LabeledPair
 from src.backend.engines.scoring.learned_fusion import (
@@ -46,7 +47,7 @@ from src.backend.engines.scoring.learned_fusion import (
 
 logger = logging.getLogger(__name__)
 
-SUPPORTED_DATASETS: Tuple[str, ...] = (
+SUPPORTED_DATASETS: tuple[str, ...] = (
     "IR-Plag-Dataset",
     "conplag",
     "kaggle_student_code",
@@ -63,7 +64,7 @@ FEATURE_CACHE_VERSION = 1
 
 #: File extension per corpus language, so the file-type classifier and the
 #: language-specific engines see the right language.
-LANGUAGE_EXTENSIONS: Dict[str, str] = {
+LANGUAGE_EXTENSIONS: dict[str, str] = {
     "java": ".java",
     "python": ".py",
     "py": ".py",
@@ -92,8 +93,8 @@ class FeatureCacheCheckReport:
     sampled_pairs: int
     compared_values: int
     max_abs_diff: float
-    per_feature_max: Dict[str, float] = field(default_factory=dict)
-    mismatched_pairs: List[str] = field(default_factory=list)
+    per_feature_max: dict[str, float] = field(default_factory=dict)
+    mismatched_pairs: list[str] = field(default_factory=list)
     tolerance: float = 1e-6
 
     @property
@@ -101,7 +102,7 @@ class FeatureCacheCheckReport:
         """True when any compared value exceeded the tolerance."""
         return self.max_abs_diff > self.tolerance
 
-    def to_json_dict(self) -> Dict[str, Any]:
+    def to_json_dict(self) -> dict[str, Any]:
         """Convert to a JSON-safe dictionary."""
         payload = asdict(self)
         payload["stale"] = self.stale
@@ -113,11 +114,11 @@ class LearnedFusionReport:
     """Serializable report for the learned fusion training workflow."""
 
     generated_at: str
-    train_datasets: List[str]
+    train_datasets: list[str]
     pair_count: int
     positive_pairs: int
     negative_pairs: int
-    feature_names: List[str]
+    feature_names: list[str]
     production_fused_auc: float
     production_fused_f1_best: float
     production_fused_threshold: float
@@ -126,16 +127,16 @@ class LearnedFusionReport:
     cv_f1_best: float
     cv_threshold: float
     cv_fold_count: int
-    coefficient_weights: Dict[str, float]
+    coefficient_weights: dict[str, float]
     intercept: float
     artifact_path: str
-    per_dataset_auc: Dict[str, float] = field(default_factory=dict)
-    per_dataset_production_auc: Dict[str, float] = field(default_factory=dict)
-    pairs_per_dataset: Dict[str, int] = field(default_factory=dict)
+    per_dataset_auc: dict[str, float] = field(default_factory=dict)
+    per_dataset_production_auc: dict[str, float] = field(default_factory=dict)
+    pairs_per_dataset: dict[str, int] = field(default_factory=dict)
     cv_notes: str = ""
     runtime_seconds: float = 0.0
 
-    def to_json_dict(self) -> Dict[str, Any]:
+    def to_json_dict(self) -> dict[str, Any]:
         """Convert to a JSON-safe dictionary."""
         return asdict(self)
 
@@ -151,7 +152,7 @@ class LearnedFusionReport:
     def save_markdown(self, path: Path) -> Path:
         """Write Markdown report to disk."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        lines: List[str] = [
+        lines: list[str] = [
             "# Learned Fusion Training Report",
             "",
             f"- Generated: `{self.generated_at}`",
@@ -237,13 +238,13 @@ class LearnedFusionTrainingRunner:
     def __init__(
         self,
         output_dir: Path,
-        dataset_roots: Optional[List[Path]] = None,
+        dataset_roots: list[Path] | None = None,
         threshold_step: float = 0.02,
         seed: int = 42,
-        max_pairs_per_dataset: Optional[int] = None,
+        max_pairs_per_dataset: int | None = None,
         cv_folds: int = 0,
         poolc_negative_ratio: float = 0.0,
-        cache_path: Optional[Path] = None,
+        cache_path: Path | None = None,
         dataset_weighting: str = "proportional",
         prewarm_embeddings: bool = True,
     ) -> None:
@@ -297,12 +298,12 @@ class LearnedFusionTrainingRunner:
         self.cache_path = Path(cache_path) if cache_path else None
         self.dataset_weighting = dataset_weighting
         self.prewarm_embeddings = prewarm_embeddings
-        self.feature_names: List[str] = list(DEFAULT_FEATURE_NAMES)
+        self.feature_names: list[str] = list(DEFAULT_FEATURE_NAMES)
 
     def run(
         self,
-        enabled_datasets: Optional[List[str]] = None,
-        artifact_path: Optional[Path] = None,
+        enabled_datasets: list[str] | None = None,
+        artifact_path: Path | None = None,
     ) -> LearnedFusionReport:
         """Execute the training workflow and write the model artifact.
 
@@ -423,7 +424,7 @@ class LearnedFusionTrainingRunner:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _default_dataset_roots() -> List[Path]:
+    def _default_dataset_roots() -> list[Path]:
         """Return the default dataset search roots."""
         repo_root = Path(__file__).resolve().parents[4]
         return [
@@ -442,7 +443,7 @@ class LearnedFusionTrainingRunner:
             + ", ".join(str(root) for root in self.dataset_roots)
         )
 
-    def load_pairs(self, dataset_names: List[str]) -> List[LabeledPair]:
+    def load_pairs(self, dataset_names: list[str]) -> list[LabeledPair]:
         """Load labeled pairs from every requested corpus.
 
         Public entry point shared with the engine-evaluation harness so that a
@@ -451,9 +452,9 @@ class LearnedFusionTrainingRunner:
         """
         return self._load_pairs(dataset_names)
 
-    def _load_pairs(self, dataset_names: List[str]) -> List[LabeledPair]:
+    def _load_pairs(self, dataset_names: list[str]) -> list[LabeledPair]:
         """Load labeled pairs from every requested dataset."""
-        all_pairs: List[LabeledPair] = []
+        all_pairs: list[LabeledPair] = []
         for dataset_name in dataset_names:
             if dataset_name == "IR-Plag-Dataset":
                 pairs = self._load_ir_plag_pairs()
@@ -475,10 +476,10 @@ class LearnedFusionTrainingRunner:
             all_pairs.extend(pairs)
         return all_pairs
 
-    def _load_ir_plag_pairs(self) -> List[LabeledPair]:
+    def _load_ir_plag_pairs(self) -> list[LabeledPair]:
         """Load every IR-Plag case as original-vs-other labeled pairs."""
         root = self._find_dataset_dir("IR-Plag-Dataset")
-        pairs: List[LabeledPair] = []
+        pairs: list[LabeledPair] = []
         for case_dir in sorted(root.glob("case-*")):
             original_files = sorted((case_dir / "original").glob("*.java"))
             if not original_files:
@@ -508,10 +509,10 @@ class LearnedFusionTrainingRunner:
                     )
         return pairs
 
-    def _load_conplag_pairs(self) -> List[LabeledPair]:
+    def _load_conplag_pairs(self) -> list[LabeledPair]:
         """Load ConPlag pairs from the train and test pair lists."""
         root = self._find_dataset_dir("conplag")
-        pair_ids: List[str] = []
+        pair_ids: list[str] = []
         for split_file in ("train_pairs.csv", "test_pairs.csv"):
             split_path = root / "versions" / split_file
             if not split_path.exists():
@@ -524,14 +525,14 @@ class LearnedFusionTrainingRunner:
                     if row and row[0].strip()
                 )
 
-        label_lookup: Dict[str, Dict[str, str]] = {}
+        label_lookup: dict[str, dict[str, str]] = {}
         labels_path = root / "versions" / "labels.csv"
         with labels_path.open("r", encoding="utf-8") as handle:
             for row in csv.DictReader(handle):
                 label_lookup[f"{row['sub1']}_{row['sub2']}"] = row
                 label_lookup[f"{row['sub2']}_{row['sub1']}"] = row
 
-        pairs: List[LabeledPair] = []
+        pairs: list[LabeledPair] = []
         version_dir = root / "versions" / "version_1"
         for pair_id in pair_ids:
             pair_dir = version_dir / pair_id
@@ -557,7 +558,7 @@ class LearnedFusionTrainingRunner:
             )
         return pairs
 
-    def _load_kaggle_pairs(self) -> List[LabeledPair]:
+    def _load_kaggle_pairs(self) -> list[LabeledPair]:
         """Load the labelled same-classroom student pairs.
 
         These are Python submissions from one class, so every pair is two
@@ -568,7 +569,7 @@ class LearnedFusionTrainingRunner:
         csv_path = root / "cheating_dataset.csv"
         if not csv_path.exists():
             raise FileNotFoundError(f"Missing Kaggle pair list: {csv_path}")
-        pairs: List[LabeledPair] = []
+        pairs: list[LabeledPair] = []
         with csv_path.open("r", encoding="utf-8") as handle:
             for row in csv.DictReader(handle):
                 file_a = (row.get("File_1") or "").strip()
@@ -601,7 +602,7 @@ class LearnedFusionTrainingRunner:
                 )
         return pairs
 
-    def _load_poolc_pairs(self) -> List[LabeledPair]:
+    def _load_poolc_pairs(self) -> list[LabeledPair]:
         """Load a balanced PoolC sample of Python competitive-programming pairs.
 
         PoolC marks every pair of solutions to the same problem ``similar`` and
@@ -645,7 +646,7 @@ class LearnedFusionTrainingRunner:
         negative_cap = int(positive_cap * max(0.0, self.poolc_negative_ratio))
 
         rng = random.Random(self.seed)
-        pairs: List[LabeledPair] = []
+        pairs: list[LabeledPair] = []
         positives_taken = 0
         negatives_taken = 0
 
@@ -696,7 +697,7 @@ class LearnedFusionTrainingRunner:
                 break
         return pairs
 
-    def _limit_pairs(self, pairs: List[LabeledPair]) -> List[LabeledPair]:
+    def _limit_pairs(self, pairs: list[LabeledPair]) -> list[LabeledPair]:
         """Cap one dataset at ``max_pairs_per_dataset`` pairs, keeping both classes.
 
         PoolC is capped inside its own loader because its class mix is
@@ -722,7 +723,7 @@ class LearnedFusionTrainingRunner:
         return path.read_text(encoding="utf-8", errors="replace")
 
     @staticmethod
-    def _poolc_group_key(meta: Dict[str, Any]) -> str:
+    def _poolc_group_key(meta: dict[str, Any]) -> str:
         """PoolC group as an unordered endpoint-group pair (``small-large``).
 
         PoolC positives sit inside one group and negatives across two, so the
@@ -756,10 +757,10 @@ class LearnedFusionTrainingRunner:
 
     def _extract_feature_rows(
         self,
-        pairs: List[LabeledPair],
-        force_indices: Optional[set] = None,
+        pairs: list[LabeledPair],
+        force_indices: set | None = None,
         write_cache: bool = True,
-    ) -> List[Dict[str, float]]:
+    ) -> list[dict[str, float]]:
         """Score every pair through the production path and collect features.
 
         The currently deployed learned artifact is neutralized so features and
@@ -784,8 +785,8 @@ class LearnedFusionTrainingRunner:
 
         cached = self._load_feature_cache()
         forced = set(force_indices or ())
-        rows: List[Optional[Dict[str, float]]] = [None] * len(pairs)
-        missing: List[int] = []
+        rows: list[dict[str, float] | None] = [None] * len(pairs)
+        missing: list[int] = []
         for index, pair in enumerate(pairs):
             cache_key = self._cache_key(pair)
             if index not in forced and cache_key in cached:
@@ -803,9 +804,9 @@ class LearnedFusionTrainingRunner:
             service = BatchDetectionService()
             service.learned_scorer = None
 
-            submissions: Dict[str, str] = {}
-            specs: List[Dict[str, Any]] = []
-            file_names: Dict[int, Tuple[str, str]] = {}
+            submissions: dict[str, str] = {}
+            specs: list[dict[str, Any]] = []
+            file_names: dict[int, tuple[str, str]] = {}
             for index in missing:
                 pair = pairs[index]
                 extension = self._extension_for(pair.language)
@@ -864,13 +865,13 @@ class LearnedFusionTrainingRunner:
                 pairs=specs,
                 progress_callback=_report_progress,
             )
-            result_by_key: Dict[Tuple[str, str], Dict[str, float]] = {}
+            result_by_key: dict[tuple[str, str], dict[str, float]] = {}
             for result in results:
                 result_by_key[self._normalize_pair(result.file_a, result.file_b)] = (
                     dict(result.features or {})
                 )
 
-            extracted: List[Tuple[str, Dict[str, float]]] = []
+            extracted: list[tuple[str, dict[str, float]]] = []
             for index in missing:
                 feature_row = result_by_key.get(
                     self._normalize_pair(*file_names[index]), {}
@@ -885,7 +886,7 @@ class LearnedFusionTrainingRunner:
             if write_cache:
                 self._append_feature_cache(extracted)
 
-        final_rows: List[Dict[str, float]] = []
+        final_rows: list[dict[str, float]] = []
         for index, row in enumerate(rows):
             if row is None:  # pragma: no cover - defensive
                 raise RuntimeError(
@@ -990,7 +991,7 @@ class LearnedFusionTrainingRunner:
                 report.mismatched_pairs.append(pair.pair_id)
         return report
 
-    def _load_feature_cache(self) -> Dict[str, Dict[str, float]]:
+    def _load_feature_cache(self) -> dict[str, dict[str, float]]:
         """Read the JSONL feature cache, if one is configured.
 
         Entries written by a different recipe are ignored (and counted in the
@@ -1001,7 +1002,7 @@ class LearnedFusionTrainingRunner:
         if not self.cache_path or not self.cache_path.exists():
             return {}
         recipe = self._cache_recipe()
-        cache: Dict[str, Dict[str, float]] = {}
+        cache: dict[str, dict[str, float]] = {}
         legacy = 0
         skipped = 0
         with self.cache_path.open("r", encoding="utf-8") as handle:
@@ -1041,7 +1042,7 @@ class LearnedFusionTrainingRunner:
         return cache
 
     def _append_feature_cache(
-        self, entries: Sequence[Tuple[str, Dict[str, float]]]
+        self, entries: Sequence[tuple[str, dict[str, float]]]
     ) -> None:
         """Append freshly extracted rows to the JSONL feature cache."""
         if not self.cache_path or not entries:
@@ -1085,10 +1086,10 @@ class LearnedFusionTrainingRunner:
 
     def _fit_final_model(
         self,
-        rows: List[Dict[str, float]],
-        labels: List[int],
-        sample_weights: Optional[List[float]] = None,
-    ) -> Tuple[Dict[str, float], float]:
+        rows: list[dict[str, float]],
+        labels: list[int],
+        sample_weights: list[float] | None = None,
+    ) -> tuple[dict[str, float], float]:
         """Fit the production logistic model on all pairs."""
         classifier = self._fit_logistic(rows, labels, sample_weights)
         coefficient_weights = {
@@ -1099,9 +1100,9 @@ class LearnedFusionTrainingRunner:
 
     def _fit_logistic(
         self,
-        rows: List[Dict[str, float]],
-        labels: List[int],
-        sample_weights: Optional[List[float]] = None,
+        rows: list[dict[str, float]],
+        labels: list[int],
+        sample_weights: list[float] | None = None,
     ) -> Any:
         """Fit a balanced logistic classifier over the feature rows."""
         try:
@@ -1120,11 +1121,11 @@ class LearnedFusionTrainingRunner:
 
     def _logo_cross_validate(
         self,
-        rows: List[Dict[str, float]],
-        labels: List[int],
-        groups: List[str],
-        sample_weights: Optional[List[float]] = None,
-    ) -> Tuple[Dict[int, float], int]:
+        rows: list[dict[str, float]],
+        labels: list[int],
+        groups: list[str],
+        sample_weights: list[float] | None = None,
+    ) -> tuple[dict[int, float], int]:
         """Run leave-one-group-out cross-validation.
 
         Returns the out-of-fold probability for each scored pair keyed by its
@@ -1140,12 +1141,12 @@ class LearnedFusionTrainingRunner:
 
     def _group_kfold_cross_validate(
         self,
-        rows: List[Dict[str, float]],
-        labels: List[int],
-        groups: List[str],
+        rows: list[dict[str, float]],
+        labels: list[int],
+        groups: list[str],
         folds: int,
-        sample_weights: Optional[List[float]] = None,
-    ) -> Tuple[Dict[int, float], int]:
+        sample_weights: list[float] | None = None,
+    ) -> tuple[dict[int, float], int]:
         """Run grouped k-fold cross-validation.
 
         Every pair of one group lands in the same fold, so no code is scored by
@@ -1160,7 +1161,7 @@ class LearnedFusionTrainingRunner:
         random.Random(self.seed).shuffle(shuffled)
         fold_of = {group: index % folds for index, group in enumerate(shuffled)}
 
-        held_out_sets: Dict[str, List[int]] = {}
+        held_out_sets: dict[str, list[int]] = {}
         for index, group in enumerate(groups):
             held_out_sets.setdefault(f"fold-{fold_of[group]}", []).append(index)
         return self._score_held_out_sets(
@@ -1169,18 +1170,18 @@ class LearnedFusionTrainingRunner:
 
     def _score_held_out_sets(
         self,
-        rows: List[Dict[str, float]],
-        labels: List[int],
-        held_out_sets: Dict[str, List[int]],
+        rows: list[dict[str, float]],
+        labels: list[int],
+        held_out_sets: dict[str, list[int]],
         fold_label: str,
-        sample_weights: Optional[List[float]] = None,
-    ) -> Tuple[Dict[int, float], int]:
+        sample_weights: list[float] | None = None,
+    ) -> tuple[dict[int, float], int]:
         """Fit one model per held-out index set and collect out-of-fold scores.
 
         Folds whose training split lacks a class are skipped with a warning, so
         the returned mapping may cover fewer pairs than were passed in.
         """
-        oof_by_index: Dict[int, float] = {}
+        oof_by_index: dict[int, float] = {}
         fold_count = 0
         total = len(held_out_sets)
         for name in sorted(held_out_sets):
@@ -1222,13 +1223,13 @@ class LearnedFusionTrainingRunner:
 
     def _auc_per_dataset(
         self,
-        scores_by_index: Dict[int, float],
-        labels: List[int],
-        pairs: List[LabeledPair],
-    ) -> Dict[str, float]:
+        scores_by_index: dict[int, float],
+        labels: list[int],
+        pairs: list[LabeledPair],
+    ) -> dict[str, float]:
         """Compute per-dataset AUC over any aligned index→score mapping."""
-        per_dataset_scores: Dict[str, List[float]] = {}
-        per_dataset_labels: Dict[str, List[int]] = {}
+        per_dataset_scores: dict[str, list[float]] = {}
+        per_dataset_labels: dict[str, list[int]] = {}
         for index, score in scores_by_index.items():
             dataset_name = str((pairs[index].metadata or {}).get("dataset", "unknown"))
             per_dataset_scores.setdefault(dataset_name, []).append(score)
@@ -1240,15 +1241,15 @@ class LearnedFusionTrainingRunner:
         }
 
     @staticmethod
-    def _count_per_dataset(pairs: List[LabeledPair]) -> Dict[str, int]:
+    def _count_per_dataset(pairs: list[LabeledPair]) -> dict[str, int]:
         """Count loaded pairs per dataset."""
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for pair in pairs:
             name = str((pair.metadata or {}).get("dataset", "unknown"))
             counts[name] = counts.get(name, 0) + 1
         return dict(sorted(counts.items()))
 
-    def _sample_weights(self, pairs: List[LabeledPair]) -> Optional[List[float]]:
+    def _sample_weights(self, pairs: list[LabeledPair]) -> list[float] | None:
         """Per-pair fit weights, or ``None`` when every pair counts once.
 
         ``dataset_weighting="equal"`` gives each corpus the same total weight, so
@@ -1268,7 +1269,7 @@ class LearnedFusionTrainingRunner:
             return None
         return [value / mean for value in raw]
 
-    def _cv_notes(self, cv_mode: str, datasets: List[str]) -> str:
+    def _cv_notes(self, cv_mode: str, datasets: list[str]) -> str:
         """Describe the evaluation protocol in one line."""
         notes = f"{cv_mode}; a fold never splits one group across train and test."
         if "poolc_600k_python" in datasets and self.poolc_negative_ratio <= 0:
@@ -1281,15 +1282,15 @@ class LearnedFusionTrainingRunner:
     def _write_artifact(
         self,
         path: Path,
-        datasets: List[str],
-        pairs: List[LabeledPair],
-        coefficient_weights: Dict[str, float],
+        datasets: list[str],
+        pairs: list[LabeledPair],
+        coefficient_weights: dict[str, float],
         intercept: float,
         production_auc: float,
         cv_auc: float,
-        cv_best: Dict[str, float],
+        cv_best: dict[str, float],
         cv_mode: str,
-        pairs_per_dataset: Dict[str, int],
+        pairs_per_dataset: dict[str, int],
     ) -> None:
         """Write the version-1 JSON artifact consumed at scoring time."""
         labels = [pair.label for pair in pairs]
@@ -1329,12 +1330,12 @@ class LearnedFusionTrainingRunner:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _normalize_pair(file_a: str, file_b: str) -> Tuple[str, str]:
+    def _normalize_pair(file_a: str, file_b: str) -> tuple[str, str]:
         """Build a stable unordered pair key."""
         return tuple(sorted((file_a, file_b)))  # type: ignore[return-value]
 
     @staticmethod
-    def _auc(scores: List[float], labels: List[int]) -> float:
+    def _auc(scores: list[float], labels: list[int]) -> float:
         """Compute ROC-AUC using the Mann-Whitney concordance estimator."""
         positives = [score for score, label in zip(scores, labels) if label == 1]
         negatives = [score for score, label in zip(scores, labels) if label == 0]
@@ -1354,10 +1355,10 @@ class LearnedFusionTrainingRunner:
         return max(0.0, min(1.0, (concordant + 0.5 * ties) / total))
 
     def _best_threshold(
-        self, scores: List[float], labels: List[int]
-    ) -> Dict[str, float]:
+        self, scores: list[float], labels: list[int]
+    ) -> dict[str, float]:
         """Sweep thresholds and return the best-F1 operating point."""
-        best: Dict[str, float] = {
+        best: dict[str, float] = {
             "threshold": 0.5,
             "precision": 0.0,
             "recall": 0.0,
@@ -1373,8 +1374,8 @@ class LearnedFusionTrainingRunner:
 
     @staticmethod
     def _metrics_at_threshold(
-        scores: List[float], labels: List[int], threshold: float
-    ) -> Dict[str, float]:
+        scores: list[float], labels: list[int], threshold: float
+    ) -> dict[str, float]:
         """Compute binary metrics for a single threshold."""
         tp = fp = tn = fn = 0
         for score, label in zip(scores, labels):
@@ -1407,15 +1408,15 @@ class LearnedFusionTrainingRunner:
 
 def run_learned_fusion_training(
     output_dir: Path,
-    artifact_path: Optional[Path] = None,
+    artifact_path: Path | None = None,
     threshold_step: float = 0.02,
     seed: int = 42,
-    enabled_datasets: Optional[List[str]] = None,
-    dataset_roots: Optional[List[Path]] = None,
-    max_pairs_per_dataset: Optional[int] = None,
+    enabled_datasets: list[str] | None = None,
+    dataset_roots: list[Path] | None = None,
+    max_pairs_per_dataset: int | None = None,
     cv_folds: int = 0,
     poolc_negative_ratio: float = 0.0,
-    cache_path: Optional[Path] = None,
+    cache_path: Path | None = None,
     dataset_weighting: str = "proportional",
     prewarm_embeddings: bool = True,
 ) -> LearnedFusionReport:

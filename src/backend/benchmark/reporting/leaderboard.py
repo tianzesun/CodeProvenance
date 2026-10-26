@@ -3,10 +3,10 @@
 Provides persistent tracking and display of benchmark results across runs.
 """
 import json
-from pathlib import Path
-from typing import List, Dict, Any, Optional
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -23,7 +23,7 @@ class LeaderboardEntry:
     ndcg: float = 0.0
     threshold: float = 0.5
     timestamp: str = ""
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
     version: str = ""
 
     def __post_init__(self):
@@ -42,7 +42,7 @@ class Leaderboard:
     
     def __init__(self, path: str = "reports/leaderboard/leaderboard.json"):
         self.path = Path(path)
-        self.entries: List[LeaderboardEntry] = []
+        self.entries: list[LeaderboardEntry] = []
         self._load()
     
     @classmethod
@@ -72,7 +72,7 @@ class Leaderboard:
         """
         self.entries.append(entry)
     
-    def rank_by(self, metric: str = "f1", n: int = -1) -> List[LeaderboardEntry]:
+    def rank_by(self, metric: str = "f1", n: int = -1) -> list[LeaderboardEntry]:
         """Get entries ranked by a specific metric.
         
         Args:
@@ -89,7 +89,7 @@ class Leaderboard:
         )
         return sorted_entries[:n] if n > 0 else sorted_entries
     
-    def best_for_dataset(self, dataset: str, metric: str = "f1") -> Optional[LeaderboardEntry]:
+    def best_for_dataset(self, dataset: str, metric: str = "f1") -> LeaderboardEntry | None:
         """Get best entry for a specific dataset.
         
         Args:
@@ -123,7 +123,7 @@ class Leaderboard:
             fcntl.flock(f, fcntl.LOCK_UN)
         return str(self.path)
     
-    def to_report(self, metric: str = "f1") -> Dict[str, Any]:
+    def to_report(self, metric: str = "f1") -> dict[str, Any]:
         """Generate a report from the leaderboard.
         
         Args:

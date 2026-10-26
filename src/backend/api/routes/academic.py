@@ -2,10 +2,9 @@
 API routes for managing Organizations, Courses, Assignments, Students, and Enrollments.
 """
 
+import logging
 from datetime import date, datetime
 from typing import Any, Optional
-
-import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr
@@ -20,6 +19,10 @@ from src.backend.api.middleware.auth import (
     require_user_permission,
 )
 from src.backend.application.services import academic_access
+from src.backend.application.services.student_service import (
+    AssignmentVersionService,
+    StudentService,
+)
 from src.backend.config.database import get_db
 from src.backend.models.database import (
     Assignment,
@@ -31,10 +34,6 @@ from src.backend.models.database import (
     Organization,
     Student,
     Term,
-)
-from src.backend.application.services.student_service import (
-    StudentService,
-    AssignmentVersionService,
 )
 
 router = APIRouter(prefix="/api", tags=["academic"])
@@ -143,10 +142,10 @@ class OrganizationResponse(BaseModel):
 class TermCreate(BaseModel):
     name: str
     year: int
-    description: Optional[str] = None
+    description: str | None = None
     # Optional planning window. Either end may be omitted.
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
+    start_date: date | None = None
+    end_date: date | None = None
 
 
 class TermUpdate(BaseModel):
@@ -160,9 +159,9 @@ class TermUpdate(BaseModel):
 
     name: str
     year: int
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    description: Optional[str] = None
+    start_date: date | None = None
+    end_date: date | None = None
+    description: str | None = None
 
 
 class TermResponse(BaseModel):
@@ -171,9 +170,9 @@ class TermResponse(BaseModel):
     name: str
     year: int
     label: str
-    description: Optional[str] = None
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    description: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
     course_count: int = 0
     created_at: str
 
@@ -182,23 +181,23 @@ class TermResponse(BaseModel):
 
 class CourseCreate(BaseModel):
     name: str
-    code: Optional[str] = None
-    term: Optional[str] = None
-    year: Optional[int] = None
-    department: Optional[str] = None
-    description: Optional[str] = None
+    code: str | None = None
+    term: str | None = None
+    year: int | None = None
+    department: str | None = None
+    description: str | None = None
     # Registry term to attach. When set, ``term``/``year`` are mirrored from it.
-    term_id: Optional[str] = None
+    term_id: str | None = None
 
 
 class CourseResponse(BaseModel):
     id: str
     organization_id: str
     name: str
-    code: Optional[str]
-    term: Optional[str]
-    year: Optional[int]
-    term_id: Optional[str] = None
+    code: str | None
+    term: str | None
+    year: int | None
+    term_id: str | None = None
     created_at: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -206,30 +205,30 @@ class CourseResponse(BaseModel):
 
 class AssignmentCreate(BaseModel):
     name: str
-    term: Optional[str] = None
+    term: str | None = None
     version: int = 1
-    due_at: Optional[str] = None
-    settings: Optional[dict] = None
+    due_at: str | None = None
+    settings: dict | None = None
     # Analytics metadata. ``assignment_type`` drives which detection mode and
     # engine weights are recommended for the assignment (see assignment_modes).
-    assignment_type: Optional[str] = None
-    description: Optional[str] = None
-    max_score: Optional[float] = None
-    team_mode: Optional[str] = None
-    open_book: Optional[bool] = None
-    time_limited: Optional[bool] = None
+    assignment_type: str | None = None
+    description: str | None = None
+    max_score: float | None = None
+    team_mode: str | None = None
+    open_book: bool | None = None
+    time_limited: bool | None = None
 
 
 class AssignmentResponse(BaseModel):
     id: str
     course_id: str
     name: str
-    term: Optional[str]
+    term: str | None
     version: int
-    due_at: Optional[str]
-    settings: Optional[dict]
-    assignment_type: Optional[str]
-    description: Optional[str]
+    due_at: str | None
+    settings: dict | None
+    assignment_type: str | None
+    description: str | None
     created_at: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -238,7 +237,7 @@ class AssignmentResponse(BaseModel):
 class StudentCreate(BaseModel):
     email: EmailStr
     full_name: str
-    student_number: Optional[str] = None
+    student_number: str | None = None
 
 
 class StudentResponse(BaseModel):
@@ -246,7 +245,7 @@ class StudentResponse(BaseModel):
     organization_id: str
     email: str
     full_name: str
-    student_number: Optional[str]
+    student_number: str | None
     created_at: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -263,7 +262,7 @@ class EnrollmentResponse(BaseModel):
     student_id: str
     role: str
     enrolled_at: str
-    student: Optional[StudentResponse] = None
+    student: StudentResponse | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -271,9 +270,9 @@ class EnrollmentResponse(BaseModel):
 class AssignmentVersionCreate(BaseModel):
     version: int
     name: str
-    description: Optional[str] = None
-    starter_files: Optional[dict] = None
-    settings: Optional[dict] = None
+    description: str | None = None
+    starter_files: dict | None = None
+    settings: dict | None = None
 
 
 class AssignmentVersionResponse(BaseModel):
@@ -282,9 +281,9 @@ class AssignmentVersionResponse(BaseModel):
     course_id: str
     version: int
     name: str
-    description: Optional[str]
-    starter_files: Optional[dict]
-    settings: Optional[dict]
+    description: str | None
+    starter_files: dict | None
+    settings: dict | None
     is_active: bool
     created_at: str
 
@@ -318,7 +317,7 @@ def _term_sort_key(term: Term) -> tuple[int, int, str]:
     return (-term.year, rank, term.name or "")
 
 
-def _request_org_id(request: Request) -> Optional[str]:
+def _request_org_id(request: Request) -> str | None:
     """Resolve the caller's organization id from the authenticated request.
 
     ``get_current_tenant`` deliberately returns the *tenant id*, and this
@@ -332,12 +331,12 @@ def _request_org_id(request: Request) -> Optional[str]:
     return str(org_id) if org_id else None
 
 
-def _term_date_to_response(value: Optional[date]) -> Optional[str]:
+def _term_date_to_response(value: date | None) -> str | None:
     """Serialize an optional term date as ``YYYY-MM-DD``, or ``None``."""
     return value.isoformat() if value else None
 
 
-def _validate_term_window(start_date: Optional[date], end_date: Optional[date]) -> None:
+def _validate_term_window(start_date: date | None, end_date: date | None) -> None:
     """Reject an inverted planning window.
 
     Raises:
@@ -354,8 +353,8 @@ def find_term_conflict(
     organization_id: str,
     year: int,
     name: str,
-    exclude_id: Optional[str] = None,
-) -> Optional[Term]:
+    exclude_id: str | None = None,
+) -> Term | None:
     """Find an existing term with the same ``(name, year)`` for the org.
 
     Matching is case-insensitive to mirror the registry's uniqueness rule. When
@@ -413,10 +412,10 @@ def _term_to_response(term: Term, course_count: int) -> TermResponse:
 def resolve_course_term(
     db: Session,
     organization_id: str,
-    term_id: Optional[str],
-    term_name: Optional[str],
-    year: Optional[int],
-) -> tuple[Optional[str], Optional[str], Optional[int]]:
+    term_id: str | None,
+    term_name: str | None,
+    year: int | None,
+) -> tuple[str | None, str | None, int | None]:
     """Resolve a course's term to a ``(term_id, term_name, year)`` triple.
 
     A ``term_id`` from the org's registry wins, and its name/year are mirrored
@@ -804,7 +803,7 @@ async def create_course(
 async def list_courses(
     org_id: str,
     request: Request,
-    term: Optional[str] = Query(None, description="Filter by term"),
+    term: str | None = Query(None, description="Filter by term"),
     db: Session = Depends(get_db),
     _tenant: str = Depends(get_current_tenant),
 ):
@@ -1051,7 +1050,7 @@ async def delete_course_by_id(
     db.commit()
 
 
-def _parse_due_at(value: Optional[str]) -> Optional[datetime]:
+def _parse_due_at(value: str | None) -> datetime | None:
     """Parse an ISO-8601 due date, returning ``None`` when absent or invalid.
 
     Invalid input is tolerated (a bad date must not block assignment creation)
@@ -1135,7 +1134,7 @@ async def create_assignment(
 @router.get("/courses/{course_id}/assignments", response_model=list[AssignmentResponse])
 async def list_assignments(
     course_id: str,
-    term: Optional[str] = Query(None, description="Filter by term"),
+    term: str | None = Query(None, description="Filter by term"),
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_course_read_access),
 ):

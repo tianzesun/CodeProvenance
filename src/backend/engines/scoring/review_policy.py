@@ -195,7 +195,7 @@ class BandThresholdConfig:
             raise ValueError("engine_agree_count must be at least 1")
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "BandThresholdConfig":
+    def from_dict(cls, d: dict[str, Any]) -> BandThresholdConfig:
         """Build from a plain dict (e.g. from BAND_THRESHOLDS or a DB row)."""
         return cls(
             review_min=float(d["review_min"]),

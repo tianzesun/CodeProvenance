@@ -25,7 +25,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class CloneType(Enum):
@@ -78,7 +78,7 @@ class DatasetMetadata:
     name: str
     version: str
     language: str
-    clone_types: List[CloneType]
+    clone_types: list[CloneType]
     difficulty: Difficulty
     size: int  # Number of pairs
     source: str  # Where it came from
@@ -103,7 +103,7 @@ class DatasetMetadata:
         ]
         return all(required)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert metadata to dictionary.
         
         Returns:
@@ -142,7 +142,7 @@ class CodePair:
     code_b: str
     label: int
     clone_type: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -159,12 +159,12 @@ class CanonicalDataset:
     """
     name: str
     version: str
-    pairs: List[CodePair] = field(default_factory=list)
-    metadata: Optional[DatasetMetadata] = None
-    submissions: List[Any] = field(default_factory=list)
+    pairs: list[CodePair] = field(default_factory=list)
+    metadata: DatasetMetadata | None = None
+    submissions: list[Any] = field(default_factory=list)
     language: str = "unknown"
     
-    def get_ground_truth(self) -> Dict[tuple, int]:
+    def get_ground_truth(self) -> dict[tuple, int]:
         """Get ground truth mapping.
         
         Returns:
@@ -172,7 +172,7 @@ class CanonicalDataset:
         """
         return {(p.id_a, p.id_b): p.label for p in self.pairs}
     
-    def get_clone_type_map(self) -> Dict[tuple, int]:
+    def get_clone_type_map(self) -> dict[tuple, int]:
         """Get clone type mapping.
         
         Returns:
@@ -210,7 +210,6 @@ class DatasetContract(ABC):
         Returns:
             DatasetMetadata with all required fields.
         """
-        pass
     
     @abstractmethod
     def load(self, **kwargs) -> CanonicalDataset:
@@ -222,7 +221,6 @@ class DatasetContract(ABC):
         Returns:
             CanonicalDataset with loaded pairs.
         """
-        pass
     
     def validate(self) -> bool:
         """Validate dataset integrity.
@@ -232,7 +230,7 @@ class DatasetContract(ABC):
         """
         return self.metadata.validate()
     
-    def info(self) -> Dict[str, Any]:
+    def info(self) -> dict[str, Any]:
         """Get dataset information.
         
         Returns:

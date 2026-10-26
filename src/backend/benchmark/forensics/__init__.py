@@ -13,43 +13,43 @@ This module elevates analysis to forensics by providing:
 - Explainability features for forensic analysis
 - Clear forensic purpose and structure
 """
-from src.backend.benchmark.forensics.causal import (
-    CausalRankingEngine,
-    CausalRankingReport,
-    ImprovementCandidate,
-    RootCauseAttributor,
-    RootCause,
-)
 from src.backend.benchmark.forensics.attribution import (
     ErrorAnalyzer,
     ErrorCategory,
-    FailurePatternDetector,
     FailurePattern,
+    FailurePatternDetector,
 )
 from src.backend.benchmark.forensics.attribution.error_attribution import (
     ErrorAttributionModel,
     ErrorAttributionReport,
 )
+from src.backend.benchmark.forensics.causal import (
+    CausalRankingEngine,
+    CausalRankingReport,
+    ImprovementCandidate,
+    RootCause,
+    RootCauseAttributor,
+)
 from src.backend.benchmark.forensics.clone_taxonomy import (
-    CloneTypeClassifier,
     CloneType,
+    CloneTypeClassifier,
     CloneTypeReport,
-)
-from src.backend.benchmark.forensics.visualizations import (
-    TokenHeatmapGenerator,
-    ASTAlignmentVisualizer,
-    CausalGraphGenerator,
-)
-from src.backend.benchmark.forensics.stability_analysis import (
-    ThresholdStabilityAnalyzer,
-    FailureClusterAnalyzer,
-    StabilityReport,
-    ClusterReport,
-    FailureCluster,
 )
 from src.backend.benchmark.forensics.clone_type_breakdown import (
     CloneTypeBreakdown,
     analyze_clone_type_breakdown,
+)
+from src.backend.benchmark.forensics.stability_analysis import (
+    ClusterReport,
+    FailureCluster,
+    FailureClusterAnalyzer,
+    StabilityReport,
+    ThresholdStabilityAnalyzer,
+)
+from src.backend.benchmark.forensics.visualizations import (
+    ASTAlignmentVisualizer,
+    CausalGraphGenerator,
+    TokenHeatmapGenerator,
 )
 
 __all__ = [

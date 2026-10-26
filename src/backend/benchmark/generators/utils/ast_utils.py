@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import ast
 import re
-from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 def parse_code(code: str) -> ast.AST:
@@ -37,7 +36,7 @@ def unparse_code(tree: ast.AST) -> str:
     return ast.unparse(tree)
 
 
-def get_functions(tree: ast.AST) -> List[ast.FunctionDef]:
+def get_functions(tree: ast.AST) -> list[ast.FunctionDef]:
     """Extract all function definitions from AST.
     
     Args:
@@ -53,7 +52,7 @@ def get_functions(tree: ast.AST) -> List[ast.FunctionDef]:
     return functions
 
 
-def get_variables(tree: ast.AST) -> Set[str]:
+def get_variables(tree: ast.AST) -> set[str]:
     """Extract all variable names from AST.
     
     Args:
@@ -69,7 +68,7 @@ def get_variables(tree: ast.AST) -> Set[str]:
     return variables
 
 
-def get_identifiers(tree: ast.AST) -> Set[str]:
+def get_identifiers(tree: ast.AST) -> set[str]:
     """Extract all identifiers (variables, functions, classes) from AST.
     
     Args:
@@ -82,9 +81,7 @@ def get_identifiers(tree: ast.AST) -> Set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
             identifiers.add(node.id)
-        elif isinstance(node, ast.FunctionDef):
-            identifiers.add(node.name)
-        elif isinstance(node, ast.ClassDef):
+        elif isinstance(node, ast.FunctionDef) or isinstance(node, ast.ClassDef):
             identifiers.add(node.name)
     return identifiers
 

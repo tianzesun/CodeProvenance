@@ -6,9 +6,9 @@ Contains Python programming tasks with prompts, tests, and reference code.
 
 Reference: https://huggingface.co/datasets/mbpp
 """
-from typing import Dict, List, Any, Optional
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -18,7 +18,7 @@ class MBPPSample:
     id: str
     text: str
     code: str
-    test_list: List[str]
+    test_list: list[str]
     split: str = "train"
 
 
@@ -40,12 +40,12 @@ class MBPPDataset:
     def __init__(self, data_dir: Path = Path("benchmark/data/mbpp")):
         self.data_dir = data_dir
         self.hf_dir = data_dir / "huggingface"
-        self._samples: List[MBPPSample] = []
+        self._samples: list[MBPPSample] = []
         self._dataset = None
 
     def load(
-        self, split: str = "train", max_samples: Optional[int] = None
-    ) -> List[MBPPSample]:
+        self, split: str = "train", max_samples: int | None = None
+    ) -> list[MBPPSample]:
         """
         Load MBPP samples from HuggingFace Arrow format.
 
@@ -90,13 +90,13 @@ class MBPPDataset:
         self._samples = samples
         return samples
 
-    def _get_available_splits(self) -> List[str]:
+    def _get_available_splits(self) -> list[str]:
         """Get available dataset splits."""
         if not self.hf_dir.exists():
             return []
         return [d.name for d in self.hf_dir.iterdir() if d.is_dir()]
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         stats = {
             "name": "MBPP",
@@ -124,7 +124,7 @@ class MBPPDataset:
 
         return stats
 
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check dataset availability."""
         return {
             "data_dir": self.data_dir.exists(),

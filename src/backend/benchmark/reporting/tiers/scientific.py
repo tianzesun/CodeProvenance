@@ -3,10 +3,9 @@
 Generates publication-ready reports with LaTeX support, statistical analysis,
 and reproducibility information.
 """
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-from datetime import datetime
 import json
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -16,10 +15,10 @@ class StatisticalTest:
     statistic: float
     p_value: float
     significant: bool
-    effect_size: Optional[float] = None
-    confidence_interval: Optional[tuple] = None
+    effect_size: float | None = None
+    confidence_interval: tuple | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "test_name": self.test_name,
@@ -39,12 +38,12 @@ class EngineResult:
     precision: float
     recall: float
     f1_score: float
-    accuracy: Optional[float] = None
-    auc_roc: Optional[float] = None
+    accuracy: float | None = None
+    auc_roc: float | None = None
     execution_time_ms: float = 0.0
-    additional_metrics: Dict[str, float] = field(default_factory=dict)
+    additional_metrics: dict[str, float] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "engine_name": self.engine_name,
@@ -64,12 +63,12 @@ class ReproducibilityInfo:
     """Information for reproducing benchmark results."""
     timestamp: str
     config_hash: str
-    dataset_versions: Dict[str, str]
-    software_versions: Dict[str, str]
-    random_seeds: Dict[str, int]
-    environment: Dict[str, str]
+    dataset_versions: dict[str, str]
+    software_versions: dict[str, str]
+    random_seeds: dict[str, int]
+    environment: dict[str, str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "timestamp": self.timestamp,
@@ -93,10 +92,10 @@ class ScientificReport:
         title: str,
         abstract: str,
         methodology: str,
-        results: List[EngineResult],
-        statistical_tests: List[StatisticalTest],
+        results: list[EngineResult],
+        statistical_tests: list[StatisticalTest],
         reproducibility_info: ReproducibilityInfo,
-        figure_paths: Optional[List[str]] = None
+        figure_paths: list[str] | None = None
     ):
         """Initialize scientific report.
 
@@ -195,7 +194,7 @@ Test & Statistic & p-value & Significant \\\\
     \\item \\textbf{{Software Versions}}: {', '.join(f'{k}={v}' for k, v in info.software_versions.items())}
 \\end{{itemize}}"""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary.
 
         Returns:
@@ -223,7 +222,7 @@ Test & Statistic & p-value & Significant \\\\
         return json.dumps(self.to_dict(), indent=indent)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ScientificReport':
+    def from_dict(cls, data: dict[str, Any]) -> 'ScientificReport':
         """Create report from dictionary.
 
         Args:

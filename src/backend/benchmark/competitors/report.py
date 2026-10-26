@@ -14,9 +14,8 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
-from .runner import CompetitorBenchmarkResult, ToolMetrics, SignificanceResult
+from .runner import CompetitorBenchmarkResult
 
 
 class CompetitorComparisonReport:
@@ -415,7 +414,7 @@ class CompetitorComparisonReport:
         p.write_text(self.to_html(), encoding="utf-8")
         return str(p)
 
-    def save_all(self, output_dir: str = "reports/competitor") -> Dict[str, str]:
+    def save_all(self, output_dir: str = "reports/competitor") -> dict[str, str]:
         """Save all report formats and return paths."""
         d = Path(output_dir)
         d.mkdir(parents=True, exist_ok=True)

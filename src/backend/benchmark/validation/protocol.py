@@ -7,11 +7,11 @@ and pass/fail validation criteria.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Callable
-from enum import Enum
-import uuid
 import datetime
+import uuid
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
 
 class ValidationStatus(Enum):
@@ -31,14 +31,14 @@ class ValidationProtocol:
     """
     protocol_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     dataset_id: str = ""
-    split_config: Dict[str, Any] = field(default_factory=dict)
-    baseline_tools: List[str] = field(default_factory=list)
-    candidate_tools: List[str] = field(default_factory=list)
-    metrics: List[str] = field(default_factory=list)
-    pass_thresholds: Dict[str, float] = field(default_factory=dict)
+    split_config: dict[str, Any] = field(default_factory=dict)
+    baseline_tools: list[str] = field(default_factory=list)
+    candidate_tools: list[str] = field(default_factory=list)
+    metrics: list[str] = field(default_factory=list)
+    pass_thresholds: dict[str, float] = field(default_factory=dict)
     timeout_seconds: int = 3600
     created_at: datetime.datetime = field(default_factory=datetime.datetime.utcnow)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> bool:
         """Validate protocol configuration is complete and valid."""
@@ -56,12 +56,12 @@ class ValidationResult:
     """Result of a complete benchmark validation run."""
     protocol: ValidationProtocol
     status: ValidationStatus
-    started_at: Optional[datetime.datetime] = None
-    completed_at: Optional[datetime.datetime] = None
-    tool_results: Dict[str, Any] = field(default_factory=dict)
-    comparison_summary: Dict[str, Any] = field(default_factory=dict)
-    pass_fail_outcomes: Dict[str, bool] = field(default_factory=dict)
-    error_message: Optional[str] = None
+    started_at: datetime.datetime | None = None
+    completed_at: datetime.datetime | None = None
+    tool_results: dict[str, Any] = field(default_factory=dict)
+    comparison_summary: dict[str, Any] = field(default_factory=dict)
+    pass_fail_outcomes: dict[str, bool] = field(default_factory=dict)
+    error_message: str | None = None
 
     @property
     def duration_seconds(self) -> float:

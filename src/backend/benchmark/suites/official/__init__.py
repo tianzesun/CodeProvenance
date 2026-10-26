@@ -25,9 +25,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from ...datasets.bigclonebench import BigCloneBenchDataset
+from ...datasets.code_similarity_dataset import CodeSimilarityDataset
 from ...datasets.codexglue_clone import CodeXGLUECloneDataset
 from ...datasets.poj104 import POJ104Dataset
-from ...datasets.code_similarity_dataset import CodeSimilarityDataset
 from ...datasets.synthetic_generator import SyntheticDatasetGenerator
 
 
@@ -57,11 +57,11 @@ class OfficialBenchmarkSuite:
     Uses established academic datasets with known ground truth.
     """
 
-    def __init__(self, config: Optional[SuiteConfig] = None):
+    def __init__(self, config: SuiteConfig | None = None):
         self.config = config or SuiteConfig()
-        self._datasets_loaded: Dict[str, bool] = {}
+        self._datasets_loaded: dict[str, bool] = {}
 
-    def get_datasets(self) -> Dict[str, Path]:
+    def get_datasets(self) -> dict[str, Path]:
         """Get required datasets for official suite.
 
         Returns:
@@ -104,7 +104,7 @@ class OfficialBenchmarkSuite:
 
         return Path(dataset.save(str(output_dir / "synthetic_official.json")))
 
-    def get_suite_requirements(self) -> Dict[str, str]:
+    def get_suite_requirements(self) -> dict[str, str]:
         """Get download/external tool requirements.
 
         Returns:
@@ -118,7 +118,7 @@ class OfficialBenchmarkSuite:
             "tools": "External tools (JPlag, MOSS, NiCad) required for competitor comparison",
         }
 
-    def validate_environment(self) -> Dict[str, bool]:
+    def validate_environment(self) -> dict[str, bool]:
         """Validate that all required datasets/tools are available.
 
         Returns:
@@ -142,7 +142,7 @@ class OfficialBenchmarkSuite:
         """Check if MOSS is installed via script."""
         return (Path("tools/moss") / "moss.pl").exists()
 
-    def run_benchmark(self, engine_runner) -> Dict[str, Dict]:
+    def run_benchmark(self, engine_runner) -> dict[str, dict]:
         """Run official benchmark suite on an engine.
 
         Args:
@@ -159,7 +159,7 @@ class OfficialBenchmarkSuite:
 
         return results
 
-    def _run_on_dataset(self, name: str, runner) -> Dict:
+    def _run_on_dataset(self, name: str, runner) -> dict:
         """Run benchmark on a single dataset."""
         # This would be implemented to load the dataset and run the engine
         return {"dataset": name, "status": "not_implemented"}

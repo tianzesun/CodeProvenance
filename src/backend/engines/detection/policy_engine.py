@@ -258,7 +258,7 @@ class PolicyEngine:
                 raise PolicyError("the policy needs a non-empty 'rules' mapping")
             self._validate(config)
             return config
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return self._fall_back(str(exc))
 
     @staticmethod

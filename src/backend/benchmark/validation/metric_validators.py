@@ -7,13 +7,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Any
-from decimal import Decimal, ROUND_HALF_UP
 
 from src.backend.evaluation.pan_metrics import (
-    PANMetrics,
     Detection,
-    TextSpan,
+    PANMetrics,
     calculate_pan_metrics,
 )
 
@@ -39,7 +36,7 @@ class MetricValidationResult:
 @dataclass
 class MetricValidationReport:
     """Complete validation report for a set of metrics."""
-    results: List[MetricValidationResult]
+    results: list[MetricValidationResult]
     all_passed: bool
     summary: str
 
@@ -58,8 +55,8 @@ class MetricValidator:
 
     @staticmethod
     def validate_precision_calculation(
-        predictions: List[Detection],
-        ground_truth: List[Detection],
+        predictions: list[Detection],
+        ground_truth: list[Detection],
         expected_precision: float,
         tolerance: float = DEFAULT_TOLERANCE,
     ) -> MetricValidationResult:
@@ -97,8 +94,8 @@ class MetricValidator:
 
     @staticmethod
     def validate_recall_calculation(
-        predictions: List[Detection],
-        ground_truth: List[Detection],
+        predictions: list[Detection],
+        ground_truth: list[Detection],
         expected_recall: float,
         tolerance: float = DEFAULT_TOLERANCE,
     ) -> MetricValidationResult:
@@ -166,8 +163,8 @@ class MetricValidator:
 
     @staticmethod
     def validate_granularity_calculation(
-        predictions: List[Detection],
-        ground_truth: List[Detection],
+        predictions: list[Detection],
+        ground_truth: list[Detection],
         expected_granularity: float,
         tolerance: float = DEFAULT_TOLERANCE,
     ) -> MetricValidationResult:
@@ -238,7 +235,7 @@ class MetricValidator:
         )
 
     @staticmethod
-    def validate_metric_ranges(metrics: PANMetrics) -> List[MetricValidationResult]:
+    def validate_metric_ranges(metrics: PANMetrics) -> list[MetricValidationResult]:
         """Validate that all metrics are within valid ranges.
 
         - Precision, Recall, F1: [0, 1]
@@ -310,7 +307,7 @@ class MetricValidator:
         return results
 
     @staticmethod
-    def validate_no_nan_inf(metrics: PANMetrics) -> List[MetricValidationResult]:
+    def validate_no_nan_inf(metrics: PANMetrics) -> list[MetricValidationResult]:
         """Validate that no metrics contain NaN or Inf values."""
         results = []
 
@@ -329,7 +326,7 @@ class MetricValidator:
         return results
 
     @staticmethod
-    def validate_metrics_consistency(metrics: PANMetrics) -> List[MetricValidationResult]:
+    def validate_metrics_consistency(metrics: PANMetrics) -> list[MetricValidationResult]:
         """Validate consistency relationships between metrics."""
         results = []
 
@@ -376,8 +373,8 @@ class MetricValidator:
 
     @staticmethod
     def validate_complete_metrics(
-        predictions: List[Detection],
-        ground_truth: List[Detection],
+        predictions: list[Detection],
+        ground_truth: list[Detection],
         expected_metrics: PANMetrics,
         tolerance: float = DEFAULT_TOLERANCE,
     ) -> MetricValidationReport:

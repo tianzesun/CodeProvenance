@@ -74,7 +74,7 @@ _OP = (
 )
 _COMMENTS = {"hash": r"\#[^\n]*", "slash": r"//[^\n]*|/\*.*?\*/"}
 _PATTERNS: dict[str, re.Pattern[str]] = {}
-_PYTHON_HINT = re.compile(r"^[ \t]*(?:def[ \t]+\w+|class[ \t]+\w+[^\n{;]*:|elif\b|import[ \t]+\w|from[ \t]+[\w.]+[ \t]+import)", re.M)
+_PYTHON_HINT = re.compile(r"^[ \t]*(?:def[ \t]+\w+|class[ \t]+\w+[^\n{;]*:|elif\b|import[ \t]+\w|from[ \t]+[\w.]+[ \t]+import)", re.MULTILINE)
 _OPEN, _CLOSE = "([{", ")]}"
 
 

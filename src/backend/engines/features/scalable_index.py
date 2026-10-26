@@ -28,7 +28,6 @@ Build the index for the threshold you care about with
 import hashlib
 import keyword
 import logging
-import math
 import random
 import re
 import struct
@@ -363,8 +362,7 @@ class MinHashGenerator:
         for h in hashes:
             for i, (a, b) in enumerate(self.coefficients):
                 value = (a * h + b) % mod
-                if value < min_values[i]:
-                    min_values[i] = value
+                min_values[i] = min(min_values[i], value)
         return min_values
 
     def _signature_numpy(self, hashes: list[int]) -> list[int]:

@@ -558,8 +558,7 @@ def _parse_model_list(list_style: str, data: Any) -> tuple[list[str], dict[str, 
             if methods and "generateContent" not in methods:
                 continue
             name = str(entry.get("name") or "")
-            if name.startswith("models/"):
-                name = name[len("models/") :]
+            name = name.removeprefix("models/")
             if name:
                 ids.append(name)
         return ids, created

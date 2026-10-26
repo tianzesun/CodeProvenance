@@ -6,9 +6,9 @@ Contains 27,318 C functions with vulnerability labels.
 
 Reference: https://huggingface.co/datasets/code_x_glue_cc_defect_detection
 """
-from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
 from pathlib import Path
-from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -46,10 +46,10 @@ class CodeXGLUEDefectDataset:
     def __init__(self, data_dir: Path = Path("benchmark/data/codexglue_defect")):
         self.data_dir = data_dir
         self.hf_dir = data_dir / "huggingface"
-        self._samples: List[CodeXGLUEDefectSample] = []
+        self._samples: list[CodeXGLUEDefectSample] = []
         self._dataset = None
     
-    def load(self, split: str = "train", max_samples: Optional[int] = None) -> List[CodeXGLUEDefectSample]:
+    def load(self, split: str = "train", max_samples: int | None = None) -> list[CodeXGLUEDefectSample]:
         """
         Load CodeXGLUE defect samples from HuggingFace Arrow format.
         
@@ -97,13 +97,13 @@ class CodeXGLUEDefectDataset:
         self._samples = samples
         return samples
     
-    def _get_available_splits(self) -> List[str]:
+    def _get_available_splits(self) -> list[str]:
         """Get available dataset splits."""
         if not self.hf_dir.exists():
             return []
         return [d.name for d in self.hf_dir.iterdir() if d.is_dir()]
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         stats = {
             "name": "CodeXGLUE Defect Detection",
@@ -131,7 +131,7 @@ class CodeXGLUEDefectDataset:
         
         return stats
     
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check dataset availability."""
         return {
             "data_dir": self.data_dir.exists(),

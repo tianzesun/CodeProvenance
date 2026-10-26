@@ -15,9 +15,8 @@ Usage:
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 @dataclass
@@ -33,7 +32,7 @@ class AlignmentConfig:
         max_depth: Maximum depth to display.
         output_format: Output format (png, pdf, svg).
     """
-    figsize: Tuple[int, int] = (12, 8)
+    figsize: tuple[int, int] = (12, 8)
     dpi: int = 150
     node_size: int = 300
     font_size: int = 8
@@ -55,7 +54,7 @@ class ASTNode:
     """
     node_type: str
     value: str = ""
-    children: List['ASTNode'] = field(default_factory=list)
+    children: list[ASTNode] = field(default_factory=list)
     line_start: int = 0
     line_end: int = 0
 
@@ -71,7 +70,7 @@ class ASTAlignmentVisualizer:
         visualizer.generate(code_a, code_b, "output.png")
     """
     
-    def __init__(self, config: Optional[AlignmentConfig] = None):
+    def __init__(self, config: AlignmentConfig | None = None):
         """Initialize AST alignment visualizer.
         
         Args:
@@ -315,7 +314,7 @@ class ASTAlignmentVisualizer:
         self,
         ast_a: ASTNode,
         ast_b: ASTNode,
-    ) -> List[Tuple[ASTNode, ASTNode]]:
+    ) -> list[tuple[ASTNode, ASTNode]]:
         """Find matching nodes between two ASTs.
         
         Args:
@@ -340,8 +339,8 @@ class ASTAlignmentVisualizer:
         self,
         graph_a: Any,
         graph_b: Any,
-        matches: List[Tuple[ASTNode, ASTNode]],
-        axes: List[Any],
+        matches: list[tuple[ASTNode, ASTNode]],
+        axes: list[Any],
     ) -> None:
         """Highlight matching nodes in graphs.
         

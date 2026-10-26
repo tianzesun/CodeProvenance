@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import json
-import argparse
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from src.backend.benchmark.datasets.synthetic_generator import SyntheticDatasetGenerator
-from src.backend.benchmark.similarity.engines import TokenWinnowingEngine, ASTEngine, HybridEngine
-from src.backend.benchmark.evaluation.metrics import compute_average_precision
+from src.backend.benchmark.similarity.engines import ASTEngine, HybridEngine, TokenWinnowingEngine
 
 
 class CoreBenchmarkRunner:
@@ -28,14 +26,14 @@ class CoreBenchmarkRunner:
         type4: int = 50,
         non_clone: int = 200,
         seed: int = 42,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run core benchmark."""
         generator = SyntheticDatasetGenerator(seed=seed)
         dataset = generator.generate_pair_count(type1, type2, type3, type4, non_clone)
         
         pairs = [(p.code_a, p.code_b, p.label) for p in dataset.pairs]
         
-        engines: Dict[str, Any] = {}
+        engines: dict[str, Any] = {}
         if engine_name in ("token", "all"):
             engines["token"] = TokenWinnowingEngine()
         if engine_name in ("ast", "all"):
@@ -43,7 +41,7 @@ class CoreBenchmarkRunner:
         if engine_name in ("hybrid", "all"):
             engines["hybrid"] = HybridEngine()
         
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         for name, engine in engines.items():
             results[name] = self._run_single_engine(engine, pairs)
         
@@ -64,10 +62,10 @@ class CoreBenchmarkRunner:
         return report
 
     def _run_single_engine(
-        self, engine: Any, pairs: List[Tuple[str, str, int]], threshold: float = 0.5
-    ) -> Dict[str, Any]:
+        self, engine: Any, pairs: list[tuple[str, str, int]], threshold: float = 0.5
+    ) -> dict[str, Any]:
         """Run benchmark on a single engine."""
-        scores: List[Tuple[float, int]] = []
+        scores: list[tuple[float, int]] = []
         for code_a, code_b, label in pairs:
             score = engine.compare(code_a, code_b)
             scores.append((max(0.0, min(1.0, score)), label))
@@ -124,7 +122,7 @@ class CoreBenchmarkRunner:
             }
         }
         
-        query_results: Dict[str, List[Tuple[str, float, int]]] = {}
+        query_results: dict[str, list[tuple[str, float, int]]] = {}
         for i, (score, label) in enumerate(scores):
             q_id = f"q_{i // 10}"
             query_results.setdefault(q_id, []).append((f"d_{i}", score, label))
@@ -171,7 +169,7 @@ class CoreBenchmarkRunner:
             "tp": tp, "fp": fp, "tn": tn, "fn": fn,
         }
 
-    def _optimize_threshold(self, scores: List[Tuple[float, int]]) -> Tuple[float, float]:
+    def _optimize_threshold(self, scores: list[tuple[float, int]]) -> tuple[float, float]:
         """Find optimal threshold by maximizing F1 using unique observed scores with constraints."""
         best_threshold, best_f1 = 0.5, 0.0
 
@@ -209,7 +207,7 @@ class CoreBenchmarkRunner:
                 best_threshold = threshold
         return best_threshold, best_f1
 
-    def _compute_score_diagnostics(self, scores: List[Tuple[float, int]]) -> Dict[str, Any]:
+    def _compute_score_diagnostics(self, scores: list[tuple[float, int]]) -> dict[str, Any]:
         """Compute diagnostic statistics for score distributions by class."""
         if not scores:
             return {"error": "No scores provided"}

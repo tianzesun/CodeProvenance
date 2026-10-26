@@ -3,9 +3,9 @@
 Provides structured JSON output for reproducibility and analysis.
 """
 import json
-from pathlib import Path
-from typing import Dict, Any, List
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 
 class JSONReportWriter:
@@ -21,8 +21,8 @@ class JSONReportWriter:
     
     def write(
         self,
-        results: Dict[str, Any],
-        metadata: Dict[str, Any] = None
+        results: dict[str, Any],
+        metadata: dict[str, Any] = None
     ) -> str:
         """Write results to JSON file.
         
@@ -46,7 +46,7 @@ class JSONReportWriter:
         return str(self.output_path)
     
     @staticmethod
-    def read(path: str) -> Dict[str, Any]:
+    def read(path: str) -> dict[str, Any]:
         """Read a previously written report.
         
         Args:
@@ -60,8 +60,8 @@ class JSONReportWriter:
     
     def write_batch(
         self,
-        results: List[Dict[str, Any]],
-        summary: Dict[str, Any] = None
+        results: list[dict[str, Any]],
+        summary: dict[str, Any] = None
     ) -> str:
         """Write multiple results with summary.
         

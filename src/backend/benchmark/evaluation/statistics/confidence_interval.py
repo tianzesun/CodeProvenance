@@ -12,7 +12,7 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 from scipy import stats
@@ -35,7 +35,7 @@ class ConfidenceInterval:
     confidence_level: float
     method: str
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "point_estimate": self.point_estimate,

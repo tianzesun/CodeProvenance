@@ -13,10 +13,9 @@ FROZEN INTERFACE: evaluate() returns canonical EvaluationResult.
 from __future__ import annotations
 
 import re
-from typing import List, Tuple
 
 from src.backend.benchmark.adapters.base_adapter import BaseAdapter
-from src.backend.benchmark.contracts.evaluation_result import EvaluationResult, EnrichedPair
+from src.backend.benchmark.contracts.evaluation_result import EnrichedPair, EvaluationResult
 
 
 class NiCadAdapter(BaseAdapter):

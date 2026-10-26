@@ -11,8 +11,10 @@ Tests robustness by:
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
+
 import numpy as np
 
 
@@ -30,14 +32,14 @@ class AdversarialRobustnessResult:
         attack_details: Per-attack degradation breakdown.
     """
     original_metric: float
-    adversarial_metrics: List[float]
+    adversarial_metrics: list[float]
     stability_score: float
     mean_degradation: float
     max_degradation: float
     is_robust: bool
-    attack_details: Dict[str, float]
+    attack_details: dict[str, float]
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "original_metric": round(self.original_metric, 4),
@@ -55,7 +57,7 @@ class AdversarialAttack:
     
     name: str = "base_attack"
     
-    def apply(self, code_a: str, code_b: str) -> Tuple[str, str]:
+    def apply(self, code_a: str, code_b: str) -> tuple[str, str]:
         """Apply adversarial perturbation to code pair.
         
         Args:
@@ -73,7 +75,7 @@ class WhitespaceNoise(AdversarialAttack):
     
     name = "whitespace_noise"
     
-    def apply(self, code_a: str, code_b: str) -> Tuple[str, str]:
+    def apply(self, code_a: str, code_b: str) -> tuple[str, str]:
         """Add extra blank lines and indentation variations."""
         import re
         
@@ -93,10 +95,10 @@ class IdentifierNoise(AdversarialAttack):
     
     name = "identifier_noise"
     
-    def apply(self, code_a: str, code_b: str) -> Tuple[str, str]:
+    def apply(self, code_a: str, code_b: str) -> tuple[str, str]:
         """Rename some (not all) identifiers to add noise."""
-        import re
         import random
+        import re
         
         def add_identifier_noise(code: str, seed: int = 42) -> str:
             rng = random.Random(seed)
@@ -130,7 +132,7 @@ class CommentNoise(AdversarialAttack):
     
     name = "comment_noise"
     
-    def apply(self, code_a: str, code_b: str) -> Tuple[str, str]:
+    def apply(self, code_a: str, code_b: str) -> tuple[str, str]:
         """Insert confusing comments."""
         comments = [
             "# TODO: fix this",
@@ -161,7 +163,7 @@ class TokenBoundaryNoise(AdversarialAttack):
     
     name = "token_boundary_noise"
     
-    def apply(self, code_a: str, code_b: str) -> Tuple[str, str]:
+    def apply(self, code_a: str, code_b: str) -> tuple[str, str]:
         """Change operator spacing, bracket placement, etc."""
         import re
         
@@ -179,7 +181,7 @@ class SemanticPreservingTransform(AdversarialAttack):
     
     name = "semantic_transform"
     
-    def apply(self, code_a: str, code_b: str) -> Tuple[str, str]:
+    def apply(self, code_a: str, code_b: str) -> tuple[str, str]:
         """Convert equivalent expressions."""
         import re
         
@@ -194,7 +196,7 @@ class SemanticPreservingTransform(AdversarialAttack):
 
 
 # All available attacks
-ALL_ATTACKS: List[AdversarialAttack] = [
+ALL_ATTACKS: list[AdversarialAttack] = [
     WhitespaceNoise(),
     IdentifierNoise(),
     CommentNoise(),
@@ -206,7 +208,7 @@ ALL_ATTACKS: List[AdversarialAttack] = [
 class AdversarialRobustnessValidator:
     """Validates benchmark metrics against adversarial perturbations."""
     
-    def __init__(self, attacks: Optional[List[AdversarialAttack]] = None):
+    def __init__(self, attacks: list[AdversarialAttack] | None = None):
         """Initialize validator.
         
         Args:
@@ -216,9 +218,9 @@ class AdversarialRobustnessValidator:
     
     def evaluate(
         self,
-        metric_fn: Callable[[List[str], List[str], List[str], List[str]], float],
-        code_pairs: List[Tuple[str, str]],
-        labels: List[int],
+        metric_fn: Callable[[list[str], list[str], list[str], list[str]], float],
+        code_pairs: list[tuple[str, str]],
+        labels: list[int],
         robustness_threshold: float = 0.85,
     ) -> AdversarialRobustnessResult:
         """Evaluate robustness of a metric.
@@ -283,11 +285,11 @@ class AdversarialRobustnessValidator:
 
 
 def validate_benchmark_robustness(
-    metrics: Dict[str, float],
-    code_pairs: List[Tuple[str, str]],
-    labels: List[int],
-    validators: Optional[List[AdversarialRobustnessValidator]] = None,
-) -> Dict[str, AdversarialRobustnessResult]:
+    metrics: dict[str, float],
+    code_pairs: list[tuple[str, str]],
+    labels: list[int],
+    validators: list[AdversarialRobustnessValidator] | None = None,
+) -> dict[str, AdversarialRobustnessResult]:
     """Validate robustness of multiple metrics.
     
     Args:

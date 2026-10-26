@@ -13,7 +13,7 @@ from typing import Any
 
 try:  # shared scanner (comments and strings handled in one pass)
     from src.backend.engines.similarity import code_scan as _code_scan
-except Exception:  # noqa: BLE001
+except Exception:
     _code_scan = None
 
 MAX_CODE_CHARS = 2_000_000
@@ -69,6 +69,6 @@ def tokens(code: str, language: str | None = None) -> list[tuple[str, str]]:
     if _code_scan is not None:
         try:
             return list(_code_scan.scan(code, language))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
     return [(m.lastgroup, m.group()) for m in _FALLBACK.finditer(code) if m.lastgroup != "comment"]

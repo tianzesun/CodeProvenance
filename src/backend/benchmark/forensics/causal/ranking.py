@@ -20,7 +20,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -42,7 +42,7 @@ class ImprovementCandidate:
     estimated_impact: float  # 0.0 to 1.0, relative F1 improvement
     confidence: float  # How confident we are in the estimate
     affected_failures: int
-    affected_clone_types: List[int] = field(default_factory=list)
+    affected_clone_types: list[int] = field(default_factory=list)
     implementation_complexity: str = "medium"  # easy, medium, hard
     recommended_action: str = ""
 
@@ -56,7 +56,7 @@ class CausalRankingReport:
         overall_priority_score: Aggregate priority score.
         system_health: Health assessment (healthy, needs_attention, critical).
     """
-    candidates: List[ImprovementCandidate] = field(default_factory=list)
+    candidates: list[ImprovementCandidate] = field(default_factory=list)
     overall_priority_score: float = 0.0
     system_health: str = ""  # "healthy", "needs_attention", "critical"
     
@@ -92,7 +92,7 @@ class CausalRankingReport:
         lines.append("=" * 70)
         return "\n".join(lines)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary.
         
         Returns:
@@ -229,7 +229,7 @@ class CausalRankingEngine:
         Returns:
             CausalRankingReport with prioritized improvements.
         """
-        candidates: List[ImprovementCandidate] = []
+        candidates: list[ImprovementCandidate] = []
         
         # 1. From root cause report: Component-based improvements
         if self.root_cause_report:
@@ -272,13 +272,13 @@ class CausalRankingEngine:
             system_health=health,
         )
     
-    def _rank_from_root_causes(self) -> List[ImprovementCandidate]:
+    def _rank_from_root_causes(self) -> list[ImprovementCandidate]:
         """Generate candidates from root cause report.
         
         Returns:
             List of improvement candidates.
         """
-        candidates: List[ImprovementCandidate] = []
+        candidates: list[ImprovementCandidate] = []
         
         if not self.root_cause_report:
             return candidates
@@ -320,13 +320,13 @@ class CausalRankingEngine:
         
         return candidates
     
-    def _rank_from_clustering(self) -> List[ImprovementCandidate]:
+    def _rank_from_clustering(self) -> list[ImprovementCandidate]:
         """Generate candidates from failure clustering.
         
         Returns:
             List of improvement candidates.
         """
-        candidates: List[ImprovementCandidate] = []
+        candidates: list[ImprovementCandidate] = []
         
         if not self.clustering_report:
             return candidates
@@ -369,13 +369,13 @@ class CausalRankingEngine:
         
         return candidates
     
-    def _rank_from_stability(self) -> List[ImprovementCandidate]:
+    def _rank_from_stability(self) -> list[ImprovementCandidate]:
         """Generate candidates from stability analysis.
         
         Returns:
             List of improvement candidates.
         """
-        candidates: List[ImprovementCandidate] = []
+        candidates: list[ImprovementCandidate] = []
         
         if not self.stability_report:
             return candidates
@@ -405,8 +405,8 @@ class CausalRankingEngine:
         return candidates
     
     def _combine_duplicates(
-        self, candidates: List[ImprovementCandidate]
-    ) -> List[ImprovementCandidate]:
+        self, candidates: list[ImprovementCandidate]
+    ) -> list[ImprovementCandidate]:
         """Combine duplicate candidates for the same target.
         
         Args:
@@ -415,7 +415,7 @@ class CausalRankingEngine:
         Returns:
             Combined list.
         """
-        by_target: Dict[str, List[ImprovementCandidate]] = {}
+        by_target: dict[str, list[ImprovementCandidate]] = {}
         for c in candidates:
             by_target.setdefault(c.target, []).append(c)
         
@@ -447,7 +447,7 @@ class CausalRankingEngine:
     
     def _map_cause_to_improvement(
         self, cause_name: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Map failure cause name to known improvement pattern.
         
         Args:

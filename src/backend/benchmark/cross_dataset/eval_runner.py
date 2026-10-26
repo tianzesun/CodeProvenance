@@ -6,7 +6,7 @@ against ground truth labels.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -28,11 +28,11 @@ class EvaluationResult:
     tn: int = 0
     fn: int = 0
     num_pairs: int = 0
-    scores: List[float] = field(default_factory=list)
-    labels: List[int] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    scores: list[float] = field(default_factory=list)
+    labels: list[int] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "dataset": self.dataset_name,
             "tool": self.tool_name,
@@ -66,7 +66,7 @@ class EvaluationRunner:
         self,
         dataset,
         tool,
-        threshold: Optional[float] = None,
+        threshold: float | None = None,
         progress_fn=None,
     ) -> EvaluationResult:
         """Evaluate a tool on a dataset.
@@ -110,8 +110,8 @@ class EvaluationRunner:
         self,
         dataset_name: str,
         tool_name: str,
-        scores: List[float],
-        labels: List[int],
+        scores: list[float],
+        labels: list[int],
         threshold: float = 0.5,
     ) -> EvaluationResult:
         """Compute all metrics from scores and labels.
@@ -170,10 +170,10 @@ class EvaluationRunner:
 
     def find_optimal_threshold(
         self,
-        scores: List[float],
-        labels: List[int],
+        scores: list[float],
+        labels: list[int],
         strategy: str = "f1_max",
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """Find the optimal threshold.
 
         Args:
@@ -190,7 +190,7 @@ class EvaluationRunner:
         best_threshold = 0.5
         best_score = 0.0
 
-        for t_int in range(0, 101):
+        for t_int in range(101):
             t = t_int / 100.0
             y_pred = (y_score >= t).astype(np.int32)
 

@@ -5,7 +5,7 @@ Each engine wraps the raw similarity functions behind the strict interface.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .base_engine import BaseSimilarityEngine
 from .token_winnowing import token_similarity

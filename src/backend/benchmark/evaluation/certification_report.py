@@ -1,36 +1,31 @@
 from __future__ import annotations
 
 import json
-import numpy as np
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
+import numpy as np
+
+from .metrics.calibration import (
+    compute_calibration_error,
+)
+from .metrics.roc_auc import (
+    compute_average_precision,
+    compute_roc_auc,
+)
 from .statistics.bootstrap import (
-    bootstrap_confidence_interval,
     bootstrap_metric,
     paired_bootstrap_test,
 )
+from .statistics.confidence_interval import (
+    clopper_pearson_interval,
+    wilson_score_interval,
+)
 from .statistics.mcnemar import (
     McNemarResult,
-    mcnemar_test,
     mcnemar_test_with_correction,
-)
-from .statistics.confidence_interval import (
-    wilson_score_interval,
-    clopper_pearson_interval,
-    compute_confidence_interval,
-)
-from .metrics.roc_auc import (
-    compute_roc_auc,
-    compute_roc_curve,
-    compute_average_precision,
-)
-from .metrics.calibration import (
-    compute_calibration_error,
-    compute_expected_calibration_error,
-    compute_maximum_calibration_error,
 )
 
 
@@ -49,7 +44,7 @@ class MetricWithCI:
     ci_upper: float
     ci_method: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "value": self.value,
@@ -82,11 +77,11 @@ class CertificationReport:
     model_name: str
     dataset_name: str
     n_samples: int
-    metrics: Dict[str, Any]
-    recommendations: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any]
+    recommendations: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "report_id": self.report_id,
@@ -103,7 +98,7 @@ class CertificationReport:
         """Convert to JSON string."""
         return json.dumps(self.to_dict(), indent=indent, default=str)
 
-    def save(self, path: Union[str, Path]) -> None:
+    def save(self, path: str | Path) -> None:
         """Save report to JSON file.
 
         Args:
@@ -198,11 +193,11 @@ def _generate_report_id(model_name: str, dataset_name: str) -> str:
 
 
 def _generate_recommendations(
-    metrics: Dict[str, Any],
+    metrics: dict[str, Any],
     roc_threshold: float = 0.7,
     ece_threshold: float = 0.05,
     mce_threshold: float = 0.1,
-) -> List[str]:
+) -> list[str]:
     """Generate recommendations based on metrics.
 
     Args:
@@ -436,7 +431,7 @@ def compare_classifiers_certification(
     n_bootstrap: int = 1000,
     confidence_level: float = 0.95,
     seed: int = 42,
-) -> Tuple[CertificationReport, CertificationReport, Dict[str, Any]]:
+) -> tuple[CertificationReport, CertificationReport, dict[str, Any]]:
     """Generate certification reports for two classifiers and compare.
 
     Args:
@@ -515,7 +510,7 @@ def compare_classifiers_certification(
 
 def _generate_comparison_recommendation(
     mcnemar_result: McNemarResult,
-    bootstrap_result: Dict[str, Any],
+    bootstrap_result: dict[str, Any],
     model_a: str,
     model_b: str,
 ) -> str:

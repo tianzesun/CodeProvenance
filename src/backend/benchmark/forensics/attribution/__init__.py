@@ -10,8 +10,8 @@ from src.backend.benchmark.forensics.attribution.error_analysis import (
     ErrorReport,
 )
 from src.backend.benchmark.forensics.attribution.failure_patterns import (
-    FailurePatternDetector,
     FailurePattern,
+    FailurePatternDetector,
     FailurePatternReport,
 )
 

@@ -14,9 +14,9 @@ Usage:
     ds = KaggleStudentCodeDataset()
     print(ds.get_stats())
 """
-from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
 from pathlib import Path
-from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -40,9 +40,9 @@ class KaggleStudentCodeDataset:
         self.data_dir = data_dir
         self.cheating_file = data_dir / "cheating_dataset.csv"
         self.features_file = data_dir / "cheating_features_dataset.csv"
-        self._pairs_cache: List[KagglePair] = []
+        self._pairs_cache: list[KagglePair] = []
 
-    def load(self, max_pairs: Optional[int] = None) -> List[KagglePair]:
+    def load(self, max_pairs: int | None = None) -> list[KagglePair]:
         """Load student code pairs with similarity labels.
         
         Args:
@@ -91,7 +91,7 @@ class KaggleStudentCodeDataset:
         self._pairs_cache = pairs
         return pairs
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         stats = {
             "name": "Kaggle Student Code Similarity",
@@ -108,7 +108,7 @@ class KaggleStudentCodeDataset:
             stats["negative_pairs"] = len(labels) - positives
         return stats
     
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check available files."""
         return {
             "data_dir": self.data_dir.exists(),

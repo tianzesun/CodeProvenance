@@ -18,8 +18,9 @@ References:
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 from scipy import stats
@@ -48,7 +49,7 @@ class McNemarResult:
     method: str
     corrected_alpha: float = 0.05
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "statistic": self.statistic,
@@ -83,7 +84,7 @@ class WilcoxonResult:
     std_diff: float
     method: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "statistic": self.statistic,
@@ -113,9 +114,9 @@ class PairedTestResults:
     bootstrap_pvalue: float
     bootstrap_significant: bool
     mean_diff: float
-    ci_diff: Tuple[float, float]
+    ci_diff: tuple[float, float]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "mcnemar": self.mcnemar.to_dict(),
@@ -131,7 +132,7 @@ def compute_mcnemar_table(
     y_true: np.ndarray,
     y_pred_a: np.ndarray,
     y_pred_b: np.ndarray,
-) -> Tuple[np.ndarray, int, int]:
+) -> tuple[np.ndarray, int, int]:
     """Compute 2x2 contingency table for McNemar's test.
 
     The table compares correctness of two classifiers:
@@ -361,7 +362,7 @@ def paired_bootstrap_test(
     metric_fn: Callable[[np.ndarray, np.ndarray], float],
     n_bootstrap: int = 10000,
     seed: int = 42,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Paired bootstrap test for comparing two classifiers.
 
     Tests whether classifier A is significantly different from classifier B
@@ -439,7 +440,7 @@ def paired_statistical_tests(
     scores_b: np.ndarray,
     decisions_a: np.ndarray,
     decisions_b: np.ndarray,
-    metric_fn: Optional[Callable[[np.ndarray, np.ndarray], float]] = None,
+    metric_fn: Callable[[np.ndarray, np.ndarray], float] | None = None,
     n_bootstrap: int = 10000,
     alpha: float = 0.05,
     seed: int = 42,
@@ -496,9 +497,9 @@ def paired_statistical_tests(
 
 
 def bonferroni_correction(
-    p_values: List[float],
+    p_values: list[float],
     alpha: float = 0.05,
-) -> Tuple[List[float], float]:
+) -> tuple[list[float], float]:
     """Apply Bonferroni correction for multiple comparisons.
 
     The Bonferroni correction is a simple, conservative method for controlling
@@ -522,14 +523,14 @@ def bonferroni_correction(
 
 def compare_multiple_engines(
     y_true: np.ndarray,
-    engine_scores: Dict[str, np.ndarray],
-    engine_decisions: Dict[str, np.ndarray],
-    metric_fn: Optional[Callable[[np.ndarray, np.ndarray], float]] = None,
-    baseline_engine: Optional[str] = None,
+    engine_scores: dict[str, np.ndarray],
+    engine_decisions: dict[str, np.ndarray],
+    metric_fn: Callable[[np.ndarray, np.ndarray], float] | None = None,
+    baseline_engine: str | None = None,
     n_bootstrap: int = 10000,
     alpha: float = 0.05,
     seed: int = 42,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """Compare multiple engines with multiple comparison correction.
 
     Performs pairwise comparisons between all engines and applies Bonferroni

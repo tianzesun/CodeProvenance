@@ -25,10 +25,9 @@ Usage:
 """
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 
 @dataclass
@@ -39,11 +38,11 @@ class AlgorithmicSignature:
     algorithm_name: str = ""   # "bubble_sort", "linear_search", etc.
     strategy: str = ""         # "brute_force", "divide_conquer", etc.
     complexity_class: str = "" # "O(n)", "O(n^2)", "O(n log n)", etc.
-    intent_patterns: List[str] = field(default_factory=list)
+    intent_patterns: list[str] = field(default_factory=list)
     control_signature: str = ""  # "nested_loop_compare_swap"
     data_flow: str = ""          # "accumulate_reduce"
     recursive: bool = False
-    equivalent_to: List[str] = field(default_factory=list)  # Known equivalent algorithms
+    equivalent_to: list[str] = field(default_factory=list)  # Known equivalent algorithms
 
 
 @dataclass
@@ -385,7 +384,7 @@ class AlgorithmicEquivalenceDetector:
             return sig_a.algorithm_name == sig_b.algorithm_name
         return self.compare(sig_a, sig_b).algorithmic_equivalent
     
-    def _match_algorithm(self, code: str, algo_info: Dict[str, Any]) -> float:
+    def _match_algorithm(self, code: str, algo_info: dict[str, Any]) -> float:
         """Match code against a single algorithm pattern.
         
         Args:
@@ -405,8 +404,8 @@ class AlgorithmicEquivalenceDetector:
         return sum(scores) / len(scores) if scores else 0.0
     
     def _extract_intent(
-        self, code: str, algo_info: Dict[str, Any]
-    ) -> List[str]:
+        self, code: str, algo_info: dict[str, Any]
+    ) -> list[str]:
         """Extract intent patterns from code.
         
         Args:
@@ -611,7 +610,7 @@ class AlgorithmicEquivalenceDetector:
         return strategy
 
 
-def create_algorithmic_engines(engines: Dict[str, Any]) -> Dict[str, Any]:
+def create_algorithmic_engines(engines: dict[str, Any]) -> dict[str, Any]:
     """Create algorithmic-aware versions of engines.
     
     Args:
@@ -643,7 +642,7 @@ class AlgorithmicComparePipeline:
     def __init__(
         self,
         engine,
-        detector: Optional[AlgorithmicEquivalenceDetector] = None,
+        detector: AlgorithmicEquivalenceDetector | None = None,
     ):
         """Initialize algorithmic pipeline.
         
@@ -689,7 +688,7 @@ class AlgorithmicComparePipeline:
     
     def compare_with_details(
         self, code_a: str, code_b: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Compare with detailed breakdown.
         
         Args:

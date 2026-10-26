@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 class TechniqueType(Enum):
@@ -57,7 +57,7 @@ class DetectedTechnique:
     technique_type: TechniqueType
     confidence: float = 1.0
     description: str = ""
-    evidence: Dict[str, Any] = field(default_factory=dict)
+    evidence: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -71,8 +71,8 @@ class TechniqueReport:
         complexity_score: Complexity of transformations (0.0 to 1.0).
     """
     pair_id: str = ""
-    techniques_detected: List[DetectedTechnique] = field(default_factory=list)
-    primary_technique: Optional[TechniqueType] = None
+    techniques_detected: list[DetectedTechnique] = field(default_factory=list)
+    primary_technique: TechniqueType | None = None
     complexity_score: float = 0.0
     
     def summary(self) -> str:
@@ -106,7 +106,7 @@ class TechniqueReport:
         lines.append("=" * 70)
         return "\n".join(lines)
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary.
         
         Returns:
@@ -217,7 +217,7 @@ class TechniqueDetector:
         self,
         code_a: str,
         code_b: str,
-    ) -> Optional[DetectedTechnique]:
+    ) -> DetectedTechnique | None:
         """Detect variable renaming technique.
         
         Args:
@@ -269,7 +269,7 @@ class TechniqueDetector:
         self,
         code_a: str,
         code_b: str,
-    ) -> Optional[DetectedTechnique]:
+    ) -> DetectedTechnique | None:
         """Detect control flow restructuring technique.
         
         Args:
@@ -280,7 +280,7 @@ class TechniqueDetector:
             DetectedTechnique if detected, None otherwise.
         """
         # Extract control flow patterns
-        def extract_control_flow(code: str) -> List[str]:
+        def extract_control_flow(code: str) -> list[str]:
             patterns = []
             # If-else patterns
             if re.search(r'\bif\b.*\belse\b', code):
@@ -324,7 +324,7 @@ class TechniqueDetector:
         self,
         code_a: str,
         code_b: str,
-    ) -> Optional[DetectedTechnique]:
+    ) -> DetectedTechnique | None:
         """Detect API substitution technique.
         
         Args:
@@ -360,7 +360,7 @@ class TechniqueDetector:
         self,
         code_a: str,
         code_b: str,
-    ) -> Optional[DetectedTechnique]:
+    ) -> DetectedTechnique | None:
         """Detect code insertion technique.
         
         Args:
@@ -392,7 +392,7 @@ class TechniqueDetector:
         self,
         code_a: str,
         code_b: str,
-    ) -> Optional[DetectedTechnique]:
+    ) -> DetectedTechnique | None:
         """Detect code deletion technique.
         
         Args:
@@ -424,7 +424,7 @@ class TechniqueDetector:
         self,
         code_a: str,
         code_b: str,
-    ) -> Optional[DetectedTechnique]:
+    ) -> DetectedTechnique | None:
         """Detect statement reordering technique.
         
         Args:
@@ -435,7 +435,7 @@ class TechniqueDetector:
             DetectedTechnique if detected, None otherwise.
         """
         # Extract statements (lines with assignments or function calls)
-        def extract_statements(code: str) -> List[str]:
+        def extract_statements(code: str) -> list[str]:
             statements = []
             for line in code.split('\n'):
                 line = line.strip()
@@ -467,7 +467,7 @@ class TechniqueDetector:
         self,
         code_a: str,
         code_b: str,
-    ) -> Optional[DetectedTechnique]:
+    ) -> DetectedTechnique | None:
         """Detect type change technique.
         
         Args:
@@ -499,7 +499,7 @@ class TechniqueDetector:
         self,
         code_a: str,
         code_b: str,
-    ) -> Optional[DetectedTechnique]:
+    ) -> DetectedTechnique | None:
         """Detect literal change technique.
         
         Args:
@@ -531,7 +531,7 @@ class TechniqueDetector:
         
         return None
     
-    def _compute_complexity(self, techniques: List[DetectedTechnique]) -> float:
+    def _compute_complexity(self, techniques: list[DetectedTechnique]) -> float:
         """Compute complexity score based on detected techniques.
         
         Args:

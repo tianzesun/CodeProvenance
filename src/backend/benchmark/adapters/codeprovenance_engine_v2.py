@@ -9,7 +9,6 @@ Implements the recommendations from benchmark analysis:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
 
 from src.backend.benchmark.similarity.base_engine import BaseSimilarityEngine
 
@@ -63,8 +62,10 @@ class CodeProvenanceEngineV2(BaseSimilarityEngine):
 
     def _get_full_engine(self):
         if self._engine is None:
-            from src.backend.engines.similarity.base_similarity import SimilarityEngine
-            from src.backend.engines.similarity.base_similarity import register_builtin_algorithms
+            from src.backend.engines.similarity.base_similarity import (
+                SimilarityEngine,
+                register_builtin_algorithms,
+            )
             
             self._engine = SimilarityEngine()
             register_builtin_algorithms(self._engine)

@@ -11,9 +11,9 @@ References:
 """
 from __future__ import annotations
 
-import random
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 
@@ -37,9 +37,9 @@ class BootstrapResult:
     ci_upper: float
     confidence_level: float
     n_bootstrap: int
-    bootstrap_means: Optional[np.ndarray] = None
+    bootstrap_means: np.ndarray | None = None
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "mean": self.mean,
@@ -159,7 +159,7 @@ def paired_bootstrap_test(
     metric_fn: Callable[[np.ndarray, np.ndarray], float],
     n_bootstrap: int = 10000,
     seed: int = 42,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Paired bootstrap test for comparing two classifiers.
     
     Tests whether classifier A is significantly different from classifier B

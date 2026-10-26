@@ -6,8 +6,9 @@ import csv
 import re
 import subprocess
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any
 
 from src.backend.benchmark.adapters.base_adapter import BaseAdapter
 from src.backend.benchmark.contracts.evaluation_result import (
@@ -57,8 +58,8 @@ class PMDBenchmarkEngine(BaseAdapter):
         )
 
     def run_batch(
-        self, submissions: Dict[str, str], pairs: Iterable[tuple[str, str]]
-    ) -> Dict[str, Any]:
+        self, submissions: dict[str, str], pairs: Iterable[tuple[str, str]]
+    ) -> dict[str, Any]:
         """Run PMD CPD for all submissions and return requested pair scores."""
         pmd_path = self._find_executable()
         if not pmd_path:
@@ -68,8 +69,8 @@ class PMDBenchmarkEngine(BaseAdapter):
             filename: max(1, len(self._tokenize_code(content)))
             for filename, content in submissions.items()
         }
-        score_by_pair: Dict[str, float] = {}
-        groups: Dict[str, Dict[str, str]] = {}
+        score_by_pair: dict[str, float] = {}
+        groups: dict[str, dict[str, str]] = {}
         for filename, content in submissions.items():
             groups.setdefault(self._infer_pmd_language_from_filename(filename), {})[
                 filename
@@ -103,9 +104,9 @@ class PMDBenchmarkEngine(BaseAdapter):
         self,
         pmd_path: Path,
         language: str,
-        submissions: Dict[str, str],
-        token_counts: Dict[str, int],
-    ) -> Dict[str, float]:
+        submissions: dict[str, str],
+        token_counts: dict[str, int],
+    ) -> dict[str, float]:
         """Run PMD for one language group."""
         with tempfile.TemporaryDirectory(prefix="pmd-adapter-") as temp_dir:
             source_root = Path(temp_dir) / "subs"
@@ -142,11 +143,11 @@ class PMDBenchmarkEngine(BaseAdapter):
     def _parse_cpd_csv(
         self,
         stdout: str,
-        written_paths: Dict[str, str],
-        token_counts: Dict[str, int],
-    ) -> Dict[str, float]:
+        written_paths: dict[str, str],
+        token_counts: dict[str, int],
+    ) -> dict[str, float]:
         """Parse PMD CPD CSV stdout into pair scores."""
-        scores: Dict[str, float] = {}
+        scores: dict[str, float] = {}
         output_lines = [line for line in stdout.splitlines() if line.strip()]
         if len(output_lines) <= 1:
             return scores
@@ -163,7 +164,7 @@ class PMDBenchmarkEngine(BaseAdapter):
             except (TypeError, ValueError):
                 continue
 
-            file_names: List[str] = []
+            file_names: list[str] = []
             for index in range(3, min(len(row), 3 + occurrence_count * 2), 2):
                 file_path = row[index + 1]
                 filename = path_to_filename.get(file_path)
@@ -182,7 +183,7 @@ class PMDBenchmarkEngine(BaseAdapter):
                     scores[pair_key] = max(scores.get(pair_key, 0.0), score)
         return scores
 
-    def _find_executable(self) -> Optional[Path]:
+    def _find_executable(self) -> Path | None:
         """Find the bundled PMD executable."""
         return next(
             (
@@ -194,10 +195,10 @@ class PMDBenchmarkEngine(BaseAdapter):
         )
 
     def _write_submissions(
-        self, target_dir: Path, submissions: Dict[str, str]
-    ) -> Dict[str, str]:
+        self, target_dir: Path, submissions: dict[str, str]
+    ) -> dict[str, str]:
         """Write submissions to a temporary directory."""
-        written_paths: Dict[str, str] = {}
+        written_paths: dict[str, str] = {}
         for filename, content in sorted(submissions.items()):
             file_path = target_dir / Path(filename).name
             file_path.write_text(content, encoding="utf-8")
@@ -231,7 +232,7 @@ class PMDBenchmarkEngine(BaseAdapter):
             "cs": ".cs",
         }.get(language.lower(), ".py")
 
-    def _tokenize_code(self, code: str) -> List[str]:
+    def _tokenize_code(self, code: str) -> list[str]:
         """Tokenize code for PMD duplicate-token score normalization."""
         return re.findall(r"[A-Za-z_]\w*|\d+|==|!=|<=|>=|\S", code.lower())
 
@@ -241,10 +242,10 @@ class PMDBenchmarkEngine(BaseAdapter):
 
 
 def run_pmd_batch(
-    submissions: Dict[str, str],
+    submissions: dict[str, str],
     pairs: Iterable[tuple[str, str]],
     progress_cb=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run the canonical PMD batch adapter used by benchmark APIs."""
     _ = progress_cb
     return PMDBenchmarkEngine().run_batch(submissions, pairs)

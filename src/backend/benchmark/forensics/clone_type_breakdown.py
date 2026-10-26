@@ -5,7 +5,7 @@ Provides detailed analysis of performance broken down by clone type.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 
 # Define SimilarityResult locally to avoid circular import with pipeline.stages
@@ -15,7 +15,7 @@ class SimilarityResult:
     id_a: str
     id_b: str
     score: float  # [0, 1]
-    label: Optional[int] = None
+    label: int | None = None
     engine_name: str = ""
     clone_type: int = 0  # 1-4 for clones, 0 for non-clone
 
@@ -33,13 +33,13 @@ class CloneTypeBreakdown:
         non_clone: Metrics for non-clone pairs.
     """
     engine_name: str = ""
-    type1: Dict[str, float] = field(default_factory=dict)
-    type2: Dict[str, float] = field(default_factory=dict)
-    type3: Dict[str, float] = field(default_factory=dict)
-    type4: Dict[str, float] = field(default_factory=dict)
-    non_clone: Dict[str, float] = field(default_factory=dict)
+    type1: dict[str, float] = field(default_factory=dict)
+    type2: dict[str, float] = field(default_factory=dict)
+    type3: dict[str, float] = field(default_factory=dict)
+    type4: dict[str, float] = field(default_factory=dict)
+    non_clone: dict[str, float] = field(default_factory=dict)
     
-    def summary_dict(self) -> Dict[str, Any]:
+    def summary_dict(self) -> dict[str, Any]:
         """Convert to summary dictionary.
         
         Returns:
@@ -96,9 +96,9 @@ class CloneTypeBreakdown:
 
 
 def analyze_clone_type_breakdown(
-    results: List[SimilarityResult],
-    ground_truth: Dict[Tuple[str, str], int],
-    pair_clone_types: Dict[Tuple[str, str], int],
+    results: list[SimilarityResult],
+    ground_truth: dict[tuple[str, str], int],
+    pair_clone_types: dict[tuple[str, str], int],
     threshold: float = 0.5,
 ) -> CloneTypeBreakdown:
     """Analyze performance broken down by clone type.

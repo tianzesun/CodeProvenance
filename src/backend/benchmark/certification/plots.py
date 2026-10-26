@@ -8,8 +8,8 @@ Generates publication-grade visualizations for:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -29,7 +29,7 @@ class ReliabilityDiagramPlotter:
         self,
         y_true: np.ndarray,
         y_prob: np.ndarray,
-    ) -> Dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray]:
         """Compute calibration data for plotting.
 
         Args:
@@ -69,7 +69,7 @@ class ReliabilityDiagramPlotter:
         self,
         y_true: np.ndarray,
         y_prob: np.ndarray,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Convert calibration data to dictionary for JSON export.
 
         Args:
@@ -107,10 +107,10 @@ class DegradationCurvePlotter:
 
     def compute_degradation_data(
         self,
-        strata_values: List[float],
-        f1_scores: List[float],
+        strata_values: list[float],
+        f1_scores: list[float],
         stratum_name: str = "Stratum",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Compute degradation curve data.
 
         Args:
@@ -143,11 +143,11 @@ class DegradationCurvePlotter:
 
     def to_dict(
         self,
-        clone_types: Optional[List[int]] = None,
-        clone_f1_scores: Optional[List[float]] = None,
-        difficulties: Optional[List[str]] = None,
-        difficulty_f1_scores: Optional[List[float]] = None,
-    ) -> Dict[str, Any]:
+        clone_types: list[int] | None = None,
+        clone_f1_scores: list[float] | None = None,
+        difficulties: list[str] | None = None,
+        difficulty_f1_scores: list[float] | None = None,
+    ) -> dict[str, Any]:
         """Convert degradation data to dictionary.
 
         Args:
@@ -159,7 +159,7 @@ class DegradationCurvePlotter:
         Returns:
             Dictionary with degradation data.
         """
-        result: Dict[str, Any] = {"title": self.title}
+        result: dict[str, Any] = {"title": self.title}
 
         if clone_types and clone_f1_scores:
             result["clone_type"] = self.compute_degradation_data(

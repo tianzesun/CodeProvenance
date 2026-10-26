@@ -7,8 +7,9 @@ import re
 import subprocess
 import tempfile
 import urllib.request
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 from src.backend.benchmark.adapters.base_adapter import BaseAdapter
 from src.backend.benchmark.contracts.evaluation_result import (
@@ -38,7 +39,7 @@ class MossAdapter(BaseAdapter):
         language: str = "python",
         max_matches: int = 10,
         threshold: float = 0.5,
-        moss_user_id: Optional[str] = None,
+        moss_user_id: str | None = None,
     ) -> None:
         self._language = language
         self._max_matches = max_matches
@@ -71,7 +72,7 @@ class MossAdapter(BaseAdapter):
 
     def evaluate(self, pair: EnrichedPair) -> EvaluationResult:
         """Evaluate a pair by submitting only those two files to MOSS."""
-        metadata: Dict[str, Any] = {
+        metadata: dict[str, Any] = {
             "language": getattr(pair, "language", None) or self._language,
             "max_matches": self._max_matches,
             "real_moss": True,
@@ -98,7 +99,7 @@ class MossAdapter(BaseAdapter):
 
         return self._make_result(pair, score, self._threshold, metadata=metadata)
 
-    def _compare(self, code_a: str, code_b: str, language: str) -> Dict[str, Any]:
+    def _compare(self, code_a: str, code_b: str, language: str) -> dict[str, Any]:
         """Submit two source strings and return the parsed report score."""
         if not code_a or not code_b:
             return {"score": 0.0}
@@ -113,15 +114,15 @@ class MossAdapter(BaseAdapter):
         return result
 
     def run_batch(
-        self, submissions: Dict[str, str], pairs: Iterable[tuple[str, str]]
-    ) -> Dict[str, Any]:
+        self, submissions: dict[str, str], pairs: Iterable[tuple[str, str]]
+    ) -> dict[str, Any]:
         """Submit grouped files to MOSS and return pair scores for requested pairs."""
         if not self.is_available():
             return {"pairs": []}
 
-        groups: Dict[str, Dict[str, str]] = {}
-        score_by_pair: Dict[str, float] = {}
-        detail_by_pair: Dict[str, Dict[str, Any]] = {}
+        groups: dict[str, dict[str, str]] = {}
+        score_by_pair: dict[str, float] = {}
+        detail_by_pair: dict[str, dict[str, Any]] = {}
         for filename, content in submissions.items():
             groups.setdefault(self._infer_language_from_filename(filename), {})[
                 filename
@@ -180,14 +181,14 @@ class MossAdapter(BaseAdapter):
                 if detail.get("report_url")
             }
         )
-        payload: Dict[str, Any] = {"pairs": results}
+        payload: dict[str, Any] = {"pairs": results}
         if report_urls:
             payload["report_url"] = report_urls[0]
         return payload
 
     def _submit_group(
-        self, submissions: Dict[str, str], moss_language: str
-    ) -> tuple[Optional[str], str, Dict[str, str]]:
+        self, submissions: dict[str, str], moss_language: str
+    ) -> tuple[str | None, str, dict[str, str]]:
         """Submit one language group to MOSS and return report HTML."""
         with tempfile.TemporaryDirectory(prefix="moss-adapter-") as temp_dir:
             run_dir = Path(temp_dir)
@@ -268,10 +269,10 @@ class MossAdapter(BaseAdapter):
         return run_script
 
     def _write_submissions(
-        self, source_root: Path, submissions: Dict[str, str]
-    ) -> Dict[str, str]:
+        self, source_root: Path, submissions: dict[str, str]
+    ) -> dict[str, str]:
         """Write submissions to a temporary directory and return path mapping."""
-        written_paths: Dict[str, str] = {}
+        written_paths: dict[str, str] = {}
         for index, (filename, content) in enumerate(sorted(submissions.items())):
             safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", Path(filename).name)
             target = source_root / f"{index:04d}_{safe_name}"
@@ -279,7 +280,7 @@ class MossAdapter(BaseAdapter):
             written_paths[filename] = str(target)
         return written_paths
 
-    def _extract_report_url(self, output: str) -> Optional[str]:
+    def _extract_report_url(self, output: str) -> str | None:
         """Extract the Stanford report URL from MOSS stdout."""
         match = re.search(r"https?://moss\.stanford\.edu/results/[^\s]+", output)
         return match.group(0).rstrip("/") if match else None
@@ -329,11 +330,11 @@ class MossAdapter(BaseAdapter):
 
 
 def run_moss_batch(
-    submissions: Dict[str, str],
+    submissions: dict[str, str],
     pairs: Iterable[tuple[str, str]],
-    moss_user_id: Optional[str] = None,
+    moss_user_id: str | None = None,
     progress_cb=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run the canonical MOSS batch adapter used by benchmark APIs."""
     _ = progress_cb
     max_matches = max(10, min(1000, len(submissions)))

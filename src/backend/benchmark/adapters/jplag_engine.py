@@ -13,7 +13,6 @@ This implementation captures the essence of JPlag's approach:
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Set, Tuple
 
 from src.backend.benchmark.similarity.base_engine import BaseSimilarityEngine
 
@@ -78,8 +77,8 @@ class JPlagEngine(BaseSimilarityEngine):
             return 0.0
         
         # Greedy string tiling
-        matched_a: Set[int] = set()
-        matched_b: Set[int] = set()
+        matched_a: set[int] = set()
+        matched_b: set[int] = set()
         total_matched = 0
         
         tiles = self._find_all_tiles(tokens_a, tokens_b, matched_a, matched_b)
@@ -98,7 +97,7 @@ class JPlagEngine(BaseSimilarityEngine):
         # Use minimum overlap (JPlag's default behavior)
         return max(0.0, min(1.0, min(overlap_a, overlap_b)))
     
-    def _tokenize(self, code: str) -> List[str]:
+    def _tokenize(self, code: str) -> list[str]:
         """Tokenize code JPlag-style.
         
         Preserves keywords and operators as structural tokens.
@@ -179,11 +178,11 @@ class JPlagEngine(BaseSimilarityEngine):
     
     def _find_all_tiles(
         self,
-        tokens_a: List[str],
-        tokens_b: List[str],
-        matched_a: Set[int],
-        matched_b: Set[int],
-    ) -> List[Tuple[int, int, int]]:
+        tokens_a: list[str],
+        tokens_b: list[str],
+        matched_a: set[int],
+        matched_b: set[int],
+    ) -> list[tuple[int, int, int]]:
         """Find all maximal matching tiles using greedy approach.
         
         Args:
@@ -201,7 +200,7 @@ class JPlagEngine(BaseSimilarityEngine):
         
         # Build suffix match index for efficiency
         # For each position pair, find max matching length
-        match_len: Dict[Tuple[int, int], int] = {}
+        match_len: dict[tuple[int, int], int] = {}
         
         for i in range(n - 1, -1, -1):
             if i in matched_a:
@@ -216,8 +215,8 @@ class JPlagEngine(BaseSimilarityEngine):
         
         # Find all maximal tiles above min_match length
         min_match = self._min_match
-        checked_a: Set[int] = set()
-        checked_b: Set[int] = set()
+        checked_a: set[int] = set()
+        checked_b: set[int] = set()
         
         while True:
             best_start_a = -1

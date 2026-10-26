@@ -1,9 +1,10 @@
 """NiCad Parser - parses XML clone output to StandardOutput."""
-from typing import List, Dict, Any, Optional
-from pathlib import Path
-from collections import defaultdict
 import xml.etree.ElementTree as ET
-from src.backend.benchmark.parsers.base_parser import BaseToolParser, StandardOutput, ParserError
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
+from src.backend.benchmark.parsers.base_parser import BaseToolParser, ParserError, StandardOutput
 
 
 class NiCadParser(BaseToolParser):
@@ -31,7 +32,7 @@ class NiCadParser(BaseToolParser):
         pairs = self.filter_pairs(pairs, self.threshold)
         return StandardOutput(tool=self.tool_name, dataset=self.dataset, pairs=pairs)
     
-    def _find_xml_file(self, path: Path) -> Optional[Path]:
+    def _find_xml_file(self, path: Path) -> Path | None:
         if path.is_file() and path.suffix == ".xml":
             return path
         if path.is_dir():
@@ -41,7 +42,7 @@ class NiCadParser(BaseToolParser):
                         return f
         return None
     
-    def _parse_xml(self, xml_path: Path) -> List[Dict[str, Any]]:
+    def _parse_xml(self, xml_path: Path) -> list[dict[str, Any]]:
         tree = ET.parse(xml_path)
         root = tree.getroot()
         pair_counts = defaultdict(int)
@@ -57,7 +58,7 @@ class NiCadParser(BaseToolParser):
                 if fe is None:
                     continue
                 fp = self.normalize_path(fe.text or "")
-                s, e = int((se.text or "0")), int((ee.text or "0"))
+                s, e = int(se.text or "0"), int(ee.text or "0")
                 if fp:
                     info.append((fp, s, e))
             for i in range(len(info)):

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any
 
 
 @dataclass
@@ -30,7 +30,7 @@ class UnifiedPair:
     label: int
     type: int = 0
     source: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -40,24 +40,24 @@ class UnifiedDataset:
     Contains a list of UnifiedPair objects and dataset-level metadata.
     """
     name: str
-    pairs: List[UnifiedPair] = field(default_factory=list)
+    pairs: list[UnifiedPair] = field(default_factory=list)
     language: str = ""
     version: str = "1.0"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __len__(self) -> int:
         return len(self.pairs)
 
     @property
-    def label_counts(self) -> Dict[int, int]:
-        counts: Dict[int, int] = {}
+    def label_counts(self) -> dict[int, int]:
+        counts: dict[int, int] = {}
         for p in self.pairs:
             counts[p.label] = counts.get(p.label, 0) + 1
         return counts
 
     @property
-    def type_counts(self) -> Dict[int, int]:
-        counts: Dict[int, int] = {}
+    def type_counts(self) -> dict[int, int]:
+        counts: dict[int, int] = {}
         for p in self.pairs:
             counts[p.type] = counts.get(p.type, 0) + 1
         return counts
@@ -69,7 +69,7 @@ class UnifiedDataset:
         return sum(1 for p in self.pairs if p.label == 1) / len(self.pairs)
 
     @property
-    def labels(self) -> List[int]:
+    def labels(self) -> list[int]:
         return [p.label for p in self.pairs]
 
     @property
@@ -84,7 +84,7 @@ class UnifiedDataset:
         y_true = [p.label for p in self.pairs]
         return y_true
 
-    def to_dicts(self) -> List[Dict[str, Any]]:
+    def to_dicts(self) -> list[dict[str, Any]]:
         return [
             {"id": p.id, "code_a": p.code_a, "code_b": p.code_b,
              "label": p.label, "type": p.type, "source": p.source}
@@ -104,7 +104,7 @@ class UnifiedDataset:
             json.dump(data, f, indent=2)
 
     @classmethod
-    def from_canonical(cls, canonical, name: str = "") -> "UnifiedDataset":
+    def from_canonical(cls, canonical, name: str = "") -> UnifiedDataset:
         pairs = []
         ds_name = name or getattr(canonical, "name", "unknown")
         for cp in canonical.pairs:

@@ -12,7 +12,7 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -34,7 +34,7 @@ class CalibrationResult:
     bin_confidences: np.ndarray
     bin_counts: np.ndarray
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "ece": self.ece,
@@ -167,8 +167,8 @@ def plot_calibration_curve(
     y_true: np.ndarray,
     y_prob: np.ndarray,
     n_bins: int = 10,
-    ax: Optional[Any] = None,
-) -> Tuple[Any, CalibrationResult]:
+    ax: Any | None = None,
+) -> tuple[Any, CalibrationResult]:
     """Plot calibration curve (reliability diagram).
     
     Args:

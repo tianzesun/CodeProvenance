@@ -1,9 +1,8 @@
 """Parser utilities - unified tool output interface."""
-from typing import Dict, List, Any, Optional
-from pathlib import Path
 import json
+from pathlib import Path
 
-from src.backend.benchmark.parsers.base_parser import BaseToolParser, StandardOutput, ParserError
+from src.backend.benchmark.parsers.base_parser import ParserError, StandardOutput
 
 
 def parse_tool_output(tool_name: str, input_path: Path, dataset: str = "",

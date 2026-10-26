@@ -17,9 +17,9 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 try:
     from tools.registry.tool_registry import ToolSpec, load_registry
@@ -68,8 +68,8 @@ class ToolSmokeRunner:
 
     def __init__(
         self,
-        repo_root: Optional[Path] = None,
-        registry_path: Optional[Path] = None,
+        repo_root: Path | None = None,
+        registry_path: Path | None = None,
         timeout_seconds: int = 20,
     ) -> None:
         self.repo_root = repo_root or self._discover_repo_root()
@@ -147,7 +147,7 @@ class ToolSmokeRunner:
 
         return False
 
-    def _run_command(self, command: list[str], cwd: Optional[Path] = None) -> subprocess.CompletedProcess[str]:
+    def _run_command(self, command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
         """
         Run a command and capture output.
         """
@@ -284,10 +284,10 @@ def main() -> None:
     for name, result in results.items():
         print(
             f"{name:12} | {result.status:4} | "
-            f"wrapper={str(result.wrapper_exists):5} | "
-            f"exec={str(result.wrapper_executable):5} | "
-            f"runtime={str(result.runtime_ok):5} | "
-            f"probe={str(result.help_ok):5} | "
+            f"wrapper={result.wrapper_exists!s:5} | "
+            f"exec={result.wrapper_executable!s:5} | "
+            f"runtime={result.runtime_ok!s:5} | "
+            f"probe={result.help_ok!s:5} | "
             f"{result.notes}"
         )
 

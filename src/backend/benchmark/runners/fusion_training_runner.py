@@ -13,9 +13,10 @@ import json
 import logging
 import pickle
 import time
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 
 from src.backend.benchmark.runners.fusion_optimization_runner import (
     PAIR_FEATURE_NAMES,
@@ -30,7 +31,6 @@ from src.backend.benchmark.runners.fusion_optimization_runner import (
     ValidationPair,
     ValidationSubmission,
 )
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -59,8 +59,8 @@ class TrainingCodePair:
     code_b: str
     label: int
     problem_id: str = ""
-    code_a_path: Optional[str] = None
-    code_b_path: Optional[str] = None
+    code_a_path: str | None = None
+    code_b_path: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -172,9 +172,9 @@ class SupervisedFusionTrainingRunner:
         output_dir: Path,
         train_datasets: Iterable[str],
         eval_datasets: Iterable[str],
-        dataset_roots: Optional[list[Path]] = None,
-        train_pair_limit: Optional[int] = None,
-        eval_pair_limit: Optional[int] = None,
+        dataset_roots: list[Path] | None = None,
+        train_pair_limit: int | None = None,
+        eval_pair_limit: int | None = None,
         threshold_step: float = 0.02,
         optuna_trials: int = 40,
         seed: int = 42,
@@ -273,7 +273,7 @@ class SupervisedFusionTrainingRunner:
         self,
         dataset_names: list[str],
         role: str,
-        pair_limit: Optional[int],
+        pair_limit: int | None,
     ) -> list[TrainingCodePair]:
         """Load pairs from all requested datasets."""
         all_pairs: list[TrainingCodePair] = []
@@ -1015,9 +1015,9 @@ def run_supervised_fusion_training(
     output_dir: Path,
     train_datasets: Iterable[str],
     eval_datasets: Iterable[str],
-    dataset_roots: Optional[list[Path]] = None,
-    train_pair_limit: Optional[int] = None,
-    eval_pair_limit: Optional[int] = None,
+    dataset_roots: list[Path] | None = None,
+    train_pair_limit: int | None = None,
+    eval_pair_limit: int | None = None,
     threshold_step: float = 0.02,
     optuna_trials: int = 40,
     seed: int = 42,

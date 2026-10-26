@@ -6,7 +6,6 @@ easy negatives (unrelated code) and hard negatives (near-miss).
 from __future__ import annotations
 
 import random
-from typing import List, Optional, Tuple
 
 from src.backend.benchmark.generators.base_loader import CodePool
 from src.backend.benchmark.generators.utils.ast_utils import count_lines, count_tokens
@@ -29,7 +28,7 @@ class NegativeGenerator:
         self.seed = seed
         self.rng = random.Random(seed)
     
-    def generate_easy(self, pool: CodePool) -> Tuple[str, str]:
+    def generate_easy(self, pool: CodePool) -> tuple[str, str]:
         """Generate easy negative pair (unrelated code).
         
         Args:
@@ -40,7 +39,7 @@ class NegativeGenerator:
         """
         return pool.sample_pair()
     
-    def generate_hard(self, code: str, pool: CodePool) -> Tuple[str, str]:
+    def generate_hard(self, code: str, pool: CodePool) -> tuple[str, str]:
         """Generate hard negative pair (near-miss).
         
         Creates pairs that look similar but are not clones
@@ -64,7 +63,7 @@ class NegativeGenerator:
         
         return code, combined
     
-    def generate_hard_by_sharing(self, pool: CodePool) -> Tuple[str, str]:
+    def generate_hard_by_sharing(self, pool: CodePool) -> tuple[str, str]:
         """Generate hard negative by sharing common patterns.
         
         Args:
@@ -96,7 +95,7 @@ class NegativeGenerator:
         min_lines: int = 5,
         max_lines: int = 50,
         difficulty: str = "easy",
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """Generate negative pair with constraints.
         
         Args:
@@ -136,7 +135,7 @@ class NegativeGenerator:
         return pool.sample_pair()
 
 
-def generate_easy_negative(pool: CodePool, seed: int = 42) -> Tuple[str, str]:
+def generate_easy_negative(pool: CodePool, seed: int = 42) -> tuple[str, str]:
     """Generate easy negative pair (unrelated code).
     
     Args:
@@ -150,7 +149,7 @@ def generate_easy_negative(pool: CodePool, seed: int = 42) -> Tuple[str, str]:
     return generator.generate_easy(pool)
 
 
-def generate_hard_negative(code: str, pool: CodePool, seed: int = 42) -> Tuple[str, str]:
+def generate_hard_negative(code: str, pool: CodePool, seed: int = 42) -> tuple[str, str]:
     """Generate hard negative pair (near-miss).
     
     Args:
@@ -169,7 +168,7 @@ def generate_negative_pair(
     pool: CodePool,
     difficulty: str = "easy",
     seed: int = 42,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Generate a negative pair.
     
     Args:

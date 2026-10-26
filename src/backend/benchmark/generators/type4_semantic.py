@@ -6,12 +6,10 @@ but same functionality. Includes Easy, Medium, and Hard levels.
 from __future__ import annotations
 
 import random
-from typing import Dict, List, Optional, Tuple
 
-from src.backend.benchmark.generators.base_loader import CodePool
+from src.backend.benchmark.generators.utils.ast_utils import is_valid_python
 from src.backend.benchmark.generators.utils.rename_utils import rename_identifiers
 from src.backend.benchmark.generators.utils.transform_utils import structural_transform
-from src.backend.benchmark.generators.utils.ast_utils import is_valid_python
 
 
 class Type4Generator:
@@ -139,7 +137,7 @@ class Type4Generator:
         
         return result
     
-    def generate_all_difficulties(self, code: str) -> Dict[str, str]:
+    def generate_all_difficulties(self, code: str) -> dict[str, str]:
         """Generate Type-4 clones at all difficulty levels.
         
         Args:
@@ -170,7 +168,7 @@ def generate_type4_clone(code: str, difficulty: str = "medium", seed: int = 42) 
     return generator.generate(code, difficulty)
 
 
-def generate_type4_all_difficulties(code: str, seed: int = 42) -> Dict[str, str]:
+def generate_type4_all_difficulties(code: str, seed: int = 42) -> dict[str, str]:
     """Generate Type-4 clones at all difficulty levels.
     
     Args:

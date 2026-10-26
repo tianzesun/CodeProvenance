@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.backend.api.schemas.submission import (  # noqa: F401  (re-exported)
+from src.backend.api.schemas.submission import (
     SubmissionBase,
     SubmissionCreate,
     SubmissionResponse,
@@ -20,8 +20,8 @@ from src.backend.config.settings import settings
 __all__ = [
     "JobBase",
     "JobCreate",
-    "JobUpdate",
     "JobResponse",
+    "JobUpdate",
     "SubmissionBase",
     "SubmissionCreate",
     "SubmissionResponse",

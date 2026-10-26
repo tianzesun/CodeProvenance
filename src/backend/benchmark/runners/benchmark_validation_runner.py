@@ -9,16 +9,14 @@ from __future__ import annotations
 
 import datetime
 import logging
-from typing import Any, Dict, List, Tuple, Optional
-import uuid
+from typing import Any
 
-from ..adapters.base_adapter import BaseAdapter
 from ..adapters import get_adapter
+from ..adapters.base_adapter import BaseAdapter
 from ..cross_dataset.dataset_registry import get_dataset
 from ..evaluation.metrics import calculate_all_metrics
+from ..validation.pass_fail import STANDARD_VALIDATION_RULES, BenchmarkPassFailValidator
 from ..validation.protocol import ValidationProtocol, ValidationResult, ValidationStatus
-from ..validation.pass_fail import BenchmarkPassFailValidator, STANDARD_VALIDATION_RULES
-
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +96,7 @@ class BenchmarkValidationRunner:
 
         return self.result
 
-    def _run_tool(self, adapter: BaseAdapter, dataset: Any) -> Dict[str, Any]:
+    def _run_tool(self, adapter: BaseAdapter, dataset: Any) -> dict[str, Any]:
         """Run a single tool adapter against the dataset and calculate metrics."""
         predictions = adapter.run(dataset)
         metrics = calculate_all_metrics(dataset.ground_truth, predictions)

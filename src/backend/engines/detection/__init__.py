@@ -24,12 +24,12 @@ from src.backend.engines.detection.layer4_explainability import Layer4Explainabi
 from src.backend.engines.detection.policy_engine import PolicyEngine
 
 __all__ = [
+    "FEDS",
     "DecisionThresholds",
     "DetectionPolicy",
     "EHEThresholds",
     "EvidenceHierarchyEngine",
     "EvidenceReport",
-    "FEDS",
     "Layer1Deterministic",
     "Layer2Statistical",
     "Layer3Semantic",

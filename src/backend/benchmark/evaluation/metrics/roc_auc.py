@@ -11,10 +11,10 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
-from sklearn.metrics import roc_curve, auc, average_precision_score
+from sklearn.metrics import auc, average_precision_score, roc_curve
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,7 @@ class ROCResult:
     thresholds: np.ndarray
     auc: float
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "fpr": self.fpr.tolist(),

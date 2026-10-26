@@ -41,7 +41,7 @@ _FOR_LOOP_RE = re.compile(r"^\s*for\s+\w+\s+in\s+", re.MULTILINE)
 
 def _clamp01(value: float) -> float:
     """Clamp to [0, 1]."""
-    return 0.0 if value < 0.0 else 1.0 if value > 1.0 else value
+    return 0.0 if value < 0.0 else min(value, 1.0)
 
 
 # ============================================================================

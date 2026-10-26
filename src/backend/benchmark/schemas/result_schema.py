@@ -2,9 +2,9 @@
 
 Provides standardized result format for reproducibility and comparison.
 """
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from typing import Any
 
 
 @dataclass
@@ -29,7 +29,7 @@ class DatasetMetadata:
     version: str
     size: int
     language: str
-    clone_types: List[int] = field(default_factory=list)
+    clone_types: list[int] = field(default_factory=list)
     description: str = ""
 
 
@@ -41,15 +41,15 @@ class BenchmarkResult:
     """
     benchmark_name: str
     dataset: DatasetMetadata
-    engine_results: List[EngineResult] = field(default_factory=list)
+    engine_results: list[EngineResult] = field(default_factory=list)
     timestamp: str = ""
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
         if not self.timestamp:
             self.timestamp = datetime.now().isoformat()
     
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Get summary of benchmark results.
         
         Returns:
@@ -69,7 +69,7 @@ class BenchmarkResult:
             "total_comparisons": sum(e.total_comparisons for e in self.engine_results)
         }
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization.
         
         Returns:

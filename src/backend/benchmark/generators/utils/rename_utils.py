@@ -8,9 +8,11 @@ from __future__ import annotations
 import ast
 import random
 import string
-from typing import Dict, List, Optional, Set, Tuple
 
-from src.backend.benchmark.generators.utils.ast_utils import get_identifiers, parse_code, unparse_code
+from src.backend.benchmark.generators.utils.ast_utils import (
+    parse_code,
+    unparse_code,
+)
 
 
 class IdentifierRenamer(ast.NodeTransformer):
@@ -28,7 +30,7 @@ class IdentifierRenamer(ast.NodeTransformer):
         """
         self.seed = seed
         self.rng = random.Random(seed)
-        self.name_map: Dict[str, str] = {}
+        self.name_map: dict[str, str] = {}
         self.counter = 0
         
         # Python keywords that should not be renamed
@@ -176,7 +178,7 @@ def rename_identifiers(code: str, seed: int = 42) -> str:
         return code
 
 
-def get_rename_map(code: str, seed: int = 42) -> Dict[str, str]:
+def get_rename_map(code: str, seed: int = 42) -> dict[str, str]:
     """Get the mapping of original names to renamed names.
     
     Args:

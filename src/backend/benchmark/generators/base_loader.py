@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 
 class CodePool:
@@ -29,7 +28,7 @@ class CodePool:
         self.rng = random.Random(seed)
         
         # Load all Python files
-        self.files: List[Path] = []
+        self.files: list[Path] = []
         if self.data_dir.exists():
             self.files = list(self.data_dir.glob("**/*.py"))
         
@@ -153,7 +152,7 @@ def merge(left, right):
         else:
             return self.rng.choice(self.templates)
     
-    def sample_pair(self) -> Tuple[str, str]:
+    def sample_pair(self) -> tuple[str, str]:
         """Sample two different code snippets.
         
         Returns:

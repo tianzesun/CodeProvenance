@@ -9,8 +9,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ======================================================================
 # Dataset definitions
@@ -134,10 +133,10 @@ class DatasetEntry:
     path: str = ""
     hf_id: str = ""
     description: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "DatasetEntry":
+    def from_dict(cls, d: dict[str, Any]) -> DatasetEntry:
         return cls(
             id=d["id"],
             type=d.get("type", "real"),
@@ -153,7 +152,7 @@ class DatasetEntry:
 class DatasetCatalog:
     """Central catalog of all known datasets."""
 
-    _entries: Dict[str, DatasetEntry] = {}
+    _entries: dict[str, DatasetEntry] = {}
 
     @classmethod
     def register_all(cls) -> None:
@@ -162,23 +161,23 @@ class DatasetCatalog:
             cls._entries[entry.id] = entry
 
     @classmethod
-    def get(cls, dataset_id: str) -> Optional[DatasetEntry]:
+    def get(cls, dataset_id: str) -> DatasetEntry | None:
         if not cls._entries:
             cls.register_all()
         return cls._entries.get(dataset_id)
 
     @classmethod
-    def list_all(cls) -> List[DatasetEntry]:
+    def list_all(cls) -> list[DatasetEntry]:
         if not cls._entries:
             cls.register_all()
         return list(cls._entries.values())
 
     @classmethod
-    def list_by_type(cls, dtype: str) -> List[DatasetEntry]:
+    def list_by_type(cls, dtype: str) -> list[DatasetEntry]:
         return [e for e in cls.list_all() if e.type == dtype]
 
     @classmethod
-    def list_by_language(cls, lang: str) -> List[DatasetEntry]:
+    def list_by_language(cls, lang: str) -> list[DatasetEntry]:
         return [e for e in cls.list_all() if e.language == lang]
 
 
@@ -270,7 +269,7 @@ def _normalize_generic(code: str) -> str:
 # Pair generation
 # ======================================================================
 
-def generate_pairs(dataset: DatasetEntry, max_pairs: Optional[int] = None, seed: int = 42) -> List[Dict[str, Any]]:
+def generate_pairs(dataset: DatasetEntry, max_pairs: int | None = None, seed: int = 42) -> list[dict[str, Any]]:
     """Generate labeled code pairs from a dataset.
 
     Real-world / synthetic: load pre-labeled pairs from disk.
@@ -283,7 +282,7 @@ def generate_pairs(dataset: DatasetEntry, max_pairs: Optional[int] = None, seed:
     return []
 
 
-def _load_local_pairs(dataset: DatasetEntry, max_pairs: Optional[int] = None) -> List[Dict[str, Any]]:
+def _load_local_pairs(dataset: DatasetEntry, max_pairs: int | None = None) -> list[dict[str, Any]]:
     """Load pre-labeled pairs from a JSON file."""
     path = Path(dataset.path)
     candidates = [
@@ -306,7 +305,7 @@ def _load_local_pairs(dataset: DatasetEntry, max_pairs: Optional[int] = None) ->
     return []
 
 
-def _generate_hf_pairs(dataset: DatasetEntry, max_pairs: Optional[int] = None, seed: int = 42) -> List[Dict[str, Any]]:
+def _generate_hf_pairs(dataset: DatasetEntry, max_pairs: int | None = None, seed: int = 42) -> list[dict[str, Any]]:
     """Generate pairs from a HuggingFace dataset."""
     import random
     rng = random.Random(seed)
@@ -380,7 +379,7 @@ def _generate_hf_pairs(dataset: DatasetEntry, max_pairs: Optional[int] = None, s
     return pairs
 
 
-def _detect_code_field(data) -> Optional[str]:
+def _detect_code_field(data) -> str | None:
     """Detect the code field in a HuggingFace dataset."""
     if len(data) == 0:
         return None
@@ -395,7 +394,7 @@ def _detect_code_field(data) -> Optional[str]:
     return None
 
 
-def _detect_label_field(data) -> Optional[str]:
+def _detect_label_field(data) -> str | None:
     """Detect the label field in a HuggingFace dataset."""
     if len(data) == 0:
         return None

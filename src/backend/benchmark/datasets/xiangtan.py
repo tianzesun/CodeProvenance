@@ -6,11 +6,11 @@ Includes hand-labeled pairs with multiple clone types.
 
 Reference: "Detecting Code Clones with Graph Neural Network and Flow-Augmented AST"
 """
-from typing import Dict, List, Any, Optional, Tuple
-from pathlib import Path
-import json
 import csv
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -48,12 +48,12 @@ class XiangtanDataset:
         self.data_dir = data_dir
         self.source_dir = data_dir / "source"
         self.pairs_file = data_dir / "pairs.csv"
-        self._pairs: List[XTClonePair] = []
-        self._source_cache: Dict[str, str] = {}
+        self._pairs: list[XTClonePair] = []
+        self._source_cache: dict[str, str] = {}
 
-    def load(self, clone_types: Optional[List[str]] = None,
-             max_pairs: Optional[int] = None,
-             load_sources: bool = True) -> List[XTClonePair]:
+    def load(self, clone_types: list[str] | None = None,
+             max_pairs: int | None = None,
+             load_sources: bool = True) -> list[XTClonePair]:
         """
         Load clone pairs from the dataset.
 
@@ -80,8 +80,8 @@ class XiangtanDataset:
 
         return self._pairs
 
-    def _load_from_csv(self, clone_types: Optional[List[str]] = None,
-                       max_pairs: Optional[int] = None) -> List[XTClonePair]:
+    def _load_from_csv(self, clone_types: list[str] | None = None,
+                       max_pairs: int | None = None) -> list[XTClonePair]:
         """Load pairs from CSV file."""
         pairs = []
         with open(self.pairs_file, 'r', encoding='utf-8') as f:
@@ -105,8 +105,8 @@ class XiangtanDataset:
 
         return pairs
 
-    def _load_from_directory(self, clone_types: Optional[List[str]] = None,
-                             max_pairs: Optional[int] = None) -> List[XTClonePair]:
+    def _load_from_directory(self, clone_types: list[str] | None = None,
+                             max_pairs: int | None = None) -> list[XTClonePair]:
         """Load pairs by scanning source directories."""
         pairs = []
         type_dirs = []
@@ -143,7 +143,7 @@ class XiangtanDataset:
 
         return pairs
 
-    def get_source(self, file_path: str) -> Optional[str]:
+    def get_source(self, file_path: str) -> str | None:
         """Load source code for a file."""
         if file_path in self._source_cache:
             return self._source_cache[file_path]
@@ -163,7 +163,7 @@ class XiangtanDataset:
         except Exception:
             return None
 
-    def load_ground_truth_json(self) -> List[Dict[str, Any]]:
+    def load_ground_truth_json(self) -> list[dict[str, Any]]:
         """Load ground truth from JSON file if available."""
         gt_file = self.data_dir / "ground_truth.json"
         if not gt_file.exists():
@@ -172,7 +172,7 @@ class XiangtanDataset:
         with open(gt_file, 'r') as f:
             return json.load(f).get("pairs", [])
 
-    def to_ground_truth_format(self) -> Dict[str, Any]:
+    def to_ground_truth_format(self) -> dict[str, Any]:
         """Convert loaded pairs to ground truth format."""
         pairs = []
         for p in self._pairs:
@@ -191,7 +191,7 @@ class XiangtanDataset:
         with open(output_path, 'w') as f:
             json.dump(data, f, indent=2)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get dataset statistics."""
         type_counts = {}
         for p in self._pairs:
@@ -205,7 +205,7 @@ class XiangtanDataset:
             "clone_type_counts": type_counts,
         }
 
-    def check_availability(self) -> Dict[str, bool]:
+    def check_availability(self) -> dict[str, bool]:
         """Check which parts of the dataset are available."""
         return {
             "data_dir": self.data_dir.exists(),

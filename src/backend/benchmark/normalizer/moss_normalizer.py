@@ -1,9 +1,9 @@
 """MOSS Normalizer."""
-from typing import List, Dict, Any, Optional
-from pathlib import Path
-import re
 import html as html_mod
+import re
+
 from src.backend.benchmark.normalizer.base_normalizer import BaseNormalizer
+
 
 class MossNormalizer(BaseNormalizer):
     @property

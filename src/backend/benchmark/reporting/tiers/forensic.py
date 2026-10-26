@@ -3,10 +3,10 @@
 Generates detailed forensic reports for investigating specific code pairs,
 including similarity breakdowns, technique analysis, and causal attribution.
 """
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-from enum import Enum
 import json
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any
 
 
 class SimilarityTechnique(Enum):
@@ -35,7 +35,7 @@ class SimilarityRegion:
     target_snippet: str
     explanation: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "region_id": self.region_id,
@@ -57,9 +57,9 @@ class AttributionEvidence:
     evidence_type: str
     confidence: float
     description: str
-    location: Optional[Tuple[int, int]] = None
+    location: tuple[int, int] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "evidence_type": self.evidence_type,
@@ -74,10 +74,10 @@ class CausalAttribution:
     """Causal attribution for similarity."""
     source: str  # "original", "derivative", "independent"
     confidence: float
-    evidence: List[AttributionEvidence]
+    evidence: list[AttributionEvidence]
     reasoning: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "source": self.source,
@@ -95,13 +95,13 @@ class CodePairAnalysis:
     target_file: str
     overall_similarity: float
     clone_type: str
-    similarity_regions: List[SimilarityRegion]
+    similarity_regions: list[SimilarityRegion]
     attribution: CausalAttribution
-    technique_summary: Dict[str, float]
+    technique_summary: dict[str, float]
     risk_level: str  # "low", "medium", "high", "critical"
     recommendation: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "pair_id": self.pair_id,
@@ -129,10 +129,10 @@ class ForensicReport:
         case_id: str,
         timestamp: str,
         investigator: str,
-        code_pairs: List[CodePairAnalysis],
-        summary: Dict[str, Any],
+        code_pairs: list[CodePairAnalysis],
+        summary: dict[str, Any],
         methodology: str,
-        limitations: Optional[List[str]] = None
+        limitations: list[str] | None = None
     ):
         """Initialize forensic report.
 
@@ -153,7 +153,7 @@ class ForensicReport:
         self.methodology = methodology
         self.limitations = limitations or []
 
-    def get_pair_by_id(self, pair_id: str) -> Optional[CodePairAnalysis]:
+    def get_pair_by_id(self, pair_id: str) -> CodePairAnalysis | None:
         """Get code pair analysis by ID.
 
         Args:
@@ -167,7 +167,7 @@ class ForensicReport:
                 return pair
         return None
 
-    def get_critical_pairs(self) -> List[CodePairAnalysis]:
+    def get_critical_pairs(self) -> list[CodePairAnalysis]:
         """Get only critical risk pairs.
 
         Returns:
@@ -175,7 +175,7 @@ class ForensicReport:
         """
         return [p for p in self.code_pairs if p.risk_level == "critical"]
 
-    def get_high_risk_pairs(self) -> List[CodePairAnalysis]:
+    def get_high_risk_pairs(self) -> list[CodePairAnalysis]:
         """Get high and critical risk pairs.
 
         Returns:
@@ -231,7 +231,7 @@ LIMITATIONS
 
         return narrative
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert report to dictionary.
 
         Returns:
@@ -259,7 +259,7 @@ LIMITATIONS
         return json.dumps(self.to_dict(), indent=indent)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ForensicReport':
+    def from_dict(cls, data: dict[str, Any]) -> 'ForensicReport':
         """Create report from dictionary.
 
         Args:
