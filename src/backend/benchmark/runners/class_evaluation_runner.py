@@ -186,11 +186,15 @@ def render_markdown(report: dict) -> str:
         "",
         f"- Run: `{report['run_id']}` ({report['runtime_seconds']}s)",
         "- Every pair in each class scored through the production path.",
-        "- Flag rate: share of all pairs flagged. Recall: labelled copies caught. "
-        "Hard negatives: labelled innocent pairs flagged (often hand-picked look-alikes).",
+        (
+            "- Flag rate: share of all pairs flagged. Recall: labelled copies caught. "
+            "Hard negatives: labelled innocent pairs flagged (often hand-picked look-alikes)."
+        ),
         "",
-        "| Class | Subs | Pairs | AUC | Flag rate @0.75 | Recall @0.75 | Hard neg. @0.75 "
-        "| Flag rate @0.95 | Recall @0.95 | Shared lines removed |",
+        (
+            "| Class | Subs | Pairs | AUC | Flag rate @0.75 | Recall @0.75 | Hard neg. @0.75 "
+            "| Flag rate @0.95 | Recall @0.95 | Shared lines removed |"
+        ),
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for c in report["classes"]:

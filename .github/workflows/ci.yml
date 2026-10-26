@@ -150,11 +150,13 @@ jobs:
   lint-format:
     name: Python Lint + Format (ruff/black)
     runs-on: ubuntu-latest
-    # TODO(phase-0 cleanup): clear the 935 pre-existing ruff findings across
-    # src/backend, then set continue-on-error to false to make this a merge gate.
-    continue-on-error: true
+    # src/backend has ~3,000 pre-existing ruff findings. Rather than wait for a
+    # cleanup, a pull request may not add findings to the files it changes; the
+    # full-tree checks below stay advisory until the backlog is cleared.
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -166,13 +168,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff black
 
-      - name: Run ruff
-        run: ruff check src/backend --output-format=concise
+      - name: No new ruff findings in changed files
+        if: github.event_name == 'pull_request'
+        run: |
+          base=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          status=0
+          for f in $(git diff --name-only --diff-filter=ACMR "$base" HEAD -- 'src/backend/*.py'); do
+            now=$(ruff check --output-format=concise "$f" | grep -c "^$f:" || true)
+            before=$(git show "$base:$f" 2>/dev/null | ruff check --output-format=concise --stdin-filename "$f" - | grep -c "^$f:" || true)
+            if [ "$now" -gt "${before:-0}" ]; then
+              echo "::error file=$f::$now ruff findings, was ${before:-0}"
+              ruff check --output-format=concise "$f" || true
+              status=1
+            fi
+          done
+          exit $status
 
-      - name: Run ruff format check
+      - name: Run ruff (advisory)
+        continue-on-error: true
+        run: ruff check src/backend --output-format=concise --statistics
+
+      - name: Run ruff format check (advisory)
+        continue-on-error: true
         run: ruff format --check src/backend
 
-      - name: Run black check
+      - name: Run black check (advisory)
+        continue-on-error: true
         run: black --check src/backend
 
   frontend-lint:

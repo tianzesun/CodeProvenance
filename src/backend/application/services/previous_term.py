@@ -44,11 +44,12 @@ COMMON_SHARE = 0.5
 _GRAM = 6
 _TOKEN = re.compile(r"[A-Za-z_]\w*|\d+|[^\s\w]")
 _COMMENT = re.compile(r"#[^\n]*|//[^\n]*|/\*.*?\*/", re.DOTALL)
-_KEYWORDS = frozenset(
+_KEYWORD_TEXT = (
     "if else elif for while return def class import from in not and or try except "
     "finally with as public private static void int float double char new break "
-    "continue switch case lambda yield None True False null true false".split()
+    "continue switch case lambda yield None True False null true false"
 )
+_KEYWORDS = frozenset(_KEYWORD_TEXT.split())
 
 
 @dataclass

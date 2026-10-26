@@ -39,7 +39,30 @@ type Settings = Record<string, unknown> & {
   source_scan_enabled?: boolean;
   webhook_url?: string;
   notify_email_on_finish?: boolean;
+  llm_providers?: LlmProviderSpec[];
+  llm_provider?: string;
+  llm_fallback_provider?: string;
+  llm_api_keys?: Record<string, string | null>;
+  llm_api_keys_configured?: Record<string, boolean>;
+  llm_model_overrides?: Record<string, string>;
+  llm_base_urls?: Record<string, string>;
 };
+
+interface LlmProviderSpec {
+  key: string;
+  label: string;
+  requires_key?: boolean;
+  key_url?: string;
+  docs_url?: string;
+  base_url?: string;
+  note?: string;
+}
+
+interface ModelOption {
+  id: string;
+  label: string;
+  tier?: string;
+}
 
 interface WeightGovernanceState {
   needs_validation: boolean;
@@ -678,7 +701,7 @@ export default function SettingsPage() {
   }, []);
 
   // Merged with the defaults: a saved profile missing a key left that option with nothing selected.
-  const profile = { ...DEFAULT_PROFILE, ...(settings?.professor_profile || {}) } as Record<string, any>;
+  const profile = { ...DEFAULT_PROFILE, ...(settings?.professor_profile || {}) } as Record<string, string>;
   const catalog = settings?.professor_profile_catalog || {};
   const applied = settings?.applied_professor_profile || {};
   const activeTabInfo = MAIN_TABS.find((tab) => tab.id === activeTab);
@@ -832,18 +855,18 @@ export default function SettingsPage() {
   // Vendor catalog + live model listings. The catalog comes with /api/settings
   // (settings.llm_providers); model lists are fetched per provider so the UI
   // always offers the vendor's newest models instead of a hardcoded list.
-  const providers: any[] = Array.isArray((settings as any)?.llm_providers) ? (settings as any).llm_providers : [];
+  const providers: LlmProviderSpec[] = Array.isArray(settings?.llm_providers) ? settings.llm_providers : [];
   const [selectedProvider, setSelectedProvider] = useState<string>('');
-  const [modelOptions, setModelOptions] = useState<Record<string, any[]>>({});
+  const [modelOptions, setModelOptions] = useState<Record<string, ModelOption[]>>({});
   const [modelSource, setModelSource] = useState<Record<string, string>>({});
   const [modelMessage, setModelMessage] = useState<Record<string, string>>({});
   const [modelsLoading, setModelsLoading] = useState<Record<string, boolean>>({});
 
-  const activeProvider = selectedProvider || String((settings as any)?.llm_provider || providers[0]?.key || 'openai');
+  const activeProvider = selectedProvider || String(settings?.llm_provider || providers[0]?.key || 'openai');
   const activeSpec = providers.find((p) => p.key === activeProvider) || providers[0] || null;
-  const configuredMap: Record<string, boolean> = (settings as any)?.llm_api_keys_configured || {};
-  const overridesMap: Record<string, string> = (settings as any)?.llm_model_overrides || {};
-  const baseUrlsMap: Record<string, string> = (settings as any)?.llm_base_urls || {};
+  const configuredMap: Record<string, boolean> = settings?.llm_api_keys_configured || {};
+  const overridesMap: Record<string, string> = settings?.llm_model_overrides || {};
+  const baseUrlsMap: Record<string, string> = settings?.llm_base_urls || {};
 
   // Status-pill truth: keyed vendors are configured once a key is stored;
   // keyless local runtimes (Ollama) need a saved model instead, and any
@@ -884,7 +907,7 @@ export default function SettingsPage() {
   };
 
   const setProviderKey = (provider: string, value: string | null) => {
-    const keys = { ...((settings as any)?.llm_api_keys || {}), [provider]: value };
+    const keys = { ...(settings?.llm_api_keys || {}), [provider]: value };
     updateSetting('llm_api_keys', keys);
     // Keep the legacy single-vendor fields in sync so old consumers still work.
     if (provider === 'openai') updateSetting('openai_api_key', value);
@@ -905,7 +928,7 @@ export default function SettingsPage() {
   const testProvider = async (provider: string) => {
     setProviderTest((current) => ({ ...current, [provider]: { testing: true, message: 'Testing connection\u2026', ok: false } }));
     try {
-      const keyMap: Record<string, string> = (settings as any)?.llm_api_keys || {};
+      const keyMap = settings?.llm_api_keys || {};
       const legacy = provider === 'openai' ? settings?.openai_api_key : settings?.anthropic_api_key;
       const key = String(keyMap[provider] || legacy || '').trim();
       const res = await apiClient.post('/api/settings/ai-provider/test', {
@@ -1464,7 +1487,7 @@ export default function SettingsPage() {
                 </div>
                 {/* Provider picker: choose which vendor to configure */}
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                  {providers.map((spec: any) => {
+                  {providers.map((spec) => {
                     const connected = providerStatus(spec).configured;
                     const isActive = activeProvider === spec.key;
                     return (
@@ -1512,7 +1535,7 @@ export default function SettingsPage() {
                       {activeSpec.requires_key ? (
                         <SecretInput
                           label="API Key"
-                          value={(settings as any)?.llm_api_keys?.[activeProvider]}
+                          value={settings?.llm_api_keys?.[activeProvider]}
                           configured={Boolean(configuredMap[activeProvider])}
                           placeholder={configuredMap[activeProvider] ? 'Leave blank to keep current key' : `Enter ${activeSpec.label} API key`}
                           onChange={(value) => setProviderKey(activeProvider, value)}
@@ -1540,10 +1563,10 @@ export default function SettingsPage() {
                               className="min-w-0 flex-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                             >
                               <option value="">Auto — always the newest recommended model</option>
-                              {overridesMap[activeProvider] && !(modelOptions[activeProvider] || []).some((model: any) => model.id === overridesMap[activeProvider]) && (
+                              {overridesMap[activeProvider] && !(modelOptions[activeProvider] || []).some((model) => model.id === overridesMap[activeProvider]) && (
                                 <option value={overridesMap[activeProvider]}>{overridesMap[activeProvider]} (saved)</option>
                               )}
-                              {(modelOptions[activeProvider] || []).map((model: any) => (
+                              {(modelOptions[activeProvider] || []).map((model) => (
                                 <option key={model.id} value={model.id}>
                                   {model.label}{model.tier && model.tier !== 'standard' ? ` — ${model.tier}` : ''}
                                 </option>
@@ -1599,12 +1622,12 @@ export default function SettingsPage() {
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Default provider</label>
                     <select
-                      value={String((settings as any)?.llm_provider || 'openai')}
+                      value={String(settings?.llm_provider || 'openai')}
                       onChange={(event) => updateSetting('llm_provider', event.target.value)}
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                       {providers.length === 0 && <option value="openai">OpenAI</option>}
-                      {providers.map((spec: any) => (
+                      {providers.map((spec) => (
                         <option key={spec.key} value={spec.key}>{spec.label}</option>
                       ))}
                     </select>
@@ -1612,14 +1635,14 @@ export default function SettingsPage() {
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-slate-600 dark:text-slate-300">Fallback provider</label>
                     <select
-                      value={String((settings as any)?.llm_fallback_provider || '')}
+                      value={String(settings?.llm_fallback_provider || '')}
                       onChange={(event) => updateSetting('llm_fallback_provider', event.target.value)}
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-white focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     >
                       <option value="">None</option>
                       {providers
-                        .filter((spec: any) => spec.key !== String((settings as any)?.llm_provider || 'openai'))
-                        .map((spec: any) => (
+                        .filter((spec) => spec.key !== String(settings?.llm_provider || 'openai'))
+                        .map((spec) => (
                           <option key={spec.key} value={spec.key}>{spec.label}</option>
                         ))}
                     </select>
