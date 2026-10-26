@@ -2,7 +2,7 @@
 
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/components/AuthProvider';
-import { Job, JobStatus, ReviewStatus, SimilarityResult } from '@/types/api';
+import { Job, ReviewStatus, SimilarityResult } from '@/types/api';
 import Link from 'next/link';
 import type { ComponentType, ReactNode, SyntheticEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -204,10 +204,14 @@ function getTopFeature(result: SimilarityResult | null | undefined): string {
   const topFeature = Object.entries(result?.features || {}).sort((a, b) => b[1] - a[1])[0];
 
   if (!topFeature) {
-    return 'Evidence ready for manual review';
+    return 'Open the result to compare the code side by side';
   }
 
-  return `${topFeature[0].replace(/_/g, ' ')} strongest`;
+  return `Strongest signal: ${topFeature[0].replace(/_/g, ' ')}`;
+}
+
+function pluralize(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
 function getHomeCardStorageKey(userId: string | null | undefined): string {
@@ -556,7 +560,7 @@ export default function Home() {
                   Recent checks
                 </div>
                 <h2 className="font-display mt-2 text-2xl font-semibold text-[var(--text-primary)]">
-                  Open a recent assignment quickly
+                  Your latest checks
                 </h2>
               </div>
 
@@ -643,7 +647,7 @@ export default function Home() {
                           <div className="font-medium text-[var(--text-primary)]">{getAssignmentTitle(job)}</div>
                           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
                             {getReferenceLabel(job) && <span>{getReferenceLabel(job)}</span>}
-                            <span>{job.file_count || 0} files</span>
+                            <span>{pluralize(job.file_count || 0, 'file')}</span>
                             <span title={formatTimestamp(job.created_at)}>{formatRelativeTime(job.created_at)}</span>
                           </div>
                         </div>
@@ -652,10 +656,9 @@ export default function Home() {
                       <div className="flex flex-wrap items-center gap-3 pl-[60px] lg:pl-0">
                         {job.status === 'completed' && flaggedPairs > 0 && (
                           <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
-                            {flaggedPairs} flagged
+                            {pluralize(flaggedPairs, 'pair')} flagged
                           </span>
                         )}
-                        <StatusBadge status={job.status} />
                         {job.status === 'completed' && <ReviewBadge status={getReviewStatus(job)} />}
                         {job.status === 'completed' ? (
                           <Link
@@ -669,12 +672,12 @@ export default function Home() {
                         ) : job.status === 'failed' ? (
                           <span className="inline-flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
                             <AlertTriangle size={14} />
-                            Failed
+                            Check failed
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-2 text-sm text-[var(--text-muted)]">
                             <Loader2 size={14} className="animate-spin" />
-                            {job.status === 'pending' ? 'Queued' : 'Running'}
+                            {job.status === 'pending' ? 'Waiting to start' : 'Checking…'}
                           </span>
                         )}
                       </div>
@@ -709,9 +712,12 @@ export default function Home() {
                     ? `${workload.pending + workload.inProgress} assignment${workload.pending + workload.inProgress === 1 ? '' : 's'} need attention`
                     : 'All caught up'}
                 </h2>
+                <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+                  A check counts as reviewed once you record a decision on it.
+                </p>
               </div>
-              <Link href="/assignments" className="theme-link inline-flex items-center gap-1 text-sm font-medium">
-                Open triage
+              <Link href="/assignments" className="theme-link inline-flex shrink-0 items-center gap-1 text-sm font-medium">
+                Review queue
                 <ChevronRight size={16} />
               </Link>
             </div>
@@ -734,12 +740,12 @@ export default function Home() {
                 {/* Summary row: colours match getReviewTone */}
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { label: 'Unreviewed', value: workload.pending, box: 'border-slate-500/15 bg-slate-500/[0.08]', text: 'text-slate-600 dark:text-slate-300' },
-                    { label: 'In progress', value: workload.inProgress, box: 'border-amber-500/15 bg-amber-500/[0.08]', text: 'text-amber-600 dark:text-amber-400' },
-                    { label: 'Escalated', value: workload.escalated, box: 'border-violet-500/15 bg-violet-500/[0.08]', text: 'text-violet-600 dark:text-violet-400' },
-                    { label: 'Confirmed', value: workload.confirmed, box: 'border-red-500/15 bg-red-500/[0.08]', text: 'text-red-600 dark:text-red-400' },
+                    { label: REVIEW_STATUS_LABELS.unreviewed, hint: 'Not opened for review yet', value: workload.pending, box: 'border-slate-500/15 bg-slate-500/[0.08]', text: 'text-slate-600 dark:text-slate-300' },
+                    { label: REVIEW_STATUS_LABELS.needs_review, hint: 'Review started, no decision yet', value: workload.inProgress, box: 'border-amber-500/15 bg-amber-500/[0.08]', text: 'text-amber-600 dark:text-amber-400' },
+                    { label: REVIEW_STATUS_LABELS.escalated, hint: 'Sent on for formal review', value: workload.escalated, box: 'border-violet-500/15 bg-violet-500/[0.08]', text: 'text-violet-600 dark:text-violet-400' },
+                    { label: REVIEW_STATUS_LABELS.confirmed, hint: 'You confirmed the concern after review', value: workload.confirmed, box: 'border-red-500/15 bg-red-500/[0.08]', text: 'text-red-600 dark:text-red-400' },
                   ].map((tile) => (
-                    <div key={tile.label} className={`rounded-[20px] border px-4 py-3 ${tile.box}`}>
+                    <div key={tile.label} title={tile.hint} className={`rounded-[20px] border px-4 py-3 ${tile.box}`}>
                       <div className={`text-2xl font-bold ${tile.text}`}>{tile.value}</div>
                       <div className="mt-0.5 text-xs text-[var(--text-muted)]">{tile.label}</div>
                     </div>
@@ -751,7 +757,7 @@ export default function Home() {
                   <div className="flex items-center justify-between rounded-[20px] border border-amber-500/20 bg-amber-500/[0.08] px-4 py-3">
                     <span className="inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                       <AlertTriangle size={14} className="text-amber-500" />
-                      Flagged pairs awaiting review
+                      Flagged pairs not yet reviewed
                     </span>
                     <span className="font-mono text-sm font-semibold text-amber-600 dark:text-amber-400">
                       {workload.flaggedPairs}
@@ -762,7 +768,7 @@ export default function Home() {
                 {/* Progress bar: reviewed / total */}
                 <div className="pt-1">
                   <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--text-muted)]">
-                    <span>Overall progress</span>
+                    <span>Checks reviewed</span>
                     <span>{workload.total - workload.pending - workload.inProgress} / {workload.total} reviewed</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]">
@@ -793,14 +799,14 @@ export default function Home() {
               Report center
             </div>
             <h2 className="font-display mt-2 text-xl font-semibold text-[var(--text-primary)]">
-              Export reports from any check
+              Download a report for a check
             </h2>
           </div>
 
           <div className="px-5 pb-5">
             {completedJobs.length === 0 ? (
               <div className="theme-card-muted rounded-[22px] px-4 py-5 text-sm leading-6 text-[var(--text-secondary)]">
-                Reports appear here after the first assignment finishes. Professors can then export the HTML summary, structured JSON, or committee report directly from the dashboard home.
+                Reports become available here once your first check finishes.
               </div>
             ) : (
               <div className="space-y-3">
@@ -822,20 +828,20 @@ export default function Home() {
                     <ReportLink
                       href={`/report/${encodeURIComponent(selectedReportJob.id)}/download`}
                       icon={FileText}
-                      title="HTML report"
-                      description="Open the formatted report with verdict summary and evidence."
-                    />
-                    <ReportLink
-                      href={`/report/${encodeURIComponent(selectedReportJob.id)}/download-json`}
-                      icon={Download}
-                      title="JSON data"
-                      description="Download the structured analysis output for records or tooling."
+                      title="Summary report"
+                      description="A readable summary of the check with the flagged pairs and their evidence."
                     />
                     <ReportLink
                       href={`/report/${encodeURIComponent(selectedReportJob.id)}/committee`}
                       icon={Shield}
                       title="Committee report"
-                      description="Open the evidence-focused report prepared for formal review."
+                      description="The evidence laid out for an academic integrity committee or formal review."
+                    />
+                    <ReportLink
+                      href={`/report/${encodeURIComponent(selectedReportJob.id)}/download-json`}
+                      icon={Download}
+                      title="Raw data (JSON)"
+                      description="The full machine-readable output, for records or other software."
                     />
 
                     <Link
@@ -843,7 +849,7 @@ export default function Home() {
                       className="theme-button-secondary inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold"
                     >
                       <FileSearch size={16} />
-                      Open Result
+                      View results
                     </Link>
                   </>
                 )}
@@ -862,7 +868,7 @@ export default function Home() {
           href="/upload"
           icon={Upload}
           title="Plagiarism Checker"
-          description="Upload two files, many files, or a ZIP. IntegrityDesk automatically runs pairwise or class-wide comparison."
+          description="Upload two files, a whole class, or a ZIP. Every submission is compared with every other one."
         />
       ),
     },
@@ -875,20 +881,20 @@ export default function Home() {
           href="/ai-detector"
           icon={Bot}
           title="AI Detector"
-          description="Stage a single-submission detector for AI-generated code signals, explanations, and professor evidence."
+          description="Check one submission for signs of AI-generated code, with an explanation of each signal found."
         />
       ),
     },
     settings: {
       id: 'settings',
-      label: 'Review default threshold',
+      label: 'Flagging threshold',
       className: 'xl:col-span-4 lg:col-span-6 sm:col-span-12',
       content: (
         <ActionCard
           href="/settings"
           icon={Settings2}
-          title="Review default threshold"
-          description="Adjust the similarity cutoff before you start a new check."
+          title="Flagging threshold"
+          description="Set how similar two submissions must be before a pair is flagged. Applies to new checks."
         />
       ),
     },
@@ -901,7 +907,7 @@ export default function Home() {
           href="/benchmark"
           icon={BarChart3}
           title="Open IntegrityDesk benchmark"
-          description="Admin-only benchmark workspace for tuning IntegrityDesk on labeled data."
+          description="Admin only. Measure and tune IntegrityDesk's accuracy on labelled data."
         />
       ),
     },
@@ -929,7 +935,7 @@ export default function Home() {
               href="/admin"
               icon={Users}
               title="Open admin console"
-              description="Manage accounts, roles, and workspace access from the dashboard."
+              description="Manage accounts, roles, and who can access the workspace."
             />
           ),
         },
@@ -952,10 +958,11 @@ export default function Home() {
 
                 <div className="space-y-6">
                   <h1 className="font-display max-w-4xl text-3xl font-semibold leading-tight text-[var(--text-primary)] sm:text-4xl lg:text-5xl">
-                    Run new similarity checks and review assignment results.
+                    Check assignments for similar code and review what gets flagged.
                   </h1>
                   <p className="max-w-3xl text-sm leading-7 text-[var(--text-secondary)] sm:text-base lg:text-lg">
-                    Upload assignments, review flagged cases, and document review decisions all from one workspace.
+                    Upload student submissions and IntegrityDesk flags pairs whose code is unusually similar.
+                    A flag is a reason to look closer, not proof of misconduct: you review the evidence and record the decision.
                   </p>
                 </div>
 
@@ -965,7 +972,7 @@ export default function Home() {
                     className="theme-button-primary inline-flex items-center gap-2 rounded-2xl px-8 py-4 text-base font-semibold transition hover:scale-105"
                   >
                     <Plus size={18} />
-                    Plagiarism Checker
+                    Start a new check
                   </Link>
 
                   {latestCompleted && (
@@ -974,7 +981,7 @@ export default function Home() {
                       className="theme-button-secondary inline-flex items-center gap-2 rounded-2xl px-6 py-4 text-sm font-semibold transition hover:scale-105"
                     >
                       <FileSearch size={16} />
-                      Open Latest Result
+                      Open latest result
                     </Link>
                   )}
                 </div>
@@ -1017,7 +1024,7 @@ export default function Home() {
                   <Link
                     href="/assignments"
                     className="inline-flex items-center gap-2.5 rounded-2xl border border-[color:var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm text-[var(--text-secondary)] transition hover:-translate-y-0.5 hover:border-amber-500/40"
-                    title="Open assignments awaiting review"
+                    title="A flagged pair is two submissions whose similarity is at or above the threshold"
                   >
                     <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
                       <AlertTriangle size={14} />
@@ -1035,10 +1042,10 @@ export default function Home() {
                   <div className="flex items-end justify-between gap-4">
                     <div>
                       <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">
-                        Latest verdict
+                        Latest result
                       </div>
                       <h2 className="font-display mt-2 text-xl font-semibold text-[var(--text-primary)]">
-                        Review the latest completed check
+                        Your most recent finished check
                       </h2>
                     </div>
 
@@ -1062,8 +1069,8 @@ export default function Home() {
                       </h3>
                       <p className="mx-auto mt-3 max-w-md text-center text-sm leading-6 text-[var(--text-secondary)]">
                         {runningCount > 0
-                          ? 'The current check is still running. This panel will update as soon as the latest verdict is ready.'
-                          : 'Upload submissions to generate the first result. The latest verdict and quick actions will appear here.'}
+                          ? 'Your check is still running. Its result will show here as soon as it finishes.'
+                          : 'Upload submissions to run your first check. Its result will show here.'}
                       </p>
                       <div className="mt-6 flex justify-center">
                         <Link
@@ -1093,7 +1100,7 @@ export default function Home() {
                               )}
                               {latestFlaggedCount > 0
                                 ? `${latestFlaggedCount} pair${latestFlaggedCount === 1 ? '' : 's'} flagged`
-                                : 'No pairs crossed the review threshold'}
+                                : 'No pairs were flagged'}
                             </div>
                             <div className="mt-3">
                               <div className="text-lg font-semibold text-[var(--text-primary)]">{getAssignmentTitle(latestCompleted)}</div>
@@ -1106,7 +1113,7 @@ export default function Home() {
                                 ? `Highest match: ${formatPercent(latestHighestMatch.score)} between ${latestHighestMatch.file_a} and ${latestHighestMatch.file_b}.`
                                 : latestFlaggedCount > 0
                                   ? 'Open the result to see which pairs were flagged.'
-                                  : `The latest assignment finished below the ${formatPercent(latestThreshold)} review threshold.`}
+                                  : `No pair of submissions reached the ${formatPercent(latestThreshold)} similarity threshold.`}
                             </p>
                           </div>
 
@@ -1124,7 +1131,7 @@ export default function Home() {
                       <div className="grid gap-3 sm:grid-cols-3">
                         <SummaryChip label="Files checked" value={latestCompleted.file_count || 0} />
                         <SummaryChip label="Flagged pairs" value={latestFlaggedCount} />
-                        <SummaryChip label="Review status" value={formatReviewStatus(latestReviewStatus)} />
+                        <SummaryChip label="Flagged at" value={`${formatPercent(latestThreshold)}+`} />
                       </div>
 
                       {latestPreviewResults.length > 0 && (
@@ -1135,7 +1142,7 @@ export default function Home() {
                                 Top flagged pairs
                               </div>
                               <p className="mt-2 text-sm text-[var(--text-secondary)]">
-                                Quick review targets from the latest result.
+                                The most similar pairs, highest first.
                               </p>
                             </div>
 
@@ -1474,7 +1481,7 @@ const ReviewBadge = ({ status }: { status: string }) => (
 );
 
 const FindingPreviewRow = ({ result }: { result: SimilarityResult }) => {
-  const risk = result.score >= 0.9 ? 'Critical' : result.score >= 0.75 ? 'High' : 'Review';
+  const risk = result.score >= 0.9 ? 'Very high' : result.score >= 0.75 ? 'High' : 'Flagged';
   const badgeTone = result.score >= 0.9
     ? 'border-red-500/20 bg-red-500/10 text-red-600'
     : result.score >= 0.75
@@ -1492,7 +1499,7 @@ const FindingPreviewRow = ({ result }: { result: SimilarityResult }) => {
             {result.file_b}
           </div>
           <div className="mt-1 text-xs text-[var(--text-muted)]">
-            {getTopFeature(result)} • Ready for evidence review
+            {getTopFeature(result)}
           </div>
         </div>
         <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeTone}`}>
@@ -1558,19 +1565,3 @@ const ActionCard = ({
     <div className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">{description}</div>
   </Link>
 );
-
-const StatusBadge = ({ status }: { status: JobStatus }) => {
-  const toneMap: Record<JobStatus, string> = {
-    analyzing: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
-    completed: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
-    failed: 'border-red-500/20 bg-red-500/10 text-red-600',
-    processing: 'border-blue-600/20 bg-blue-600/10 text-blue-600',
-    pending: 'border-slate-500/20 bg-slate-500/10 text-slate-600',
-  };
-
-  return (
-    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${toneMap[status] || toneMap.processing}`}>
-      {status}
-    </span>
-  );
-};
