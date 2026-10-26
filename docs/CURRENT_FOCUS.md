@@ -63,7 +63,6 @@ as its UI.
 - `src/backend/models/database.py` — use `SCHEMA_OVERVIEW.md`
 - `src/backend/api/server.py` (13k+ lines) — grep, don't read whole
 - Large migration files unless schema debugging is the explicit task
-- `docs/TODO.md` — historical 48-week roadmap, largely superseded
 
 ## Session Rules for Codex
 

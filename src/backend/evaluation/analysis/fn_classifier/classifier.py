@@ -1,5 +1,5 @@
 """
-FN Classifier - Rule-based multi-label classification following FN.md spec.
+FN Classifier - Rule-based multi-label classification.
 
 Pipeline: FN pairs -> Feature Extraction -> Rule-based Classification -> Structured output
 
@@ -95,7 +95,7 @@ class FeatureExtractor:
 
 class FNClassifier:
     """
-    Rule-based FN classifier following FN.md spec.
+    Rule-based FN classifier.
 
     Multi-label: a single FN can have multiple categories.
 
@@ -161,7 +161,7 @@ class FNClassifier:
         """
         Apply rule-based classification (multi-label).
 
-        Rules from FN.md:
+        Rules:
         1. variable_renaming: token_sim low AND ident_overlap high
         2. structural_variation: token_sim medium-low
         3. dead_code_insertion: length_ratio > 1.5

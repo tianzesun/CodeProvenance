@@ -18,11 +18,10 @@ Then:
 - The user is **actively editing** `src/backend/models/database.py`.
 - **Never** read the full `src/backend/models/database.py` (626 lines) unless the user explicitly writes: “read the full database.py” or “check the implementation in the model file”.
 - When doing schema work, you **must** default to this order:
-  1. `docs/SCHEMA_WORK_NOTES.md`
-  2. `docs/SCHEMA_OVERVIEW.md`
-  3. `docs/CURRENT_FOCUS.md`
+  1. `docs/SCHEMA_OVERVIEW.md`
+  2. `docs/CURRENT_FOCUS.md`
 - Only read the full model file as a last resort, and only after the user explicitly permits it.
-- Always prefer the three small focus files (`CURRENT_FOCUS.md`, `SCHEMA_OVERVIEW.md`, `BENCHMARK_WORK.md`) + `SCHEMA_WORK_NOTES.md` over large source files.
+- Always prefer the three small focus files (`CURRENT_FOCUS.md`, `SCHEMA_OVERVIEW.md`, `BENCHMARK_WORK.md`) over large source files.
 
 ## Token Efficiency & Context Rules (Critical for Long Sessions)
 
@@ -62,8 +61,6 @@ src/
 ├── models/            # Shared data models
 └── utils/             # Shared utilities
 ```
-
-For the full detailed structure, see `docs/PROJECT_STRUCTURE.md`.
 
 **Important**: The structure evolved significantly after the cms merge. Do not rely on old folder assumptions.
 

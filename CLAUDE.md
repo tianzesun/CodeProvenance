@@ -28,9 +28,8 @@ The user is **currently editing** `src/backend/models/database.py`.
 - **Never** read the full `src/backend/models/database.py` (626 lines) unless the user explicitly says:  
   “read the full database.py” or “check the implementation in the model file”.
 - When the user is doing schema work, you **must** default to this order:
-  1. `docs/SCHEMA_WORK_NOTES.md`
-  2. `docs/SCHEMA_OVERVIEW.md`
-  3. `docs/CURRENT_FOCUS.md`
+  1. `docs/SCHEMA_OVERVIEW.md`
+  2. `docs/CURRENT_FOCUS.md`
 - Only read the full model file as a last resort after getting explicit permission.
 
 1. Read `.ai-rules.md` and `AGENTS.md` before making changes.

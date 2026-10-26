@@ -4,7 +4,7 @@ Dataset Builder - Generate training data from classified FNs.
 Converts FN classification results into training data format
 for model fine-tuning.
 
-From FN.md:
+Labelling:
 - FNs -> label=1 (positive samples)
 - FPs -> label=0 (negative samples)
 """

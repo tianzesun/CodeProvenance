@@ -1,4 +1,4 @@
-"""FN Classification Taxonomy - FN.md spec."""
+"""FN Classification Taxonomy."""
 
 from dataclasses import dataclass, field
 from enum import Enum
