@@ -14484,9 +14484,10 @@ def _workspace_setting_overrides(
             value = {str(name): str(val) for name, val in value.items() if val}
             if not value:
                 continue
-        elif key in ("llm_model_overrides", "llm_base_urls"):
-            if not isinstance(value, dict):
-                continue
+        elif key in ("llm_model_overrides", "llm_base_urls") and not isinstance(
+            value, dict
+        ):
+            continue
         overrides[attr] = value
     return overrides
 
@@ -17826,7 +17827,8 @@ def _number_setting(minimum: float, maximum: float, integer: bool = True):
 
     def check(value: Any) -> int | float:
         if isinstance(value, bool):
-            raise ValueError("must be a number")
+            # ValueError on purpose: the caller turns it into a field message.
+            raise ValueError("must be a number")  # noqa: TRY004
         try:
             number = float(value)
         except (TypeError, ValueError):
