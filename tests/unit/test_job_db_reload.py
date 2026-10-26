@@ -7,9 +7,19 @@ from src.backend.config.database import SessionLocal
 from src.backend.models.database import Job, SimilarityResult
 
 
-def _seed(job_id: str, scores: list[float], statuses: dict[int, str]) -> None:
+def _seed(
+    job_id: str, tenant_id: str, scores: list[float], statuses: dict[int, str]
+) -> None:
     with SessionLocal() as db:
-        db.add(Job(id=job_id, name="db reload test", status="completed", threshold=0.5))
+        db.add(
+            Job(
+                id=job_id,
+                tenant_id=tenant_id,
+                name="db reload test",
+                status="completed",
+                threshold=0.5,
+            )
+        )
         db.flush()
         for index, score in enumerate(scores):
             db.add(
@@ -31,11 +41,13 @@ def _delete(job_id: str) -> None:
         db.commit()
 
 
-def test_reloaded_job_counts_the_whole_cohort_and_keeps_decisions() -> None:
+def test_reloaded_job_counts_the_whole_cohort_and_keeps_decisions(
+    job_tenant_id,
+) -> None:
     job_id = str(uuid.uuid4())
     # 210 pairs (more than the 200-row page), 205 at or above the 0.5 threshold.
     scores = [0.9] * 5 + [0.66] * 200 + [0.2] * 5
-    _seed(job_id, scores, {0: "confirmed", 1: "dismissed"})
+    _seed(job_id, job_tenant_id, scores, {0: "confirmed", 1: "dismissed"})
     try:
         job = server._load_job_from_db(job_id)
 

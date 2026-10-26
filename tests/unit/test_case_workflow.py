@@ -43,7 +43,7 @@ def _ids() -> dict[str, str]:
 
 
 @pytest.fixture
-def seeded():
+def seeded(job_tenant_id):
     ids = _ids()
     with SessionLocal() as db:
         for org in ("org_mine", "org_other"):
@@ -69,6 +69,7 @@ def seeded():
             db.add(
                 Job(
                     id=ids[f"job_{side}"],
+                    tenant_id=job_tenant_id,
                     name="case test",
                     status="completed",
                     assignment_id=ids[f"assignment_{side}"],

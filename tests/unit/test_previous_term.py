@@ -95,7 +95,7 @@ def test_starter_code_alone_does_not_make_a_candidate() -> None:
 
 
 @pytest.fixture
-def offerings():
+def offerings(job_tenant_id):
     """CSC108 now and in Fall 2025 (taught by the owner), plus a colleague's
     Fall 2025 CSC108 that was never shared."""
     ids = {k: str(uuid.uuid4()) for k in ("org", "owner", "colleague")}
@@ -144,6 +144,7 @@ def offerings():
             db.add(
                 Job(
                     id=jobs[key],
+                    tenant_id=job_tenant_id,
                     name="pt",
                     status="completed",
                     assignment_id=assignments[key],

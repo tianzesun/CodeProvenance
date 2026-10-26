@@ -43,8 +43,27 @@ def client() -> Generator[TestClient, None, None]:
         yield test_client
 
 
-# Additional test fixtures would go here
-# For example: database fixtures, test clients, etc.
+@pytest.fixture(scope="session")
+def job_tenant_id() -> Generator[str, None, None]:
+    """A workspace for tests that write jobs rows (jobs.tenant_id is required)."""
+    import uuid
+
+    from src.backend.config.database import SessionLocal
+    from src.backend.models.database import Tenant
+
+    with SessionLocal() as db:
+        tenant = Tenant(
+            name="Unit test workspace", api_key_hash=f"test-hash-{uuid.uuid4().hex}"
+        )
+        db.add(tenant)
+        db.commit()
+        tenant_id = str(tenant.id)
+    try:
+        yield tenant_id
+    finally:
+        with SessionLocal() as db:
+            db.query(Tenant).filter(Tenant.id == tenant_id).delete()
+            db.commit()
 
 
 @pytest.fixture(autouse=True)
