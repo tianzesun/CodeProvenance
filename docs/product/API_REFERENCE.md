@@ -82,7 +82,7 @@ Returns `job_id`, `name`, `status`, `progress`, `submission_count`,
 `results`. `progress` is `100` when completed and `0` otherwise; there is no
 finer-grained progress. Once completed, `results` holds up to 1,000 pairs,
 each with `submission_a_id`, `submission_b_id`, `similarity_score`,
-`confidence_lower`, `confidence_upper` and `detected_clones`.
+`confidence_lower` and `confidence_upper`.
 
 ### `GET /api/v1/jobs/{job_id}/results`
 
@@ -90,8 +90,8 @@ Query: `threshold` (`0`–`1`, optional), `limit` (1–5000, default 1000),
 `offset` (default 0). Returns `409` until the job is completed.
 
 Each item has `submission_a` and `submission_b` (`id`, `name`),
-`similarity_score`, `confidence_interval` (`lower`, `upper`, `confidence`),
-`detected_clones` and `matching_blocks`.
+`similarity_score`, `confidence_interval` (`lower`, `upper`, `confidence`) and
+`matching_blocks`.
 
 ### `GET /api/v1/jobs/{job_id}/report`
 
@@ -142,18 +142,6 @@ Headers: `X-IntegrityDesk-Event`, `X-IntegrityDesk-Timestamp` and, when the
 server has `WEBHOOK_SECRET_KEY` set, `X-IntegrityDesk-Signature`. The
 signature is `sha256=<hex HMAC-SHA256 of "<timestamp>.<body>">`. A failed
 delivery is logged and does not affect the job.
-
-## Known problems (2026-10-26)
-
-`analyze.py` reads two attributes the `SimilarityResult` model does not have:
-
-- `detected_clones`, so `GET /api/v1/jobs/{job_id}` and
-  `GET /api/v1/jobs/{job_id}/results` raise a `500` as soon as a completed job
-  has any result rows.
-- `tenant_id`, so `GET /api/v1/usage` always raises a `500`.
-
-`tests/integration/test_v1_analyze_flow.py` only checks a job with no result
-rows, so it does not catch either one.
 
 ## Errors
 
