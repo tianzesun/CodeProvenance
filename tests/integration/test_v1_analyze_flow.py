@@ -288,3 +288,61 @@ class TestV1AnalyzeFlow:
             api_key_manager.revoke_key(other_key)
             _delete_tenant(other_tenant_id)
             _cleanup_job(job_id, job_dir)
+
+    def test_completed_job_with_results_and_usage(
+        self, client, require_db, api_key, stub_pipeline
+    ):
+        """Status, results and usage read a completed job that has result rows.
+
+        They used to read ``SimilarityResult.detected_clones`` and
+        ``SimilarityResult.tenant_id``, which the model no longer has, so all
+        three returned 500 once a job had any results.
+        """
+        response = client.post(
+            "/api/v1/analyze",
+            headers={"X-API-Key": api_key},
+            json=_analyze_payload(),
+        )
+        assert response.status_code == 201, response.text
+        data = response.json()
+        job_id = data["job_id"]
+        job_dir = stub_pipeline.get("job_dir")
+        submission_a, submission_b = data["submission_ids"][:2]
+
+        from datetime import datetime
+
+        from src.backend.config.database import SessionLocal
+        from src.backend.models.database import Job, SimilarityResult
+
+        try:
+            with SessionLocal() as db:
+                job = db.query(Job).filter(Job.id == job_id).first()
+                job.status = "completed"
+                job.completed_at = datetime.now()
+                db.add(
+                    SimilarityResult(
+                        job_id=job_id,
+                        submission_a_id=submission_a,
+                        submission_b_id=submission_b,
+                        similarity_score=0.8,
+                        matching_blocks=[{"a": [1, 2], "b": [1, 2]}],
+                    )
+                )
+                db.commit()
+
+            headers = {"X-API-Key": api_key}
+            status_response = client.get(data["status_url"], headers=headers)
+            assert status_response.status_code == 200, status_response.text
+            assert len(status_response.json()["results"]) == 1
+
+            results_response = client.get(f"/api/v1/jobs/{job_id}/results", headers=headers)
+            assert results_response.status_code == 200, results_response.text
+            (result,) = results_response.json()
+            assert result["similarity_score"] == pytest.approx(0.8)
+            assert result["matching_blocks"] == [{"a": [1, 2], "b": [1, 2]}]
+
+            usage_response = client.get("/api/v1/usage", headers=headers)
+            assert usage_response.status_code == 200, usage_response.text
+            assert usage_response.json()["files_analyzed"] >= 1
+        finally:
+            _cleanup_job(job_id, job_dir)

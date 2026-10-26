@@ -375,7 +375,6 @@ def get_job_status(
                 "similarity_score": float(r.similarity_score),
                 "confidence_lower": _as_float(r.confidence_lower),
                 "confidence_upper": _as_float(r.confidence_upper),
-                "detected_clones": r.detected_clones or [],
             }
             for r in similarity_results
         ]
@@ -484,7 +483,6 @@ def get_job_results(
                 "upper": _as_float(r.confidence_upper) if r.confidence_upper is not None else 1.0,
                 "confidence": 0.95,
             },
-            "detected_clones": r.detected_clones or [],
             "matching_blocks": r.matching_blocks or [],
         }
         for r in results
@@ -551,13 +549,15 @@ def get_api_usage(request: Request, db: Session = Depends(get_db)):
     tenant_id = get_current_tenant(request)
     set_tenant_context(db, tenant_id)
 
-    # One round trip instead of two.
+    # One round trip instead of two. Results have no tenant column; they belong
+    # to the tenant through their job (jobs.id is VARCHAR(36) in the database).
     job_count, result_count = db.execute(
         select(
             select(func.count()).select_from(Job).where(Job.tenant_id == tenant_id).scalar_subquery(),
             select(func.count())
             .select_from(SimilarityResult)
-            .where(SimilarityResult.tenant_id == tenant_id)
+            .join(Job, cast(Job.id, String) == SimilarityResult.job_id)
+            .where(Job.tenant_id == tenant_id)
             .scalar_subquery(),
         )
     ).one()
