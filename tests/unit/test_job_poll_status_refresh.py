@@ -272,3 +272,54 @@ class TestRefreshDoesNotFailARunningJob:
             assert server._get_job(job_id)["status"] == "failed"
         finally:
             _forget(job_id)
+
+
+class TestPollNeverOverwritesTheAnalysis:
+    """An in-process analysis finishing mid-poll must keep its result."""
+
+    def test_completion_during_a_poll_is_kept(self, monkeypatch, tmp_path) -> None:
+        monkeypatch.setattr(server, "REPORTS_DIR", tmp_path)
+        job_id = f"poll-race-{uuid.uuid4()}"
+        _seed(job_id, "processing")
+        server._jobs[job_id]["guest"] = True  # no job.json: only the cache knows
+
+        def analysis_finishes(_job_id: str) -> None:
+            server._jobs[job_id] = {**server._jobs[job_id], "status": "completed"}
+            return None
+
+        monkeypatch.setattr(server, "_read_job_status_from_db", analysis_finishes)
+        try:
+            server._get_job(job_id)
+
+            assert server._jobs[job_id]["status"] == "completed"
+            assert server._get_job(job_id)["status"] == "completed"
+        finally:
+            _forget(job_id)
+
+    def test_a_poll_only_reads_job_json(self, monkeypatch, tmp_path) -> None:
+        monkeypatch.setattr(server, "REPORTS_DIR", tmp_path)
+        monkeypatch.setattr(server, "_read_job_status_from_db", lambda job_id: None)
+        job_id = f"poll-readonly-{uuid.uuid4()}"
+        _seed(job_id, "processing", server._new_job_progress())
+        server._persist_job(job_id)
+        path = server._job_metadata_path(job_id)
+        before = path.stat().st_mtime_ns
+        try:
+            server._get_job(job_id)
+
+            assert path.stat().st_mtime_ns == before
+        finally:
+            _forget(job_id)
+
+    def test_saving_leaves_no_temp_files_behind(self, monkeypatch, tmp_path) -> None:
+        monkeypatch.setattr(server, "REPORTS_DIR", tmp_path)
+        job_id = f"poll-atomic-{uuid.uuid4()}"
+        _seed(job_id, "processing")
+        try:
+            server._persist_job(job_id)
+            server._persist_job(job_id)
+
+            folder = server._job_metadata_path(job_id).parent
+            assert [p.name for p in folder.iterdir()] == ["job.json"]
+        finally:
+            _forget(job_id)
