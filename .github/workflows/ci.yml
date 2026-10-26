@@ -16,6 +16,9 @@ env:
   # AppSettings also requires AUTH_JWT_SECRET, and CI has no .env.local to read it
   # from, so without this the settings import (and every test that touches it) dies.
   AUTH_JWT_SECRET: "ci-only-placeholder-never-used-at-runtime"
+  # Without this the production security policy (https FRONTEND_URL, secure
+  # cookies, real email backend) rejects the localhost values above.
+  DEBUG_MODE: "true"
 
 jobs:
   migrations:

@@ -2,6 +2,7 @@
 Pytest configuration for IntegrityDesk tests.
 """
 
+import base64
 import os
 import sys
 from pathlib import Path
@@ -15,9 +16,9 @@ from fastapi.testclient import TestClient
 # takes hours (and its results depend on a model download being present).
 # Tests that specifically exercise Binoculars inject a fake instance instead.
 os.environ.setdefault("BINOCULARS_ENABLED", "0")
-# Workspace credentials are sealed at rest; tests use a fixed, test-only key.
+# Workspace credentials are sealed at rest; tests use a throwaway key per run.
 os.environ.setdefault(
-    "SETTINGS_ENCRYPTION_KEY", "dGVzdC1vbmx5LWtleS1kby1ub3QtdXNlLWluLXByb2Q="
+    "SETTINGS_ENCRYPTION_KEY", base64.b64encode(os.urandom(32)).decode()
 )
 
 # Add backend to Python path
