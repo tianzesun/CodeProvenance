@@ -80,6 +80,33 @@ class TestJobProgressPayload:
         finally:
             server._jobs.pop(job_id, None)
 
+    def test_pair_ticks_reach_job_json_at_a_bounded_rate(self, monkeypatch) -> None:
+        # A Celery worker's progress only reaches the API through job.json; it
+        # used to be written on stage changes only, so the pair counter froze.
+        persisted: list[int] = []
+        clock = [1000.0]
+        monkeypatch.setattr(server.time, "monotonic", lambda: clock[0])
+        job_id = "progress-throttle-test"
+        monkeypatch.setattr(
+            server,
+            "_persist_job",
+            lambda _: persisted.append(server._jobs[job_id]["progress"]["completed_units"]),
+        )
+        self._seed_job(job_id)
+        report = server._pair_progress_callback(job_id)
+        try:
+            report(1, 100, "a.py", "b.py")  # stage change: written
+            clock[0] += 0.5
+            report(2, 100, "a.py", "c.py")  # too soon: memory only
+            clock[0] += server.PROGRESS_PERSIST_INTERVAL_SECONDS
+            report(3, 100, "a.py", "d.py")  # interval passed: written
+
+            assert persisted == [1, 3]
+            assert server._jobs[job_id]["progress"]["completed_units"] == 3
+        finally:
+            server._jobs.pop(job_id, None)
+            server._progress_persisted_at.pop(job_id, None)
+
     def test_stage_change_advances_percent_to_the_stage_floor(
         self, monkeypatch
     ) -> None:

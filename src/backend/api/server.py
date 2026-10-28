@@ -4337,6 +4337,12 @@ ANALYSIS_STAGE_PERCENT: dict[str, float] = {
 # duration grows with the number of submissions.
 COMPARISON_PERCENT_FLOOR = 0.20
 COMPARISON_PERCENT_CEILING = 0.72
+#: Same-stage progress (per-pair ticks) is written to job.json at most this
+#: often. A Celery worker's progress only reaches the API through job.json, and
+#: it used to be written on stage changes only, so the bar sat at the start of
+#: "comparing submissions" for the whole comparison of a large class.
+PROGRESS_PERSIST_INTERVAL_SECONDS = 2.0
+_progress_persisted_at: dict[str, float] = {}
 
 
 def _new_job_progress() -> dict[str, Any]:
@@ -4441,9 +4447,10 @@ def _set_job_progress(
 
     The upload page polls ``GET /api/jobs/{job_id}`` and renders whatever is
     stored under the job's ``progress`` key. In-memory state is always updated
-    so the next poll sees the change immediately; job.json is only rewritten
-    when the stage changes, because pair-level ticks would otherwise write to
-    disk on every comparison.
+    so the next poll sees the change immediately; job.json is rewritten when
+    the stage changes and otherwise at most every
+    ``PROGRESS_PERSIST_INTERVAL_SECONDS``, because pair-level ticks would
+    write to disk on every comparison.
 
     Args:
         job_id: Job identifier whose progress should be updated.
@@ -4496,7 +4503,12 @@ def _set_job_progress(
         "updated_at": datetime.now().isoformat(),
     }
 
-    if previous.get("stage") != stage:
+    now = time.monotonic()
+    if (
+        previous.get("stage") != stage
+        or now - _progress_persisted_at.get(job_id, 0.0) >= PROGRESS_PERSIST_INTERVAL_SECONDS
+    ):
+        _progress_persisted_at[job_id] = now
         try:
             _persist_job(job_id)
         except Exception:
