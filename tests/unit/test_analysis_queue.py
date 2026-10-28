@@ -15,6 +15,8 @@ Covers the three guarantees the 100-user story depends on:
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -71,6 +73,28 @@ class TestCeleryAppConfig:
             "src.backend.workers.analysis_tasks.run_upload_analysis"
             in celery_app_module.celery_app.tasks
         )
+
+    def test_tasks_module_imports_before_celery_app(self) -> None:
+        """``dispatch`` imports ``analysis_tasks`` first in the API process.
+
+        Regression: an import-time assert in ``celery_app`` ran while
+        ``analysis_tasks`` was half-loaded, so every enqueue raised and
+        silently fell back to inline execution.
+        """
+        code = (
+            "from src.backend.workers.analysis_tasks import run_upload_analysis\n"
+            "from src.backend.workers.celery_app import celery_app\n"
+            "assert run_upload_analysis.name in celery_app.tasks\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
 
 
 class TestRunUploadAnalysisTask:
