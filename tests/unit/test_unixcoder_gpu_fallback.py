@@ -30,6 +30,11 @@ class _GpuFullModel:
 
 
 def _patch(monkeypatch, model):
+    # Keep the fake vectors out of the shared Redis embedding cache.
+    monkeypatch.setattr(
+        "src.backend.infrastructure.cache.get_cache",
+        lambda: type("NoCache", (), {"available": False})(),
+    )
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
     monkeypatch.setattr(torch.cuda, "get_device_name", lambda index: "Tesla T4")
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
@@ -73,3 +78,45 @@ def test_other_cuda_errors_are_not_masked(monkeypatch, tmp_path):
     engine = UniXcoderSimilarity(cache_dir=tmp_path)
     with pytest.raises(RuntimeError, match="illegal memory access"):
         engine._load_model()
+
+
+class _GpuFilledLaterModel:
+    """Model that loaded on the GPU, then runs out of room when it is used."""
+
+    def __init__(self):
+        self.device = None
+
+    def to(self, device):
+        self.device = device
+        return self
+
+    def eval(self):
+        return self
+
+    def __call__(self, **inputs):
+        if self.device == "cuda":
+            raise torch.cuda.OutOfMemoryError("CUDA out of memory. Tried to allocate 20.00 MiB")
+        hidden = torch.ones(len(inputs["input_ids"]), 3, 4)
+        return type("Output", (), {"last_hidden_state": hidden})()
+
+
+class _Tokens(dict):
+    def to(self, device):
+        return self
+
+
+def test_gpu_filled_after_load_finishes_on_cpu(monkeypatch, tmp_path):
+    model = _GpuFilledLaterModel()
+    _patch(monkeypatch, model)
+    monkeypatch.setattr(
+        transformers.AutoTokenizer,
+        "from_pretrained",
+        lambda *a, **k: lambda batch, **kw: _Tokens(input_ids=[[0]] * len(batch)),
+    )
+
+    engine = UniXcoderSimilarity(cache_dir=tmp_path)
+    vectors = engine._embed_texts(["def f(x): return x + 1", "def g(y): return y * 2"])
+
+    assert vectors.shape == (2, 4)
+    assert engine.device == "cpu"
+    assert model.device == "cpu"

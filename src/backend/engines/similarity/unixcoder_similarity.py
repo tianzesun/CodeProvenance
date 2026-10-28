@@ -157,23 +157,33 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
             model = AutoModel.from_pretrained(
                 self.model_name, ignore_mismatched_sizes=True
             )
-        import torch
-
         try:
             model.to(self.device)
         except RuntimeError as exc:
             # A GPU filled by another service (a local LLM) used to fail every
             # load, so each pair fell back to token overlap instead of embeddings.
-            # With no room for the CUDA context torch raises a plain RuntimeError
-            # ("CUDA error: out of memory"), not torch.cuda.OutOfMemoryError.
-            if not self._auto_device or "out of memory" not in str(exc):
+            if not self._gpu_out_of_memory(exc):
                 raise
-            logger.warning("No free GPU memory for %s; loading on CPU instead", self.model_name)
-            model.to("cpu")
-            torch.cuda.empty_cache()
-            self.device = "cpu"
+            self._move_to_cpu(model)
         self._model = model.eval()
         logger.info("Model loaded on %s.", self.device)
+
+    def _gpu_out_of_memory(self, exc: RuntimeError) -> bool:
+        """True when ``exc`` is a full GPU this engine may leave for the CPU.
+
+        With no room for the CUDA context torch raises a plain RuntimeError
+        ("CUDA error: out of memory"), not torch.cuda.OutOfMemoryError.
+        """
+        return self._auto_device and "out of memory" in str(exc)
+
+    def _move_to_cpu(self, model) -> None:
+        """Move ``model`` to the CPU for the rest of this engine's life."""
+        import torch
+
+        logger.warning("No free GPU memory for %s; using the CPU instead", self.model_name)
+        model.to("cpu")
+        torch.cuda.empty_cache()
+        self.device = "cpu"
 
     # ─────────────────────────────────────────
     #  Cache helpers
@@ -242,27 +252,22 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
                 missing.append(i)
 
         if missing:
-            import torch
-
             self._load_model()
             for batch_start in range(0, len(missing), self.batch_size):
                 batch_idx = missing[batch_start : batch_start + self.batch_size]
                 batch = [unique_texts[i] for i in batch_idx]
-                inputs = self._tokenizer(
-                    batch,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=MAX_LENGTH,
-                    padding=True,
-                ).to(self.device)
-
-                with torch.no_grad():
-                    output = self._model(**inputs)
-
-                # CLS token, L2-normalised so dot product == cosine similarity
-                cls_embeddings = output.last_hidden_state[:, 0, :]
-                norms = cls_embeddings.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-                normalised = (cls_embeddings / norms).cpu().numpy()
+                try:
+                    normalised = self._encode(batch)
+                except RuntimeError as exc:
+                    # The GPU had room at load time but another service has
+                    # since filled it: finish on the CPU instead of every pair
+                    # falling back to token overlap.
+                    if not self._gpu_out_of_memory(exc):
+                        raise
+                    with self._load_lock:
+                        if self.device != "cpu":
+                            self._move_to_cpu(self._model)
+                    normalised = self._encode(batch)
 
                 for idx, emb in zip(batch_idx, normalised):
                     text = unique_texts[idx]
@@ -275,6 +280,23 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
                             pass
 
         return np.stack([vectors[unique[text]] for text in texts])  # (N, hidden_size)
+
+    def _encode(self, batch: list[str]) -> np.ndarray:
+        """CLS embeddings of ``batch``, L2-normalised so dot product == cosine."""
+        import torch
+
+        inputs = self._tokenizer(
+            batch,
+            return_tensors="pt",
+            truncation=True,
+            max_length=MAX_LENGTH,
+            padding=True,
+        ).to(self.device)
+        with torch.no_grad():
+            output = self._model(**inputs)
+        cls_embeddings = output.last_hidden_state[:, 0, :]
+        norms = cls_embeddings.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        return (cls_embeddings / norms).cpu().numpy()
 
     # ─────────────────────────────────────────
     #  Public API (matches BaseSimilarityAlgorithm)
