@@ -83,9 +83,11 @@ celery_app = create_celery_app()
 # forever with a live worker). Import here — after `celery_app` exists —
 # rather than at the top, which would be circular. (batch_processor.py owns
 # a separate legacy Celery app; its tasks are out of scope here.)
+# No import-time assert on registration: when ``analysis_tasks`` is imported
+# first (as ``dispatch`` does), it is only partly loaded here, so the assert
+# failed and every API enqueue silently fell back to inline. Registration is
+# covered by ``test_upload_task_is_registered`` instead.
 from src.backend.workers import analysis_tasks as _analysis_tasks  # noqa: F401
-
-assert "src.backend.workers.analysis_tasks.run_upload_analysis" in celery_app.tasks
 
 
 def worker_concurrency() -> int:
