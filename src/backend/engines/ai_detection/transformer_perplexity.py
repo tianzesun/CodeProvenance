@@ -162,7 +162,17 @@ class TransformerPerplexityAnalyzer:
                     warnings.filterwarnings("ignore", message=".*is better suited.*")
                     tokenizer = AutoTokenizer.from_pretrained(self.model_name, local_files_only=local_only)
                     model = AutoModelForCausalLM.from_pretrained(self.model_name, local_files_only=local_only)
-                model.to(device)
+                try:
+                    model.to(device)
+                except torch.cuda.OutOfMemoryError:
+                    # A busy GPU (another job, a local LLM) used to fail the load and leave
+                    # perplexity off for the backoff window though the CPU could score fine.
+                    if self._requested_device:
+                        raise
+                    logger.warning("No free GPU memory for %s; loading on CPU instead", self.model_name)
+                    model.to("cpu")
+                    torch.cuda.empty_cache()
+                    device = "cpu"
                 model.eval()
                 self.device, self._tokenizer, self._model = device, tokenizer, model
             except ImportError as exc:

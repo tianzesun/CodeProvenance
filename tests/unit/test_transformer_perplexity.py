@@ -142,3 +142,59 @@ def helper(a, b):
 
         assert 0 <= result["ai_score"] <= 1
         assert result["token_count"] > 0
+
+
+class _GpuFullModel:
+    """Stands in for a model that does not fit on the GPU."""
+
+    def __init__(self):
+        self.moves: list[str] = []
+
+    def to(self, device):
+        import torch
+
+        self.moves.append(device)
+        if device == "cuda":
+            raise torch.cuda.OutOfMemoryError("CUDA out of memory")
+        return self
+
+    def eval(self):
+        return self
+
+
+@pytest.mark.skipif(not TRANSFORMERS_AVAILABLE, reason="transformers not installed")
+class TestGpuOutOfMemoryFallback:
+    """A full GPU must not switch perplexity off when the CPU could score."""
+
+    def _patch(self, monkeypatch, model):
+        import torch
+        import transformers
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+        monkeypatch.setattr(
+            transformers.AutoTokenizer, "from_pretrained", lambda *a, **k: object()
+        )
+        monkeypatch.setattr(
+            transformers.AutoModelForCausalLM, "from_pretrained", lambda *a, **k: model
+        )
+
+    def test_auto_device_falls_back_to_cpu(self, monkeypatch):
+        model = _GpuFullModel()
+        self._patch(monkeypatch, model)
+
+        analyzer = TransformerPerplexityAnalyzer()
+        assert analyzer.model is model
+        assert analyzer.device == "cpu"
+        assert model.moves == ["cuda", "cpu"]
+
+    def test_explicit_cuda_still_reports_unavailable(self, monkeypatch):
+        from src.backend.engines.ai_detection.transformer_perplexity import (
+            PerplexityUnavailable,
+        )
+
+        self._patch(monkeypatch, _GpuFullModel())
+
+        analyzer = TransformerPerplexityAnalyzer(device="cuda")
+        with pytest.raises(PerplexityUnavailable):
+            _ = analyzer.model
