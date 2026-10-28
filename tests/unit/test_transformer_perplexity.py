@@ -147,15 +147,16 @@ def helper(a, b):
 class _GpuFullModel:
     """Stands in for a model that does not fit on the GPU."""
 
-    def __init__(self):
+    def __init__(self, error=None):
         self.moves: list[str] = []
+        self.error = error
 
     def to(self, device):
         import torch
 
         self.moves.append(device)
         if device == "cuda":
-            raise torch.cuda.OutOfMemoryError("CUDA out of memory")
+            raise self.error or torch.cuda.OutOfMemoryError("CUDA out of memory")
         return self
 
     def eval(self):
@@ -187,6 +188,25 @@ class TestGpuOutOfMemoryFallback:
         assert analyzer.model is model
         assert analyzer.device == "cpu"
         assert model.moves == ["cuda", "cpu"]
+
+    def test_no_room_for_cuda_context_falls_back_to_cpu(self, monkeypatch):
+        # torch raises a plain RuntimeError when the CUDA context itself does not fit.
+        model = _GpuFullModel(RuntimeError("CUDA error: out of memory"))
+        self._patch(monkeypatch, model)
+
+        analyzer = TransformerPerplexityAnalyzer()
+        assert analyzer.model is model
+        assert analyzer.device == "cpu"
+
+    def test_other_cuda_errors_are_not_masked(self, monkeypatch):
+        from src.backend.engines.ai_detection.transformer_perplexity import (
+            PerplexityUnavailable,
+        )
+
+        self._patch(monkeypatch, _GpuFullModel(RuntimeError("CUDA error: illegal memory access")))
+
+        with pytest.raises(PerplexityUnavailable):
+            _ = TransformerPerplexityAnalyzer().model
 
     def test_explicit_cuda_still_reports_unavailable(self, monkeypatch):
         from src.backend.engines.ai_detection.transformer_perplexity import (

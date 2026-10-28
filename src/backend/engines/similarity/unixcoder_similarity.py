@@ -79,6 +79,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
         self.batch_size = batch_size
 
         # Resolve device
+        self._auto_device = device == "auto"
         if device == "auto":
             self.device = self._resolve_device()
         else:
@@ -153,12 +154,26 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
             # ``trust_remote_code=True`` was removed: it executes Python from the model
             # repository. UniXcoder is a standard RoBERTa-style checkpoint and does not
             # need it.
-            self._model = (
-                AutoModel.from_pretrained(self.model_name, ignore_mismatched_sizes=True)
-                .to(self.device)
-                .eval()
+            model = AutoModel.from_pretrained(
+                self.model_name, ignore_mismatched_sizes=True
             )
-        logger.info("Model loaded.")
+        import torch
+
+        try:
+            model.to(self.device)
+        except RuntimeError as exc:
+            # A GPU filled by another service (a local LLM) used to fail every
+            # load, so each pair fell back to token overlap instead of embeddings.
+            # With no room for the CUDA context torch raises a plain RuntimeError
+            # ("CUDA error: out of memory"), not torch.cuda.OutOfMemoryError.
+            if not self._auto_device or "out of memory" not in str(exc):
+                raise
+            logger.warning("No free GPU memory for %s; loading on CPU instead", self.model_name)
+            model.to("cpu")
+            torch.cuda.empty_cache()
+            self.device = "cpu"
+        self._model = model.eval()
+        logger.info("Model loaded on %s.", self.device)
 
     # ─────────────────────────────────────────
     #  Cache helpers

@@ -164,10 +164,12 @@ class TransformerPerplexityAnalyzer:
                     model = AutoModelForCausalLM.from_pretrained(self.model_name, local_files_only=local_only)
                 try:
                     model.to(device)
-                except torch.cuda.OutOfMemoryError:
+                except RuntimeError as exc:
                     # A busy GPU (another job, a local LLM) used to fail the load and leave
                     # perplexity off for the backoff window though the CPU could score fine.
-                    if self._requested_device:
+                    # A GPU with no room for the CUDA context raises a plain RuntimeError
+                    # ("CUDA error: out of memory"), not torch.cuda.OutOfMemoryError.
+                    if self._requested_device or "out of memory" not in str(exc):
                         raise
                     logger.warning("No free GPU memory for %s; loading on CPU instead", self.model_name)
                     model.to("cpu")
