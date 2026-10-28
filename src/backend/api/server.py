@@ -4213,7 +4213,10 @@ def _persist_job(job_id: str) -> None:
 
     metadata_path = _job_metadata_path(job_id)
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
-    metadata_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
+    # Write then rename, so a concurrent poll never reads a half-written file.
+    temp_path = metadata_path.with_name(f".{metadata_path.name}.{uuid.uuid4().hex}")
+    temp_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
+    os.replace(temp_path, metadata_path)
 
 
 def _persist_ai_detection_results(job_id: str, ai_detection: dict[str, Any]) -> None:
@@ -4623,7 +4626,9 @@ def _resolve_cached_report(job_id: str, report_type: str, fmt: str) -> Path | No
     return None
 
 
-def _recover_job_from_report(job_id: str) -> dict[str, Any] | None:
+def _recover_job_from_report(
+    job_id: str, *, store: bool = True
+) -> dict[str, Any] | None:
     report_json_path = _job_report_dir(job_id) / "report.json"
     if not report_json_path.exists():
         return None
@@ -4703,19 +4708,22 @@ def _recover_job_from_report(job_id: str) -> dict[str, Any] | None:
             "review_updated_at": None,
         }
     )
-    _jobs[job_id] = recovered_job
-    _persist_job(job_id)
+    if store:
+        _jobs[job_id] = recovered_job
+        _persist_job(job_id)
     return recovered_job
 
 
 def _load_persisted_job(
-    job_id: str, *, mark_interrupted: bool = True
+    job_id: str, *, mark_interrupted: bool = True, store: bool = True
 ) -> dict[str, Any] | None:
     """Load job.json into the cache.
 
     ``mark_interrupted`` turns a stored "processing" status into "failed": right
     for a cold load after a restart, wrong for the poll-time refresh of a job
     that is still running here or in a worker, which it used to fail mid-run.
+    ``store=False`` only reads: the poll-time refresh must not write a copy it
+    read back into the cache or job.json while the analysis is updating them.
     """
     metadata_path = _job_metadata_path(job_id)
     if metadata_path.exists():
@@ -4726,11 +4734,12 @@ def _load_persisted_job(
         else:
             stored_job["id"] = job_id
             normalized = _normalize_job(stored_job, from_disk=mark_interrupted)
-            _jobs[job_id] = normalized
-            _persist_job(job_id)
+            if store:
+                _jobs[job_id] = normalized
+                _persist_job(job_id)
             return normalized
 
-    return _recover_job_from_report(job_id)
+    return _recover_job_from_report(job_id, store=store)
 
 
 #: Lifecycle order of job statuses. The poll-time refresh in ``_get_job``
@@ -4800,7 +4809,9 @@ def _get_job(job_id: str) -> dict[str, Any] | None:
     if job_id in _jobs:
         cached = _normalize_job(_jobs[job_id])
         if _job_status_rank(cached.get("status")) < _JOB_STATUS_RANK["completed"]:
-            refreshed = _load_persisted_job(job_id, mark_interrupted=False)
+            refreshed = _load_persisted_job(
+                job_id, mark_interrupted=False, store=False
+            )
             if refreshed is None and _job_status_rank(
                 _read_job_status_from_db(job_id)
             ) > _job_status_rank(cached.get("status")):
@@ -4826,12 +4837,14 @@ def _get_job(job_id: str) -> dict[str, Any] | None:
                 merged = {**cached, **refreshed}
                 if not merged.get("owner_user_id"):
                     merged["owner_user_id"] = cached.get("owner_user_id")
-                cached = merged
-            # Either way the assignment below refreshes the cache: adopt the
-            # re-read copy, or put the live dict back after _load_persisted_job
-            # rewrote it as a side effect.
-        _jobs[job_id] = cached
+                _jobs[job_id] = merged
+                return merged
+        # Nothing newer was adopted, so the cache is left alone: an in-process
+        # analysis may have finished while this poll was reading, and writing
+        # the snapshot back lost its completed result (the job then polled as
+        # "processing" forever).
         return cached
+    loaded = _load_persisted_job(job_id)
     loaded = _load_persisted_job(job_id)
     if loaded:
         return loaded
