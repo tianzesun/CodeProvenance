@@ -48,6 +48,12 @@ logger = logging.getLogger(__name__)
 
 #: A shared (starter-code / boilerplate dominated) match is never auto-escalated past this.
 STARTER_OVERLAP_CAP = 0.70
+#: The exact-match shortcut also needs winnowing or line coverage this high.
+#: The token fingerprint is set- and distribution-based, so repetitive code that
+#: differs (the same few loop shapes in another order and mix) also reaches 0.95.
+#: Either one is enough: added comments lower coverage, and a failed winnowing
+#: engine reports 0.0.
+EXACT_MATCH_MIN_CORROBORATION = 0.90
 
 
 @dataclass
@@ -535,7 +541,16 @@ class FusionEngine:
         # Exact match: return 100% for identical files, unless the shared text is the
         # instructor's starter code / boilerplate (two untouched starter files are identical).
         token_score = raw_scores.get("fingerprint", raw_scores.get("token", 0.0))
-        if _finite_scores({"t": token_score}).get("t", 0.0) >= 0.95:
+        exact = _finite_scores(
+            {
+                "t": token_score,
+                "w": raw_scores.get("winnowing"),
+                "c": getattr(features, "coverage", None),
+            }
+        )
+        if exact.get("t", 0.0) >= 0.95 and (
+            max(exact.get("w", 0.0), exact.get("c", 0.0)) >= EXACT_MATCH_MIN_CORROBORATION
+        ):
             if shared_regions >= STARTER_OVERLAP_CAP:
                 return self._shared_region_result(raw_scores, ranking, shared_regions)
             return FusedScore(

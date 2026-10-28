@@ -57,3 +57,23 @@ def test_fusion_engine_exposes_professor_review_priority() -> None:
     assert 0.0 <= result.review_priority <= 1.0
     assert result.professor_summary
     assert isinstance(result.evidence_reasons, list)
+
+
+def test_exact_match_needs_more_than_the_token_fingerprint() -> None:
+    """Fingerprint 0.95+ alone used to report "files are identical" at 100%.
+
+    The fingerprint is set-based, so repetitive code that differs reaches it;
+    winnowing or line coverage has to agree before the shortcut applies.
+    """
+    engine = FusionEngine()
+
+    look_alike = engine.fuse(FeatureVector(fingerprint=0.96, winnowing=0.59, coverage=0.56, ast=0.57))
+    assert "identical" not in look_alike.professor_summary
+
+    for corroborated in (
+        FeatureVector(fingerprint=1.0, winnowing=1.0, coverage=0.69, ast=1.0),  # comments added
+        FeatureVector(fingerprint=1.0, winnowing=0.0, coverage=1.0, ast=1.0),  # winnowing failed
+    ):
+        result = engine.fuse(corroborated)
+        assert result.final_score == 1.0
+        assert "identical" in result.professor_summary
