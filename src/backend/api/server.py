@@ -123,6 +123,9 @@ from src.backend.models.database import (
 from src.backend.workers.dispatch import dispatch_analysis
 
 logging.basicConfig(level=logging.INFO)
+# Font subsetting for PDF reports logged every font table it touched (hundreds
+# of lines per report), burying real errors; keep its warnings only.
+logging.getLogger("fontTools").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -9097,6 +9100,9 @@ async def _run_analysis_in_workspace(
             logger.warning(
                 f"Failed to resolve assignment_id={assignment_id} for mode inference"
             )
+    if effective_mode == "auto_detect":
+        # Nothing inferred: the default mode, without an "unknown mode" warning.
+        effective_mode = ""
 
     mode = get_assignment_mode(effective_mode)
 
