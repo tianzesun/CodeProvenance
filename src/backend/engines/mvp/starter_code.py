@@ -159,10 +159,17 @@ class StarterCodeRemover:
                     marked.add(index)
 
         removed_numbers = {meaningful[i][0] for i in marked}
+        # Docstrings and comments are not meaningful lines, so they were never
+        # matched and a starter docstring stayed in every submission. Drop what
+        # sits between two consecutive removed lines; counts stay meaningful-only.
+        dropped = set(removed_numbers)
+        for i in marked:
+            if i + 1 in marked:
+                dropped.update(range(meaningful[i][0] + 1, meaningful[i + 1][0]))
         kept = [
             line
             for number, line in enumerate(lines, 1)
-            if number not in removed_numbers
+            if number not in dropped
         ]
         return StarterRemovalResult(
             filtered_source="\n".join(kept),

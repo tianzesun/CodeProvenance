@@ -86,6 +86,38 @@ def solve(values):
     assert result.filtered_source.strip() == submission.strip()
 
 
+def test_starter_docstrings_and_comments_are_removed_with_their_code() -> None:
+    """Docstrings inside a removed starter block go too; the student's own stay.
+
+    The normalizer drops docstrings and comments, so they are not lines the
+    remover matches; a starter docstring used to survive in every submission
+    and make unrelated work look shared.
+    """
+    starter = '''
+def load_rows(path):
+    """Read the assignment CSV into a list of dicts."""
+    # one row per line
+    with open(path) as handle:
+        return [line.split(",") for line in handle]
+'''
+    submission = (
+        starter
+        + '''
+
+def summarize(rows):
+    """My own summary of the rows."""
+    return len(rows)
+'''
+    )
+
+    result = StarterCodeRemover([starter]).remove(submission)
+
+    assert "Read the assignment CSV" not in result.filtered_source
+    assert "one row per line" not in result.filtered_source
+    assert "My own summary of the rows." in result.filtered_source
+    assert result.removed_line_count == 3  # meaningful lines only
+
+
 def test_ast_subtree_hashing_is_identifier_and_literal_resistant() -> None:
     """AST subtree hashing should stay high under renames and literal edits."""
     left = """
