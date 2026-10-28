@@ -124,8 +124,11 @@ from src.backend.workers.dispatch import dispatch_analysis
 
 logging.basicConfig(level=logging.INFO)
 # Font subsetting for PDF reports logged every font table it touched (hundreds
-# of lines per report), burying real errors; keep its warnings only.
-logging.getLogger("fontTools").setLevel(logging.WARNING)
+# of lines per report), burying real errors; keep its warnings only. The child
+# loggers are set because WeasyPrint switches "fontTools" itself to DEBUG while
+# it subsets, and those records still propagate to the root handler.
+for _font_logger in ("fontTools.subset", "fontTools.ttLib"):
+    logging.getLogger(_font_logger).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
