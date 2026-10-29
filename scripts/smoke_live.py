@@ -280,6 +280,22 @@ class Smoke:
             self.check("zip upload finds all submissions", len(job.get("results") or []) == 3,
                        f"{len(job.get('results') or [])} pairs")
 
+    def zip_student_folders(self) -> None:
+        # Course exports put each student in a folder; each folder is one submission.
+        job = self.run_job("zip student folders", {
+            "alice/stats.py": ORIGINAL, "alice/report.py": STUDENT_X,
+            "bob/stats.py": RENAMED_COPY, "bob/report.py": STUDENT_X,
+            "carol/main.py": UNRELATED,
+        }, zipped=True)
+        if not job:
+            return
+        names = sorted({name for r in job.get("results") or [] for name in (r.get("file_a"), r.get("file_b"))})
+        self.check("zip folders become one submission per student", names == ["alice.py", "bob.py", "carol.py"],
+                   f"submissions={names}")
+        copied = self.pair_score(job, "alice.py", "bob.py")
+        self.check("copied student folder is flagged", copied is not None and copied >= self.threshold,
+                   f"score={copied}")
+
     def reports(self, job: dict) -> None:
         job_id = job["id"]
         expected = {
@@ -337,6 +353,7 @@ def main() -> int:
             job = smoke.detection()
             smoke.starter_code()
             smoke.zip_upload()
+            smoke.zip_student_folders()
             if job:
                 smoke.reports(job)
                 if email:

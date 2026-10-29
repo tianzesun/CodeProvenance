@@ -722,7 +722,7 @@ def test_read_files_from_dir_preserves_nested_duplicate_filenames(tmp_path):
     (case_a / "Main.java").write_text("class Main { int a = 1; }\n", encoding="utf-8")
     (case_b / "Main.java").write_text("class Main { int b = 2; }\n", encoding="utf-8")
 
-    submissions = server._read_files_from_dir(tmp_path)
+    submissions = server._read_files_from_dir(tmp_path, group_folders=False)
 
     assert submissions == {
         "case_a__Main.java": "class Main { int a = 1; }\n",

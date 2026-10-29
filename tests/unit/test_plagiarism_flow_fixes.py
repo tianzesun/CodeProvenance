@@ -48,7 +48,7 @@ def test_too_few_files_fails_the_job_visibly(monkeypatch, tmp_path) -> None:
 
     job = server._jobs["job-few"]
     assert job["status"] == "failed"
-    assert "At least 2 code files" in job["error"]
+    assert "At least 2 submissions with code" in job["error"]
 
 
 def test_analysis_failure_does_not_expose_the_exception(monkeypatch, tmp_path) -> None:

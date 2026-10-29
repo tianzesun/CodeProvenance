@@ -2535,8 +2535,19 @@ def _unique_child_path(root_dir: PathLib, relative_path: PathLib) -> PathLib:
         counter += 1
 
 
-def _read_files_from_dir(directory: PathLib) -> dict[str, str]:
-    submissions = {}
+def _read_files_from_dir(
+    directory: PathLib, *, group_folders: bool = True
+) -> dict[str, str]:
+    """Read submissions; each student folder is one submission.
+
+    Class ZIPs put each student in a folder (``alice/main.py``, ``alice/util.py``).
+    Comparing file by file split one student into many submissions and paired a
+    student's own files against each other, so, as MOSS and JPlag do, the files of
+    a folder are joined into one submission named after it (``alice.py``). A
+    wrapper folder shared by every file (``A1/alice/...``) is not a student, and
+    files at the top level keep their file names.
+    """
+    files: dict[PathLib, str] = {}
     # One walk filtered by _is_code_file: globbing "*{ext}" per extension was
     # case-sensitive, so "Alice.PY" passed the upload check and was then dropped.
     for f in sorted(directory.rglob("*")):
@@ -2545,7 +2556,8 @@ def _read_files_from_dir(directory: PathLib) -> dict[str, str]:
         # Reserved "starter" subdirectory holds instructor-provided templates;
         # those files must never be read back as student submissions (they
         # would inflate pair results).
-        if "starter" in f.relative_to(directory).parts:
+        relative = f.relative_to(directory)
+        if "starter" in relative.parts:
             continue
         try:
             content = f.read_text(encoding="utf-8", errors="ignore")
@@ -2553,7 +2565,30 @@ def _read_files_from_dir(directory: PathLib) -> dict[str, str]:
             logger.warning(f"Skipping {f.name}: {e}")
             continue
         if len(content.strip()) > 10:
-            submissions[_normalize_submission_name(f, directory)] = content
+            files[relative] = content
+
+    folders: dict[tuple[str, ...], list[PathLib]] = defaultdict(list)
+    if group_folders and files:
+        wrapper = os.path.commonpath([str(path.parent) for path in files])
+        depth = len(PathLib(wrapper).parts) if wrapper not in {"", "."} else 0
+        for path in files:
+            if len(path.parts) > depth + 1:
+                folders[path.parts[: depth + 1]].append(path)
+
+    submissions = {}
+    grouped = {path for paths in folders.values() for path in paths}
+    for path, content in files.items():
+        if path not in grouped:
+            submissions[_normalize_submission_name(directory / path, directory)] = (
+                content
+            )
+    for folder, paths in folders.items():
+        suffix = Counter(path.suffix.lower() for path in paths).most_common(1)[0][0]
+        base = "__".join(folder[depth:])
+        name, counter = f"{base}{suffix}", 2
+        while name in submissions:
+            name, counter = f"{base}_{counter}{suffix}", counter + 1
+        submissions[name] = "\n\n".join(files[path] for path in sorted(paths))
     return submissions
 
 
@@ -2575,7 +2610,8 @@ async def _store_benchmark_uploads(
         if filename.lower().endswith(".zip"):
             _extract_zip(destination, target_dir)
 
-    return _read_files_from_dir(target_dir)
+    # Benchmark datasets label individual files, so their folders stay apart.
+    return _read_files_from_dir(target_dir, group_folders=False)
 
 
 # Dataset location: All datasets are stored in data/datasets/
@@ -4891,7 +4927,12 @@ def _read_job_submission_sources(job_id: str, subs: list[Any]) -> dict[str, str]
     on_disk: dict[str, str] = {}
     if job_dir.exists():
         try:
-            on_disk = _read_files_from_dir(job_dir)
+            # Jobs analysed before student folders were grouped stored one
+            # submission per file; their names still resolve here.
+            on_disk = {
+                **_read_files_from_dir(job_dir, group_folders=False),
+                **_read_files_from_dir(job_dir),
+            }
         except Exception:
             logger.warning(f"Failed to read sources for job {job_id} from disk")
 
@@ -9287,7 +9328,8 @@ async def _run_analysis_in_workspace(
             # Fail the job visibly. Deleting it from the cache left job.json at
             # "processing", which later read as "the backend restarted".
             message = (
-                "At least 2 code files with content are required; "
+                "At least 2 submissions with code are required (a student "
+                "folder counts as one); "
                 f"{len(submissions)} could be read from the upload."
             )
             _jobs[job_id]["status"] = "failed"

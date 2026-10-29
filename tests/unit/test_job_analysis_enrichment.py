@@ -3,16 +3,16 @@
 import zipfile
 
 from src.backend.api.server import (
-    _build_ai_text_trust_report,
-    _build_ai_detection_summary,
     _audit_benchmark_pairs,
     _benchmark_split_guard,
+    _build_ai_detection_summary,
+    _build_ai_text_trust_report,
     _build_calibration_report,
     _build_fusion_debug,
     _build_reproducibility_report,
     _build_web_analysis_summary,
-    _normalize_job,
     _extract_zip,
+    _normalize_job,
     _read_files_from_dir,
 )
 from src.backend.application.services.batch_detection_service import (
@@ -333,9 +333,77 @@ def test_zip_upload_preserves_class_submission_paths(tmp_path) -> None:
     submissions = _read_files_from_dir(target_dir)
 
     assert len(extracted) == 4
+    assert sorted(submissions) == ["alice.py", "bob.py", "carol.py", "dan.py"]
+
+
+def test_zip_student_folders_become_one_submission_each(tmp_path) -> None:
+    """A student's several files are one submission, as in MOSS and JPlag."""
+    zip_path = tmp_path / "class.zip"
+    target_dir = tmp_path / "extract"
+    target_dir.mkdir()
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        # A wrapper folder every file shares is the assignment, not a student.
+        archive.writestr("A1/alice/main.py", "def solve():\n    return helper()\n")
+        archive.writestr("A1/alice/util.py", "def helper():\n    return 'alice'\n")
+        archive.writestr("A1/bob/src/main.py", "def solve():\n    return 'bob!!'\n")
+        archive.writestr("A1/bob/src/io.py", "def read():\n    return input()\n")
+        archive.writestr("A1/carol/main.py", "def solve():\n    return 'carol'\n")
+        archive.writestr("A1/dan.py", "def solve():\n    return 'dan!!'\n")
+
+    _extract_zip(zip_path, target_dir)
+    submissions = _read_files_from_dir(target_dir)
+
     assert sorted(submissions) == [
-        "alice__main.py",
-        "bob__main.py",
-        "carol__main.py",
-        "dan__main.py",
+        "A1__dan.py",
+        "alice.py",
+        "bob.py",
+        "carol.py",
     ]
+    assert "return helper()" in submissions["alice.py"]
+    assert "return 'alice'" in submissions["alice.py"]
+    assert "return input()" in submissions["bob.py"]
+
+
+def test_student_folder_name_never_overwrites_a_file_submission(tmp_path) -> None:
+    (tmp_path / "alice").mkdir()
+    (tmp_path / "alice" / "a.py").write_text("print('folder a')\n", encoding="utf-8")
+    (tmp_path / "alice" / "b.py").write_text("print('folder b')\n", encoding="utf-8")
+    (tmp_path / "alice.py").write_text("print('top level')\n", encoding="utf-8")
+
+    submissions = _read_files_from_dir(tmp_path)
+
+    assert submissions["alice.py"] == "print('top level')\n"
+    assert "folder a" in submissions["alice_2.py"]
+    assert "folder b" in submissions["alice_2.py"]
+
+
+def test_folder_grouping_can_be_turned_off_for_labelled_datasets(tmp_path) -> None:
+    (tmp_path / "case").mkdir()
+    (tmp_path / "case" / "original.py").write_text("x = 'original'\n", encoding="utf-8")
+    (tmp_path / "case" / "copy.py").write_text("x = 'the copy'\n", encoding="utf-8")
+
+    submissions = _read_files_from_dir(tmp_path, group_folders=False)
+
+    assert sorted(submissions) == ["case__copy.py", "case__original.py"]
+
+
+def test_jobs_stored_with_per_file_names_still_load_their_code(
+    tmp_path, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    from src.backend.api import server
+
+    job_dir = tmp_path / "old-job"
+    (job_dir / "alice").mkdir(parents=True)
+    (job_dir / "alice" / "main.py").write_text("print('alice main')\n", encoding="utf-8")
+    (job_dir / "alice" / "util.py").write_text("print('alice util')\n", encoding="utf-8")
+    (job_dir / "bob.py").write_text("print('bob only')\n", encoding="utf-8")
+    monkeypatch.setattr(server, "UPLOADS_DIR", tmp_path)
+    old_row = SimpleNamespace(name="alice__main.py", storage_path=None, file_paths=None)
+    new_row = SimpleNamespace(name="alice.py", storage_path=None, file_paths=None)
+
+    sources = server._read_job_submission_sources("old-job", [old_row, new_row])
+
+    assert sources["alice__main.py"] == "print('alice main')\n"
+    assert "alice util" in sources["alice.py"]
