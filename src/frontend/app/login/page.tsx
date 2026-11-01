@@ -445,7 +445,7 @@ const NOTICES: Record<string, string> = {
   password_reset: 'Your password was updated. Sign in with your new password.',
 };
 
-type LoginMethod = 'password' | 'register';
+type LoginMethod = 'password' | 'register' | 'bootstrap';
 type View = 'signin' | 'bootstrap' | 'forgot' | 'forgot-sent' | 'register' | 'register-sent';
 
 export default function LoginPage() {
@@ -458,7 +458,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [forceSignIn, setForceSignIn] = useState(false);
 
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
@@ -484,15 +483,16 @@ export default function LoginPage() {
   const [registerEmailSent, setRegisterEmailSent] = useState(false);
   const [resendNotice, setResendNotice] = useState('');
 
-  // Treat "status still loading" as sign-in so returning professors never see
-  // the bootstrap form flash before /api/auth/status resolves.
-  const showLogin = loading || bootstrapped || forceSignIn;
+  // Sign-in is always the default. The administrator form only opens when the
+  // user clicks "Create one" on a workspace that has no accounts yet, so a
+  // failed /api/auth/status call never drops returning professors into it.
+  const showLogin = loginMethod !== 'bootstrap' || bootstrapped;
 
   const view: View = showForgotPassword
     ? resetEmailSent
       ? 'forgot-sent'
       : 'forgot'
-    : showLogin && loginMethod === 'register'
+    : loginMethod === 'register' || (loginMethod === 'bootstrap' && bootstrapped)
       ? registerEmailSent
         ? 'register-sent'
         : 'register'
@@ -558,7 +558,8 @@ export default function LoginPage() {
 
   const handleBackToPassword = () => openView('password');
   const handleBackToLogin = () => openView('password');
-  const handleChooseRegister = () => openView('register');
+  const handleChooseRegister = () =>
+    openView(loading || bootstrapped ? 'register' : 'bootstrap');
 
   const handleShowForgotPassword = () => {
     // Without this, a failed sign-in's error banner followed the user into
@@ -868,14 +869,14 @@ export default function LoginPage() {
                 <h2 className="text-4xl font-semibold tracking-tight text-white">
                   {!showLogin
                     ? 'Initialize Institutional Workspace'
-                    : loginMethod === 'register'
+                    : view === 'register' || view === 'register-sent'
                       ? 'Create Your Account'
                       : 'Academic Workspace Sign-In'}
                 </h2>
                 <p className="mt-4 text-base leading-7 text-slate-300">
                   {!showLogin
                     ? 'Create the first administrator account and configure the workspace for your institution.'
-                    : loginMethod === 'register'
+                    : view === 'register' || view === 'register-sent'
                       ? 'Set up your workspace in minutes and start checking submissions for academic integrity.'
                       : 'Access academic integrity tools, review assignments, and manage courses from your secure workspace.'}
                 </p>
@@ -1172,7 +1173,7 @@ export default function LoginPage() {
                 )}
 
                 {view === 'bootstrap' && (
-                  <button type="button" onClick={() => setForceSignIn(true)} className={SECONDARY_BUTTON}>
+                  <button type="button" onClick={handleBackToPassword} className={SECONDARY_BUTTON}>
                     Already have an account? Sign in
                   </button>
                 )}
