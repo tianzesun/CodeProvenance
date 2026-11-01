@@ -253,14 +253,14 @@ def build_default_registry(
         kwargs = dict(info.get("kwargs", {}))
         metadata = info.get("metadata", {})
 
-        def make_loader(mn, kw):
+        def make_loader(mn, kw, ds_name):
             def _loader(**extra) -> UnifiedDataset:
                 combined = {**kw, **extra}
                 method = getattr(loader, mn)
                 canonical = method(**combined)
-                return UnifiedDataset.from_canonical(canonical, name=name)
+                return UnifiedDataset.from_canonical(canonical, name=ds_name)
             return _loader
 
-        registry.register(name, make_loader(method_name, kwargs), metadata)
+        registry.register(name, make_loader(method_name, kwargs, name), metadata)
 
     return registry
