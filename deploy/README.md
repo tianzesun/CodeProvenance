@@ -56,6 +56,26 @@ This reinstalls Python deps (if changed), rebuilds the frontend, and restarts
 the services. It does **not** touch `deploy.conf` or the generated
 `.env.local`.
 
+### Automatic updates (optional)
+
+`deploy/auto-update.sh` checks `origin/main` every 2 minutes via a systemd
+timer. On new commits it fast-forwards, reinstalls Python deps / rebuilds the
+frontend only if those changed, and restarts the affected services. It refuses
+to run if tracked files have local edits, rolls back if pip or the build fails,
+and never runs migrations (it logs a warning when `alembic/` changes).
+
+```bash
+for f in integritydesk-auto-update.service integritydesk-auto-update.timer; do
+    sudo sed "s|@APP_DIR@|$PWD|g" deploy/systemd/$f | sudo tee /etc/systemd/system/$f >/dev/null
+done
+sudo systemctl daemon-reload
+sudo systemctl enable --now integritydesk-auto-update.timer
+journalctl -u integritydesk-auto-update -f   # watch it
+```
+
+The repo owner's SSH key must be able to `git fetch` without a passphrase
+prompt (or use an HTTPS deploy token).
+
 ## Day-to-day operations
 
 ```bash

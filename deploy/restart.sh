@@ -7,13 +7,19 @@ set -euo pipefail
 
 log() { echo -e "\033[1;32m[restart]\033[0m $*"; }
 
-log "Restarting IntegrityDesk services..."
-systemctl restart integritydesk-backend integritydesk-dashboard integritydesk-worker integritydesk-analysis-worker || true
-if systemctl list-unit-files integritydesk-embedding.service >/dev/null 2>&1; then
-    systemctl restart integritydesk-embedding || true
-fi
+# Restart only enabled units; covers both the codeprovenance-* and the
+# integritydesk-* unit names.
+UNITS=()
+for u in codeprovenance-backend codeprovenance-celery codeprovenance-embedding codeprovenance-dashboard \
+         integritydesk-backend integritydesk-worker integritydesk-analysis-worker integritydesk-embedding integritydesk-dashboard; do
+    systemctl is-enabled --quiet "$u" 2>/dev/null && UNITS+=("$u")
+done
+
+[ "${#UNITS[@]}" -gt 0 ] || { echo "No IntegrityDesk services are enabled." >&2; exit 1; }
+
+log "Restarting: ${UNITS[*]}"
+systemctl restart "${UNITS[@]}" || true
 
 sleep 2
 log "Done. Status:"
-systemctl --no-pager --full status integritydesk-backend integritydesk-dashboard integritydesk-worker integritydesk-analysis-worker \
-    | grep -E "Loaded:|Active:" || true
+systemctl --no-pager --full status "${UNITS[@]}" | grep -E "●|Loaded:|Active:" || true
