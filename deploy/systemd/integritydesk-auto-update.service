@@ -1,0 +1,9 @@
+[Unit]
+Description=IntegrityDesk auto-update (git pull + restart)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash @APP_DIR@/deploy/auto-update.sh
+TimeoutStartSec=1800
