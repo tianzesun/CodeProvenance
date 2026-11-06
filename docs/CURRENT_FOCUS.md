@@ -50,6 +50,11 @@ as its UI.
   cases are private unless shared; per-workspace settings, encrypted credentials
   and notifications. Rollout notes in `docs/ROLLOUT_SHARING_AND_SETTINGS.md`.
 - **Results page → case**: a flagged pair can open a case directly (2026-10-26).
+- **First external AI holdout** (2026-11-06, CoDet-M4 Python, source-balanced):
+  live blend AUC 0.523 vs 0.591 in-domain; the ML classifier transfers (0.667),
+  the heuristic does not (0.458). Offline fusion sweeps gain ≤0.03 within the
+  student-FP contract, so the blend was left unchanged. Details in
+  `docs/AI_DETECTOR_VS_TURNITIN.md` § External holdout.
 
 ## Current Active Areas
 

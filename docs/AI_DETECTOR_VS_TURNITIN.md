@@ -57,10 +57,57 @@ Re-verified against public sources before repeating any comparison claim:
 4. **Where Turnitin still leads — do not claim otherwise:** prose coverage,
    scale (16,000+ institutions), and years of published validation. We do not
    do prose detection at all, and our code-side accuracy (safe-blend AUC 0.591
-   grouped holdout) is honest, modest, and single-dataset — see the gaps
-   below. The defensible claims are **domain coverage (code, where Turnitin
+   grouped holdout) is honest, modest, and in-domain only. Out of domain it
+   falls to 0.523 (CoDet-M4, 2026-11-06) — see the gaps below. The defensible claims are **domain coverage (code, where Turnitin
    says it is unreliable), per-signal explainability, and measured,
    published false-positive rates** — not raw detection accuracy parity.
+
+## External holdout (2026-11-06): CoDet-M4
+
+First measurement on data the shipped classifier never saw. **On out-of-domain
+code the live detector ranks at chance.**
+
+- **Data:** CoDet-M4 (Orel, Azizov & Nakov, ACL Findings 2025; MIT;
+  `DaniilOr/CoDET-M4`), Python, its own *test* split. Raw AI vs human is
+  confounded by source (AI is mostly LeetCode, human mostly GitHub/Codeforces),
+  so the sample is balanced per source: 150 AI + 150 human from each of
+  LeetCode, Codeforces and GitHub (899 after ingest), seed 17. Generators:
+  CodeLlama, GPT, Llama 3.1, NxCode, Qwen 1.5.
+- **Result (production orchestrator, shipped artifact):**
+
+  | Score | All | Codeforces | GitHub | LeetCode |
+  | --- | ---: | ---: | ---: | ---: |
+  | Final (safe blend) | **0.523** | 0.848 | 0.482 | 0.346 |
+  | ML classifier alone | 0.667 | 0.936 | 0.477 | 0.636 |
+  | Heuristic alone | 0.458 | 0.68 | 0.50 | 0.255 |
+
+  At the 0.70 band: 2.2% of AI caught, 2.4% of human flagged. By length:
+  0.436 under 15 lines, 0.718 over 40. Per generator 0.48–0.58.
+- **Reading it:** the classifier transfers (0.664 in-domain, 0.667 here); the
+  heuristic does not, and is *inverted* on short LeetCode-style solutions.
+  The blend leans on the heuristic for short code, so it inherits that.
+  Codeforces human solutions are about twice the length of the AI ones (median
+  54 vs 27 lines), so part of its 0.848 is length.
+- **Fusion cannot fix it within the FP contract.** Replaying the blend offline
+  (`scripts/sweep_ml_blend.py`, self-check ok): `ml_base_weight` 0.5→1.0 moves
+  AUC 0.520→0.539 with student FP@0.70 unchanged at 2.9%. Also loosening the
+  length ramp reaches 0.550 (+0.030, bootstrap 95% CI +0.018 to +0.042) but
+  raises student FP@0.40 from 5.2% to 8.1%. Variants above that break the
+  contract (the best, 0.589, flags 35% of Kaggle students at 0.70). The
+  classifier alone flags **49.7%** of Kaggle students at 0.70, so the safe
+  blend is doing its job. **No fusion change recommended.**
+- **Student FP re-measured the same day** (`measure_human_fp.py`, 174 Kaggle
+  files): 2.9% at ≥0.70, 3.4% at ≥0.50, 5.2% at ≥0.40, against the published
+  2.3% / 3.4% / 9.8%. The in-product artifact was not changed.
+- **Reproduce:** download `dataset_without_comments.parquet` into
+  `data/datasets/codet_m4/raw/`, build the balanced JSONL (python, `split ==
+  test`, 150 per source × label, seed 17, ids `codet_<source>_<label>_<n>`),
+  then
+  `python -m src.backend.engines.ai.build_student_dataset --input <jsonl> --output data/datasets/codet_m4`
+  and
+  `python scripts/measure_ai_accuracy.py --corpus codet_m4 --limit 0 --dump-scores <out>`.
+- **Caveats:** not student code; GitHub samples are often functions pulled
+  from larger files; ±~0.05 per source at n=150.
 
 ## Capability matrix
 
@@ -85,7 +132,7 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
 | 13 | Non-native-English / L2 caveat handling | MISSING (n/a, code) | **LIVE** (documented L2 limitation) | BEST | For code the analogue is "non-expert student style"; not modeled. |
 | 14 | Adversarial / obfuscation resistance testing | **MISSING** | partial | par | No test suite for paraphrasing/refactoring/comment-stripping attacks on our detector. |
 | 15 | Published false-positive-rate targets | **LIVE** (measured + in-product) | **LIVE** (<1% claimed at ≥20% AI at launch; revised rate later withheld; independent estimates 5–20%) | par | Human-code FP measured and surfaced in-product (accuracy page, results banner, dossier) since the 2026-09-21 recalibration: **2.3%** of novice student Python flags at the 0.70 high band (9.8% at 0.40), 0% on community code — `docs/HUMAN_FP_BASELINE.md`. |
-| 16 | External holdout beyond one dataset | **DISABLED** | **LIVE** | par | We rely on AIGCodeSet (single dataset, competitive-programming style). FPR validation UI exists (`/tools/fpr-validation`). |
+| 16 | External holdout beyond one dataset | **PARTIAL** (measured 2026-11-06) | **LIVE** | par | CoDet-M4 Python, source-balanced: final AUC **0.523** (ML alone 0.667, heuristic 0.458) — see "External holdout" above. Accuracy numbers still come from AIGCodeSet; no student-code holdout yet. FPR validation UI exists (`/tools/fpr-validation`). |
 | 17 | Score-as-signal framing (not proof) | **LIVE** | **LIVE** | BEST | Both explicitly tell users not to treat scores as sole basis for action. |
 | 18 | Binoculars / open detection SOTA | MISSING (not installed) | n/a | optional | Not installed in `requirements.txt`. |
 | 19 | Per-generator calibration (GEMINI/LLAMA/CODESTRAL) | **DISABLED** (measured, not surfaced) | n/a | par | Measured: CODESTRAL AUC 0.72 > LLAMA 0.68 > GEMINI 0.60 on grouped holdout. |
@@ -110,7 +157,10 @@ off by default (`ai_ensemble_config.yaml`) · **PARTIAL** = works but limited ·
 4. **Single-dataset validation.** All published accuracy numbers come from
    AIGCodeSet (competitive-programming style). Not representative of the
    product's real input (short assignment submissions). Needs an external
-   student-code holdout.
+   student-code holdout. **2026-11-06:** the first out-of-domain check
+   (CoDet-M4) put the live blend at AUC 0.523, so the AIGCodeSet 0.591 does
+   not transfer. The ML classifier does transfer (0.667); the heuristic
+   path is the weak link on short code.
 5. **No adversarial-resistance suite.** No automated tests for paraphrase /
    comment-stripping / refactor attacks; a credulous humanizer would defeat the
    heuristic path.
