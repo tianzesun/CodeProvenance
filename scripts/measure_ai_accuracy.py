@@ -7,6 +7,7 @@ shipped thresholds, and the operating points that matter for grading.
 Corpora used (all local, no network):
   - ``aigcodeset/data/ai``    : labelled AI-generated Python
   - ``aigcodeset/data/human`` : labelled human Python
+                                (``--corpus`` picks another labelled dataset)
   - ``kaggle_student_code``   : real novice student submissions (human-only,
                                 used as a false-positive check)
 
@@ -111,6 +112,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--datasets", default=str(DEFAULT_DATASETS))
     parser.add_argument(
+        "--corpus",
+        default="aigcodeset",
+        help="Labelled dataset under --datasets with data/ai and data/human "
+        "(the build_student_dataset.py layout). Use a corpus the shipped "
+        "classifier was not trained on for an external holdout.",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=300,
@@ -140,12 +148,9 @@ def main() -> int:
     args = parser.parse_args()
 
     datasets = Path(args.datasets)
-    ai = _subsample(
-        _iter_python(datasets / "aigcodeset" / "data" / "ai"), args.limit, args.seed
-    )
-    human = _subsample(
-        _iter_python(datasets / "aigcodeset" / "data" / "human"), args.limit, args.seed
-    )
+    corpus = datasets / args.corpus / "data"
+    ai = _subsample(_iter_python(corpus / "ai"), args.limit, args.seed)
+    human = _subsample(_iter_python(corpus / "human"), args.limit, args.seed)
     students = _subsample(
         _iter_python(datasets / "kaggle_student_code"),
         args.student_limit or 10**9,
@@ -154,7 +159,7 @@ def main() -> int:
 
     if not ai or not human:
         print(
-            f"ERROR: need both AIGCodeSet classes under {datasets}. "
+            f"ERROR: need both ai/ and human/ classes under {corpus}. "
             "Run data/datasets/download_datasets.sh first.",
             file=sys.stderr,
         )
@@ -225,6 +230,7 @@ def main() -> int:
 
     auc = _roc_auc(ai_scores, human_scores)
     report = {
+        "corpus": args.corpus,
         "ai": _summarize(ai_scores),
         "human": _summarize(human_scores),
         "student_human": _summarize(student_scores) if student_scores else {"count": 0},
