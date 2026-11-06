@@ -20,6 +20,7 @@ from src.backend.api.routes.academic import (
     _request_org_id,
     _term_date_to_response,
     _term_sort_key,
+    _validate_term_name_and_year,
     _validate_term_window,
     create_term,
     delete_term,
@@ -27,11 +28,12 @@ from src.backend.api.routes.academic import (
     list_terms,
     resolve_course_term,
     router,
+    sync_term_on_assignments,
     sync_term_on_courses,
     term_label,
     update_term,
 )
-from src.backend.models.database import Course, Term
+from src.backend.models.database import Assignment, Course, Term
 
 ORG_ID = "org-123"
 
@@ -537,6 +539,52 @@ def test_sync_term_on_courses_mirrors_name_and_year() -> None:
     assert query.updates == [{Course.term: "Winter", Course.year: 2027}]
 
 
+def test_sync_term_on_assignments_rewrites_bare_name_and_full_label() -> None:
+    """Assignments carry either form of the term, so a rename rewrites both."""
+    query = _RecordingQuery(rowcount=2)
+    db = _ModelDb({Assignment: query})
+    term = SimpleNamespace(id="term-1", name="Winter", year=2027)
+
+    assert sync_term_on_assignments(db, term, "Fall", 2026) == 4
+    assert query.updates == [
+        {Assignment.term: "Winter"},
+        {Assignment.term: "Winter 2027"},
+    ]
+
+
+def test_sync_term_on_assignments_skips_forms_that_did_not_change() -> None:
+    """A year-only change leaves the bare name alone and rewrites the label."""
+    query = _RecordingQuery(rowcount=1)
+    db = _ModelDb({Assignment: query})
+    term = SimpleNamespace(id="term-1", name="Fall", year=2027)
+
+    assert sync_term_on_assignments(db, term, "Fall", 2026) == 1
+    assert query.updates == [{Assignment.term: "Fall 2027"}]
+
+    unchanged = _RecordingQuery(rowcount=1)
+    db = _ModelDb({Assignment: unchanged})
+    assert sync_term_on_assignments(db, term, "Fall", 2027) == 0
+    assert unchanged.updates == []
+
+
+def test_term_name_and_year_validation_returns_stripped_name() -> None:
+    """A valid name comes back stripped, ready for the conflict check."""
+    assert _validate_term_name_and_year("  Fall ", 2026) == "Fall"
+
+
+@pytest.mark.parametrize(
+    ("name", "year"),
+    [("   ", 2026), ("x" * 51, 2026), ("Fall", 1899), ("Fall", 2201), ("Fall", 10**10)],
+)
+def test_term_name_and_year_validation_rejects_values_the_columns_cannot_hold(
+    name: str, year: int
+) -> None:
+    """Blank or over-long names and implausible years are a 400, not a 500."""
+    with pytest.raises(HTTPException) as exc:
+        _validate_term_name_and_year(name, year)
+    assert exc.value.status_code == 400
+
+
 def _org_request(org_id: str | None) -> SimpleNamespace:
     """Build a request stub whose session user carries ``org_id``."""
     return SimpleNamespace(state=SimpleNamespace(user={"organization_id": org_id}))
@@ -588,6 +636,7 @@ def test_update_term_route_is_org_scoped_and_cascades() -> None:
     # asserts is that the route still routes *every* lookup through it.
     assert "_get_org_term_or_error" in source
     assert "sync_term_on_courses" in source
+    assert "sync_term_on_assignments" in source
     # A colliding (name, year) must not slip through to the unique constraint.
     assert "status_code=409" in source
 

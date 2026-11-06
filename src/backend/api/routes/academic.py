@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -348,6 +348,30 @@ def _validate_term_window(start_date: date | None, end_date: date | None) -> Non
         )
 
 
+def _validate_term_name_and_year(raw_name: str, year: int) -> str:
+    """Return the stripped term name, rejecting values the columns cannot hold.
+
+    ``terms.name`` is ``VARCHAR(50)`` and ``terms.year`` an ``INTEGER``, so an
+    over-long name or out-of-range year would otherwise fail at the database as
+    an opaque 500.
+
+    Raises:
+        HTTPException: 400 for a blank or over-long name, or an implausible year.
+    """
+    name = raw_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Term name is required")
+    if len(name) > 50:
+        raise HTTPException(
+            status_code=400, detail="Term name must be 50 characters or fewer"
+        )
+    if not 1900 <= year <= 2200:
+        raise HTTPException(
+            status_code=400, detail="Year must be between 1900 and 2200"
+        )
+    return name
+
+
 def find_term_conflict(
     db: Session,
     organization_id: str,
@@ -391,6 +415,39 @@ def sync_term_on_courses(db: Session, term: Term) -> int:
             synchronize_session=False,
         )
     )
+
+
+def sync_term_on_assignments(
+    db: Session, term: Term, old_name: str, old_year: int
+) -> int:
+    """Carry a term rename onto the assignments of the courses linked to it.
+
+    ``assignments.term`` is free text that defaults to the course's bare term
+    name but may also hold the full ``"Fall 2026"`` label, so both forms are
+    rewritten. Like :func:`sync_term_on_courses`, only rows under courses whose
+    ``term_id`` points at this term are touched.
+
+    Returns:
+        The number of assignment rows updated.
+    """
+    linked_course_ids = select(Course.id).where(Course.term_id == term.id)
+    renames = (
+        (old_name, term.name),
+        (term_label(old_name, old_year), term_label(term.name, term.year)),
+    )
+    updated = 0
+    for old, new in renames:
+        if old == new:
+            continue
+        updated += (
+            db.query(Assignment)
+            .filter(
+                Assignment.course_id.in_(linked_course_ids),
+                Assignment.term == old,
+            )
+            .update({Assignment.term: new}, synchronize_session=False)
+        )
+    return updated
 
 
 def _term_to_response(term: Term, course_count: int) -> TermResponse:
@@ -573,9 +630,7 @@ async def create_term(
             status_code=400, detail="No organization associated with user"
         )
 
-    name = term_data.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Term name is required")
+    name = _validate_term_name_and_year(term_data.name, term_data.year)
     _validate_term_window(term_data.start_date, term_data.end_date)
 
     existing = find_term_conflict(db, org_id, term_data.year, name)
@@ -635,9 +690,7 @@ async def update_term(
     """
     term = _get_org_term_or_error(db, request, term_id)
 
-    name = term_data.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Term name is required")
+    name = _validate_term_name_and_year(term_data.name, term_data.year)
     _validate_term_window(term_data.start_date, term_data.end_date)
 
     conflict = find_term_conflict(
@@ -649,6 +702,7 @@ async def update_term(
             detail=f"{term_label(name, term_data.year)} is already registered",
         )
 
+    old_name, old_year = term.name, term.year
     term.name = name.title()
     term.year = term_data.year
     term.start_date = term_data.start_date
@@ -669,6 +723,7 @@ async def update_term(
             detail=f"{term_label(name, term_data.year)} is already registered",
         )
     sync_term_on_courses(db, term)
+    sync_term_on_assignments(db, term, old_name, old_year)
     db.commit()
     db.refresh(term)
 
