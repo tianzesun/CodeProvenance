@@ -5,16 +5,12 @@
 
 set -euo pipefail
 
+# shellcheck source=units.sh
+source "$(dirname "${BASH_SOURCE[0]}")/units.sh"
+
 log() { echo -e "\033[1;32m[restart]\033[0m $*"; }
 
-# Restart only enabled units; covers both the codeprovenance-* and the
-# integritydesk-* unit names.
-UNITS=()
-for u in codeprovenance-backend codeprovenance-celery codeprovenance-embedding codeprovenance-dashboard \
-         integritydesk-backend integritydesk-worker integritydesk-analysis-worker integritydesk-embedding integritydesk-dashboard; do
-    systemctl is-enabled --quiet "$u" 2>/dev/null && UNITS+=("$u")
-done
-
+mapfile -t UNITS < <(enabled_units "${BACKEND_UNITS[@]}" "${DASHBOARD_UNITS[@]}")
 [ "${#UNITS[@]}" -gt 0 ] || { echo "No IntegrityDesk services are enabled." >&2; exit 1; }
 
 log "Restarting: ${UNITS[*]}"

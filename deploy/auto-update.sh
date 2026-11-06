@@ -25,6 +25,9 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 RUN_USER="$(stat -c '%U' "$APP_DIR")"
 RUN_HOME="$(getent passwd "$RUN_USER" | cut -d: -f6)"
 
+# shellcheck source=units.sh
+source "$SCRIPT_DIR/units.sh"
+
 log() { echo "[auto-update] $*"; }
 warn() { echo "[auto-update WARN] $*" >&2; }
 die() { echo "[auto-update ERROR] $*" >&2; exit 1; }
@@ -85,19 +88,12 @@ if changed '^alembic/'; then
     warn "alembic/ changed - review and run migrations manually (alembic upgrade head)."
 fi
 
-# Restart only enabled units; covers both the codeprovenance-* and the
-# integritydesk-* unit names.
 UNITS=()
 if changed '^(src/backend/|src/[^/]*\.py$|requirements\.txt$)'; then
-    for u in codeprovenance-backend codeprovenance-celery codeprovenance-embedding \
-             integritydesk-backend integritydesk-worker integritydesk-analysis-worker integritydesk-embedding; do
-        systemctl is-enabled --quiet "$u" 2>/dev/null && UNITS+=("$u")
-    done
+    mapfile -t -O "${#UNITS[@]}" UNITS < <(enabled_units "${BACKEND_UNITS[@]}")
 fi
 if changed '^src/frontend/'; then
-    for u in codeprovenance-dashboard integritydesk-dashboard; do
-        systemctl is-enabled --quiet "$u" 2>/dev/null && UNITS+=("$u")
-    done
+    mapfile -t -O "${#UNITS[@]}" UNITS < <(enabled_units "${DASHBOARD_UNITS[@]}")
 fi
 
 if [ "${#UNITS[@]}" -gt 0 ]; then
