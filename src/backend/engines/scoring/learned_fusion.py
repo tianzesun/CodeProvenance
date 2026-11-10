@@ -162,7 +162,18 @@ class LearnedFusionScorer:
         """
         if not self._available:
             return 0.0
-        linear = self._intercept
+        return _sigmoid(self._intercept + sum(self.contributions(features).values()))
+
+    def contributions(self, features: dict[str, float]) -> dict[str, float]:
+        """Each feature's share of the model's log-odds: coefficient times value.
+
+        The score is the sigmoid of the intercept plus these terms, so they are
+        exactly what moved it. Negative terms lowered the score. Empty when no
+        model is loaded.
+        """
+        if not self._available:
+            return {}
+        terms: dict[str, float] = {}
         for name, coefficient in zip(self._feature_names, self._coefficients):
             value = features.get(name)
             try:
@@ -173,10 +184,10 @@ class LearnedFusionScorer:
                 number = (
                     0.0  # a NaN feature must not become a NaN (then 1.0) probability
                 )
-            linear += coefficient * max(
+            terms[name] = coefficient * max(
                 0.0, min(1.0, number)
             )  # features are unit-scale scores
-        return _sigmoid(linear)
+        return terms
 
     def try_score(self, features: dict[str, float]) -> float | None:
         """Like :meth:`score`, but ``None`` when no model is loaded.

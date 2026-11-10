@@ -56,6 +56,19 @@ def _aligned_chunks(chunks_a: list[Any], chunks_b: list[Any]) -> list[tuple[Any,
     return pairs
 
 
+def _learned_inputs(features: Any, logic_flow: float) -> dict[str, float]:
+    """The feature vector the learned fusion model scores."""
+    return {
+        "ast": features.ast,
+        "fingerprint": features.fingerprint,
+        "embedding": features.embedding,
+        "ngram": features.ngram,
+        "winnowing": features.winnowing,
+        "logic_flow": logic_flow,
+        "coverage": getattr(features, "coverage", 0.0) or 0.0,
+    }
+
+
 @dataclass
 class ComparisonResult:
     file_a: str
@@ -260,6 +273,18 @@ class BatchDetectionService:
         learned_scorer = getattr(self, "learned_scorer", None)
         return learned_scorer is not None and learned_scorer.available
 
+    def _contributions(
+        self, features: Any, logic_flow: float, fused: Any
+    ) -> dict[str, float]:
+        """What moved the score: the learned model's per-engine terms when it
+        scored the pair, else the rule-based fusion's contributions."""
+        if self._learned_available():
+            terms = self.learned_scorer.contributions(
+                _learned_inputs(features, logic_flow)
+            )
+            return {name: round(value, 6) for name, value in terms.items()}
+        return dict(fused.contributions)
+
     def _primary_score(
         self,
         features: Any,
@@ -300,17 +325,7 @@ class BatchDetectionService:
             return 0.0, None
         learned_scorer = getattr(self, "learned_scorer", None)
         if learned_scorer is not None and learned_scorer.available:
-            learned = learned_scorer.score(
-                {
-                    "ast": features.ast,
-                    "fingerprint": features.fingerprint,
-                    "embedding": features.embedding,
-                    "ngram": features.ngram,
-                    "winnowing": features.winnowing,
-                    "logic_flow": logic_flow,
-                    "coverage": getattr(features, "coverage", 0.0) or 0.0,
-                }
-            )
+            learned = learned_scorer.score(_learned_inputs(features, logic_flow))
             base = (
                 learned if fused.final_score < 0.999 else 1.0
             )  # keep exact-match override
@@ -628,7 +643,7 @@ class BatchDetectionService:
             score=final_score,
             risk_level=_risk_level(final_score),
             features={k: v for k, v in feature_payload.items() if v is not None},
-            contributions=dict(fused.contributions),
+            contributions=self._contributions(features, logic_flow, fused),
             matching_blocks=matching_blocks,
             code_a=ca,
             code_b=cb,
@@ -701,7 +716,7 @@ class BatchDetectionService:
                     "raw_score": raw_score,
                     "logic_flow": logic_flow,
                     "features": features,
-                    "contributions": dict(fused.contributions),
+                    "contributions": self._contributions(features, logic_flow, fused),
                     "matching_blocks": matching_blocks,
                     "code_a": ca,
                     "code_b": cb,
