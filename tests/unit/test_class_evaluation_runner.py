@@ -68,3 +68,30 @@ def test_the_report_renders_a_row_per_class() -> None:
     )
 
     assert "| toy | 4 | 2 |" in text
+
+
+def test_labelled_pair_rows_keep_the_engine_breakdown() -> None:
+    scores = {("a.py", "b.py"): 0.9, ("b.py", "c.py"): 0.2}
+    details = {
+        ("a.py", "b.py"): {
+            "features": {"ast": 0.8},
+            "contributions": {"ast": 0.4},
+            "review_hold": None,
+        }
+    }
+
+    rows = runner.labelled_pair_rows(_class(), scores, details)
+
+    # ("a.py", "c.py") is labelled but unscored; ("b.py", "c.py") is unlabelled.
+    assert rows == [
+        {
+            "class": "toy",
+            "file_a": "a.py",
+            "file_b": "b.py",
+            "label": 1,
+            "score": 0.9,
+            "features": {"ast": 0.8},
+            "contributions": {"ast": 0.4},
+            "review_hold": None,
+        }
+    ]
