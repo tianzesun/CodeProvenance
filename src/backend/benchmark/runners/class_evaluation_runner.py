@@ -16,6 +16,9 @@ file cap) and reports, per threshold:
 * ``hard_negative_rate``: labelled innocent pairs flagged (hard cases),
 
 plus AUC over the labelled pairs and how much class-shared code was removed.
+Every labelled pair is also written with its per-engine features, fusion
+contributions and review hold, so a false flag can be traced to the engines
+that produced it.
 
 Datasets: ``kaggle_student_code`` (one class, labelled pairs in a CSV) and
 ``IR-Plag-Dataset`` (each case is a class; the original against each other
@@ -138,10 +141,34 @@ def evaluate_class(
     return result
 
 
+def labelled_pair_rows(
+    class_set: ClassSet,
+    scores: dict[tuple[str, str], float],
+    details: dict[tuple[str, str], dict],
+) -> list[dict]:
+    """One row per scored labelled pair: label, score and its engine breakdown."""
+    return [
+        {
+            "class": class_set.name,
+            "file_a": pair[0],
+            "file_b": pair[1],
+            "label": label,
+            "score": scores[pair],
+            **details.get(pair, {}),
+        }
+        for pair, label in sorted(class_set.labels.items())
+        if pair in scores
+    ]
+
+
 def score_class(
     class_set: ClassSet, max_workers: int | None = None
-) -> tuple[dict, int]:
-    """Score every pair in a class the way a Plagiarism Checker job does."""
+) -> tuple[dict, int, dict]:
+    """Score every pair in a class the way a Plagiarism Checker job does.
+
+    Returns the pair scores, the class-shared lines removed, and each labelled
+    pair's features, contributions and review hold.
+    """
     from src.backend.application.services.batch_detection_service import (
         MIN_EVIDENCE_TOKENS,
         BatchDetectionService,
@@ -152,7 +179,17 @@ def score_class(
     )
     results = service.compare_all_pairs(class_set.files, max_workers=max_workers)
     common = getattr(service.starter_remover, "inferred_common_lines", 0) or 0
-    return {_pair(r.file_a, r.file_b): float(r.score) for r in results}, common
+    scores = {_pair(r.file_a, r.file_b): float(r.score) for r in results}
+    details = {
+        _pair(r.file_a, r.file_b): {
+            "features": r.features,
+            "contributions": r.contributions,
+            "review_hold": r.review_hold,
+        }
+        for r in results
+        if _pair(r.file_a, r.file_b) in class_set.labels
+    }
+    return scores, common, details
 
 
 def run_class_evaluation(
@@ -164,10 +201,12 @@ def run_class_evaluation(
     """Run the evaluation and write JSON + Markdown reports; returns the report."""
     started = time.time()
     classes: list[ClassResult] = []
+    pair_rows: list[dict] = []
     for name in datasets:
         for class_set in LOADERS[name](root):
-            scores, common = score_class(class_set, max_workers=max_workers)
+            scores, common, details = score_class(class_set, max_workers=max_workers)
             classes.append(evaluate_class(class_set, scores, common))
+            pair_rows.extend(labelled_pair_rows(class_set, scores, details))
             logger.info("Scored %s (%d pairs)", class_set.name, len(scores))
     report = {
         "run_id": f"CLASS_EVAL_{datetime.now():%Y%m%d_%H%M%S}",
@@ -177,6 +216,8 @@ def run_class_evaluation(
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / f"{report['run_id']}.json").write_text(json.dumps(report, indent=2))
     (output_dir / f"{report['run_id']}.md").write_text(render_markdown(report))
+    with open(output_dir / f"{report['run_id']}_labelled_pairs.jsonl", "w") as handle:
+        handle.writelines(json.dumps(row) + "\n" for row in pair_rows)
     return report
 
 
