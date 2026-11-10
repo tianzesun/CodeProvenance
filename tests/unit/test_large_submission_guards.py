@@ -196,9 +196,11 @@ class TestChunkComparisonCap:
         def fake_chunk_pair(chunk_a, chunk_b, *args):
             """Record one chunk comparison and return a minimal result."""
             calls.append(len(chunk_a))
+            index = len(calls)
             return {
-                "score": 0.1,
+                "score": 0.9 if index == 3 else 0.1,
                 "ngram": 0.1,
+                "contributions": {"winnowing": float(index)},
                 "matching_blocks": [],
                 "weight": 1.0,
             }
@@ -209,6 +211,17 @@ class TestChunkComparisonCap:
             "src.backend.infrastructure.code_chunker.chunk_large_file",
             lambda code, language, filename: _Chunking(chunk_count),
         )
+        monkeypatch.setattr(
+            "src.backend.infrastructure.code_chunker.should_chunk",
+            lambda code, threshold=10000: True,
+        )
+
+        result = service._compare_chunked_pair("a", "b", "a.py", "b.py", None)
+
+        assert len(calls) == MAX_CHUNK_COMPARISONS_PER_PAIR
+        # The pair takes the strongest chunk's score, and that chunk explains it.
+        assert result.score == 0.9
+        assert result.contributions == {"winnowing": 3.0}
 
 
 class TestCFGBuilderGrowth:

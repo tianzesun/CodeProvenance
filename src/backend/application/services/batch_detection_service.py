@@ -922,7 +922,8 @@ class BatchDetectionService:
                 chunk_comparisons.append(result)
 
         # Aggregate results: take maximum similarity (worst case for plagiarism)
-        max_similarity = max(r["score"] for r in chunk_comparisons)
+        strongest = max(chunk_comparisons, key=lambda r: r["score"])
+        max_similarity = strongest["score"]
 
         # Weight by chunk size for feature aggregation
         total_weight = sum(r.get("weight", 1.0) for r in chunk_comparisons)
@@ -971,7 +972,8 @@ class BatchDetectionService:
                 "chunk_count_a": chunking_a.chunk_count if chunking_a else 1,
                 "chunk_count_b": chunking_b.chunk_count if chunking_b else 1,
             },
-            contributions={},
+            # The score is the strongest chunk's, so its terms are what explain it.
+            contributions=dict(strongest.get("contributions", {})),
             matching_blocks=all_matching_blocks[:100],  # Limit to top 100 blocks
             code_a=code_a,
             code_b=code_b,
@@ -1015,6 +1017,7 @@ class BatchDetectionService:
             "ngram": features.ngram,
             "winnowing": features.winnowing,
             "logic_flow": logic_flow,
+            "contributions": self._contributions(features, logic_flow, fused),
             "matching_blocks": matching_blocks,
             "weight": len(chunk_a.split("\n")),  # Weight by chunk size
         }
