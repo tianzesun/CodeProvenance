@@ -4714,6 +4714,7 @@ def _recover_job_from_report(
                 "features": comparison.get("features")
                 or comparison.get("engine_scores")
                 or {},
+                "contributions": comparison.get("contributions") or {},
                 "matching_blocks": comparison.get("matching_blocks") or [],
                 "fusion_debug": comparison.get("fusion_debug") or {},
                 "code_a": comparison.get("code_a")
@@ -9626,6 +9627,9 @@ async def _run_analysis_in_workspace(
                 "similarity_score": r.score,
                 "risk_level": r.risk_level,
                 "engine_scores": r.features,
+                # Jobs run by the analysis worker are read back from this file,
+                # so the score's per-engine terms must survive the round trip.
+                "contributions": dict(r.contributions),
                 "matching_blocks": r.matching_blocks or [],
                 "fusion_debug": _build_fusion_debug(r, threshold),
                 "ai_detection": pair_ai_details.get(_pair_key(r.file_a, r.file_b), {}),

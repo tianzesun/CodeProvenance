@@ -267,6 +267,11 @@ const ENGINE_META = {
     what: 'Order and shape of the control flow graph.',
     why: 'Both files follow the same path through branches and loops.',
   },
+  coverage: {
+    name: 'Matched-line coverage',
+    what: 'Share of lines that sit inside matched blocks, in whichever file is more covered.',
+    why: 'Most of one file can be found in the other.',
+  },
 };
 
 function normalizeKeyword(key) {
