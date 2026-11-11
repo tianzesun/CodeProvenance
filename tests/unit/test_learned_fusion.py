@@ -1,6 +1,7 @@
 """Unit tests for the learned fusion scoring model."""
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -89,6 +90,30 @@ class TestLearnedFusionScorer:
         high = scorer.score({"ast": 0.9, "fingerprint": 0.9, "coverage": 0.9})
         assert high > low
         assert 0.0 <= high <= 1.0
+
+    def test_contributions_are_the_terms_of_the_score(self, tmp_path):
+        """Each term is coefficient x clamped value, and they sum to the logit."""
+        path = _write_artifact(
+            tmp_path / "model.json",
+            coefficients=[-2.0, 0.0, 0.0, 0.0, 4.0, 0.0, 1.0],
+            intercept=-1.0,
+        )
+        scorer = LearnedFusionScorer(artifact_path=path)
+        features = {"ast": 0.5, "winnowing": 0.75, "coverage": 1.5}
+
+        terms = scorer.contributions(features)
+
+        assert terms["ast"] == pytest.approx(-1.0)
+        assert terms["winnowing"] == pytest.approx(3.0)
+        assert terms["coverage"] == pytest.approx(1.0)  # clamped to 1.0
+        assert terms["embedding"] == pytest.approx(0.0)
+        logit = -1.0 + sum(terms.values())
+        assert scorer.score(features) == pytest.approx(1 / (1 + math.exp(-logit)))
+
+    def test_contributions_empty_without_a_model(self, tmp_path):
+        """No artifact, no terms: callers fall back to rule-based fusion."""
+        scorer = LearnedFusionScorer(artifact_path=tmp_path / "missing.json")
+        assert scorer.contributions({"winnowing": 1.0}) == {}
 
     def test_missing_features_treated_as_zero(self, tmp_path):
         """Missing features degrade to 0.0 like an explicit zero."""

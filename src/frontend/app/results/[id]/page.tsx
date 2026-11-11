@@ -296,24 +296,34 @@ function engineMetaFor(key) {
 function buildEvidenceSignals(result) {
   // Derive professor-readable evidence from the real backend feature keys
   // plus the fusion_debug breakdown (which engine fired past the threshold).
-  // Returns an ordered list of { key, name, what, why, score, fired, source }.
+  // Returns an ordered list of { key, name, what, why, score, contribution, fired }.
+  // When the result carries per-engine contributions (the learned model's terms),
+  // a signal is contributing only if it raised the score, and signals are ordered
+  // by how much: a high engine score the model gives no weight is not evidence.
   const features = result?.features || {};
   const debug = result?.fusion_debug || {};
   const threshold = typeof debug.threshold === 'number' ? debug.threshold : 0.5;
   const firedSet = new Set((debug.engines_fired || []).map(normalizeKeyword));
+  const contributions = result?.contributions || {};
+  const hasContributions = Object.keys(contributions).length > 0;
+  const contributionFor = (key) => (key in contributions ? Number(contributions[key]) || 0 : null);
 
   const signals = [];
   for (const [key, raw] of Object.entries(features)) {
     const score = Number(raw) || 0;
     if (score <= 0) continue;
     const meta = engineMetaFor(key);
-    const fired = debug.engines_fired ? firedSet.has(normalizeKeyword(key)) : score >= threshold;
+    const contribution = contributionFor(key);
+    const fired = hasContributions
+      ? contribution !== null && contribution > 0
+      : debug.engines_fired ? firedSet.has(normalizeKeyword(key)) : score >= threshold;
     signals.push({
       key,
       name: meta.name,
       what: meta.what,
       why: meta.why,
       score,
+      contribution,
       fired,
     });
   }
@@ -326,18 +336,20 @@ function buildEvidenceSignals(result) {
     const score = Number(entry.score) || 0;
     if (score <= 0) continue;
     const meta = engineMetaFor(key);
+    const contribution = contributionFor(key);
     signals.push({
       key,
       name: meta.name,
       what: meta.what,
       why: meta.why,
       score,
-      fired: Boolean(entry.fired),
+      contribution,
+      fired: hasContributions ? contribution !== null && contribution > 0 : Boolean(entry.fired),
     });
   }
 
   return signals
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => (hasContributions ? (b.contribution ?? -Infinity) - (a.contribution ?? -Infinity) : 0) || b.score - a.score)
     .slice(0, 6);
 }
 
@@ -681,7 +693,9 @@ export default function ResultsPage() {
     } else if (activeResult.review_hold === 'shared_code') {
       parts.push('The score is held at 50% because most of the overlap is starter or boilerplate code, which is expected to match.');
     }
-    const strongest = [...buildEvidenceSignals(activeResult)].sort((a, b) => b.score - a.score).slice(0, 2);
+    const strongest = Object.keys(activeResult.contributions || {}).length > 0
+      ? evidenceSignals.slice(0, 2)
+      : [...buildEvidenceSignals(activeResult)].sort((a, b) => b.score - a.score).slice(0, 2);
     if (strongest.length > 0) {
       parts.push(`Strongest evidence: ${strongest.map((signal) => `${signal.name.toLowerCase()} (${Math.round(signal.score * 100)}%)`).join(' and ')}.`);
     }
@@ -1381,8 +1395,10 @@ export default function ResultsPage() {
                     <div>
                       <div className="text-sm font-semibold text-slate-950 dark:text-white">How this score was reached</div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">
-                        The signals below are the independent checks that support this verdict. A check is
-                        marked as contributing when its score crosses the alert threshold.
+                        The signals below are the independent checks that support this verdict.{' '}
+                        {Object.keys(activeResult?.contributions || {}).length > 0
+                          ? 'They are the checks that raised this score, strongest first; checks the scoring model gives no weight are left out.'
+                          : 'A check is marked as contributing when its score crosses the alert threshold.'}
                       </div>
                     </div>
                   </div>

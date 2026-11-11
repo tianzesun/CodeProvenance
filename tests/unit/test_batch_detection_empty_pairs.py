@@ -20,6 +20,9 @@ class _ConfidentLearnedScorer:
     def score(self, features: dict[str, Any]) -> float:
         return 0.97
 
+    def contributions(self, features: dict[str, Any]) -> dict[str, float]:
+        return {}
+
 
 @pytest.fixture(scope="module")
 def service() -> BatchDetectionService:
