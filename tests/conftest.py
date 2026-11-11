@@ -34,6 +34,20 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     loop.close()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_analysis_broker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run uploads in-process, never through a Redis that happens to be up.
+
+    Dispatch probes the broker's port, so on a machine running Redis every
+    test upload was enqueued as a real Celery task, and any local analysis
+    worker then ran it. Tests that exercise Celery mode patch
+    ``broker_available`` and ``delay`` themselves, which overrides this.
+    """
+    from src.backend.workers import dispatch
+
+    monkeypatch.setattr(dispatch, "broker_available", lambda timeout=1.0: False)
+
+
 @pytest.fixture
 def client() -> Generator[TestClient, None, None]:
     """Create a test client for the FastAPI app."""
