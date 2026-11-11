@@ -95,3 +95,29 @@ def test_labelled_pair_rows_keep_the_engine_breakdown() -> None:
             "review_hold": None,
         }
     ]
+
+
+def test_conplag_groups_submissions_by_problem(tmp_path) -> None:
+    versions = tmp_path / "conplag" / "versions"
+    for sub1, sub2 in (("aaa", "bbb"), ("aaa", "ccc"), ("ddd", "eee"), ("fff", "ggg")):
+        pair_dir = versions / "version_1" / f"{sub1}_{sub2}"
+        pair_dir.mkdir(parents=True)
+        (pair_dir / f"{sub1}.java").write_text(f"class {sub1.upper()} {{}}\n")
+        if sub2 != "ggg":  # one pair is missing a file and is skipped
+            (pair_dir / f"{sub2}.java").write_text(f"class {sub2.upper()} {{}}\n")
+    (versions / "labels.csv").write_text(
+        "sub1,sub2,problem,verdict\n"
+        "aaa,bbb,p1,1\n"
+        "aaa,ccc,p1,0\n"
+        "ddd,eee,p2,0\n"
+        "fff,ggg,p2,1\n"
+    )
+
+    p1, p2 = list(runner.load_conplag(tmp_path))
+
+    assert p1.name == "conplag/p1"
+    assert sorted(p1.files) == ["aaa.java", "bbb.java", "ccc.java"]
+    assert p1.labels == {("aaa.java", "bbb.java"): 1, ("aaa.java", "ccc.java"): 0}
+    assert p1.files["aaa.java"] == "class AAA {}\n"
+    assert sorted(p2.files) == ["ddd.java", "eee.java"]
+    assert p2.labels == {("ddd.java", "eee.java"): 0}
