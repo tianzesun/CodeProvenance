@@ -26,6 +26,6 @@
 - Test changes: run relevant unit tests first with `pytest tests/unit/`, then integration tests when appropriate
 - Use existing logging patterns from src/infrastructure/
 - Avoid introducing async patterns unless necessary
-- Always use the virtual environment: `source /home/tsun/Documents/Projects/CodeProvenance/venv/bin/activate`
+- Always use the virtual environment: `source venv/bin/activate` (from the repository root)
 - Never hardcode secrets; use .env via python-dotenv (see .env.example for reference)
 - Use conventional commits: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
