@@ -25,7 +25,10 @@ that produced it.
 Datasets: ``kaggle_student_code`` (one class, labelled pairs in a CSV),
 ``IR-Plag-Dataset`` (each case is a class; the original against each other
 file is labelled) and ``conplag`` (each contest problem is a class; its
-annotated pairs are labelled). Output goes to ``reports/class_evaluation/``.
+annotated pairs are labelled). An institution's labelled holdout
+(``--student-holdout``, the layout in ``docs/STUDENT_DATA_REQUEST_PACK.md``)
+is read the same way, one class per assignment folder. Output goes to
+``reports/class_evaluation/``.
 """
 
 from __future__ import annotations
@@ -136,6 +139,45 @@ def load_conplag(root: Path = DATASET_ROOT) -> Iterator[ClassSet]:
         yield ClassSet(f"conplag/{problem}", files[problem], labels[problem])
 
 
+def load_student_holdout(holdout: Path) -> Iterator[ClassSet]:
+    """Each assignment folder of a labelled student holdout is a class.
+
+    The layout is the one ``docs/STUDENT_DATA_REQUEST_PACK.md`` asks for:
+    ``<holdout>/<assignment>/`` with ``submissions/``, ``pairs.csv``
+    (``file_a,file_b,label,notes``; label ``1`` plagiarism, ``0`` clean) and an
+    optional ``problem.txt`` naming the assignment. Every submission is scored,
+    not only the labelled ones. Rows naming a missing file or another label are
+    skipped with a warning.
+    """
+    for folder in sorted(p for p in holdout.iterdir() if p.is_dir()):
+        submissions = folder / "submissions"
+        pairs_csv = folder / "pairs.csv"
+        if not (submissions.is_dir() and pairs_csv.exists()):
+            logger.warning("Skipping %s: needs submissions/ and pairs.csv", folder)
+            continue
+        files = {
+            f.name: f.read_text(errors="ignore")
+            for f in sorted(submissions.iterdir())
+            if f.is_file()
+        }
+        labels: dict[tuple[str, str], int] = {}
+        with open(pairs_csv, newline="") as handle:
+            for row in csv.DictReader(handle):
+                file_a, file_b = row["file_a"].strip(), row["file_b"].strip()
+                label = row["label"].strip()
+                if (
+                    file_a not in files
+                    or file_b not in files
+                    or label not in ("0", "1")
+                ):
+                    logger.warning("Skipping %s row %s,%s", pairs_csv, file_a, file_b)
+                    continue
+                labels[_pair(file_a, file_b)] = int(label)
+        problem_txt = folder / "problem.txt"
+        problem = problem_txt.read_text().strip() if problem_txt.exists() else ""
+        yield ClassSet(f"student/{problem or folder.name}", files, labels)
+
+
 LOADERS = {
     "kaggle_student_code": load_kaggle,
     "IR-Plag-Dataset": load_irplag,
@@ -239,17 +281,20 @@ def run_class_evaluation(
     output_dir: Path = Path("reports/class_evaluation"),
     root: Path = DATASET_ROOT,
     max_workers: int | None = None,
+    student_holdout: Path | None = None,
 ) -> dict:
     """Run the evaluation and write JSON + Markdown reports; returns the report."""
     started = time.time()
     classes: list[ClassResult] = []
     pair_rows: list[dict] = []
-    for name in datasets:
-        for class_set in LOADERS[name](root):
-            scores, common, details = score_class(class_set, max_workers=max_workers)
-            classes.append(evaluate_class(class_set, scores, common))
-            pair_rows.extend(labelled_pair_rows(class_set, scores, details))
-            logger.info("Scored %s (%d pairs)", class_set.name, len(scores))
+    class_sets = [class_set for name in datasets for class_set in LOADERS[name](root)]
+    if student_holdout is not None:
+        class_sets.extend(load_student_holdout(student_holdout))
+    for class_set in class_sets:
+        scores, common, details = score_class(class_set, max_workers=max_workers)
+        classes.append(evaluate_class(class_set, scores, common))
+        pair_rows.extend(labelled_pair_rows(class_set, scores, details))
+        logger.info("Scored %s (%d pairs)", class_set.name, len(scores))
     report = {
         "run_id": f"CLASS_EVAL_{datetime.now():%Y%m%d_%H%M%S}",
         "runtime_seconds": round(time.time() - started, 1),
@@ -304,9 +349,15 @@ if __name__ == "__main__":  # pragma: no cover - operator command
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--datasets", nargs="+", choices=sorted(LOADERS))
     parser.add_argument(
-        "--datasets", nargs="+", choices=sorted(LOADERS), default=sorted(LOADERS)
+        "--student-holdout",
+        type=Path,
+        help="labelled holdout folder (docs/STUDENT_DATA_REQUEST_PACK.md, Part 2)",
     )
     args = parser.parse_args()
+    # With only a holdout given, score just the holdout; otherwise every corpus.
+    datasets = args.datasets or ([] if args.student_holdout else sorted(LOADERS))
     logging.basicConfig(level=logging.INFO)
-    print(render_markdown(run_class_evaluation(tuple(args.datasets))))
+    report = run_class_evaluation(tuple(datasets), student_holdout=args.student_holdout)
+    print(render_markdown(report))

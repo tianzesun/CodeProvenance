@@ -72,10 +72,11 @@ Python (Kaggle corpus), student Java (IR-Plag originals), and community Python
 (PoolC). The student holdout extends this from "human code" to "_your_ students'
 code, with known AI cases".
 
-The plagiarism checker's **false-positive** rate was likewise measured on the
-same Kaggle corpus (174 submissions, 14,706 pairs) — see
-`reports/human_fp/plagiarism_fp_report_20260825.md`: **0.96% FPR at the production
-threshold (0.95)**, well within the 4–5% safe target.
+The plagiarism checker was measured on ConPlag (911 human-annotated contest
+pairs, November 2026; `docs/BENCHMARK_WORK.md` § ConPlag): **2.3%** of innocent
+pairs reach the high band (0.65) and **64%** of copies reach the review band
+(0.35), on par with JPlag and Dolos. That is contest code, not coursework, so
+these numbers still need confirming on your students' code.
 
 ---
 
@@ -83,11 +84,13 @@ threshold (0.95)**, well within the 4–5% safe target.
 
 ### What we need
 
-The plagiarism engine's **false-positive** rate is now measured and safe (~1% at
-threshold 0.95 on real student Python). But **recall** — does it actually catch
-real plagiarism at that conservative threshold? — has only been validated on
-synthetic/competitive-programming data (IR-Plag, ConPlag). We need a **labelled
-holdout of real student plagiarism pairs** to close this gap.
+Professors see a pair when it reaches the **review** band (0.35) and are told it
+is a priority at the **high** band (0.65). On contest data (ConPlag) few innocent
+pairs reach the high band, but about a third of confirmed copies never reach
+review: copies rewritten inside the student's own scaffolding look like
+independent work to every engine, and to JPlag and Dolos. Whether that holds for
+coursework has only been tested on synthetic and contest data (IR-Plag, ConPlag,
+Kaggle). We need a **labelled holdout from real classes** to close this gap.
 
 Unlike the AI-detection holdout (which labels _single submissions_), the
 plagiarism holdout labels **pairs** of submissions with a known ground truth.
@@ -97,10 +100,16 @@ plagiarism holdout labels **pairs** of submissions with a known ground truth.
 | Pair type                                                         | Count (pilot) | Count (target) | Ground-truth requirement                                                                       |
 | ----------------------------------------------------------------- | ------------: | -------------: | ---------------------------------------------------------------------------------------------- |
 | Known **plagiarism** (copy, rename, restructure, paraphrase)      |           ~50 |           ≥300 | Instructor-verified copy/paste, admitted collaboration, or a confirmed paraphrase case         |
+| Known **disguised** plagiarism (a subset of the row above)        |          ~10 |            ≥50 | As above, where the copied logic was rewritten or wrapped in the student's own helpers/scaffolding |
 | Known **clean** (different students, same assignment, no copying) |           ~50 |           ≥300 | Viva-confirmed independent work, or assignments with no shared code beyond starter scaffolding |
 
 **No borderline cases.** "Maybe they helped each other" is not a label —
 ambiguity pollutes the recall measurement.
+
+**Send whole classes.** Include *every* submission to each assignment, not only
+the labelled ones. Unlabelled submissions are never used as labels; they let us
+measure what a professor sees: how much of a real class lands in each band.
+Mark disguised cases with `disguised` in the `notes` column.
 
 ### How to package it
 
@@ -128,25 +137,27 @@ The `pairs.csv` columns:
 The `problem.txt` id is the grouping key for leakage-free grouped holdout —
 the same problem never appears in both training and test folds.
 
-Alternatively, a single CSV at the root with columns
-`file_a,file_b,label,problem_id,notes` and a `submissions/` directory alongside it.
+Please use the folder layout above: the evaluation command reads it directly.
+(A single CSV with `file_a,file_b,label,problem_id,notes` is not read by the
+command; we would convert it by hand.)
 
 ### What happens with the data
 
-1. Ingested locally (no cloud upload):
-   `python -m src.backend.benchmark.runners.learned_fusion_training_runner --student-holdout plagiarism_labelled/`
-2. Runs the production `BatchDetectionService` (with the learned-fusion model) on
-   the labeled pairs in a grouped-holdout cross-validation, producing a recall /
-   precision report.
-3. Decision gate: if recall is acceptable at the production threshold (0.95), the
-   band stays as-is; if recall is too low, the threshold/bands are reviewed on
-   _data_, not guesswork — per `CURRENT_FOCUS.md`.
+1. Scored locally (no cloud upload), one class per assignment folder:
+   `python -m src.backend.benchmark.runners.class_evaluation_runner --student-holdout plagiarism_labelled/`
+2. Every pair in each class goes through the production scoring path, exactly as
+   a professor's check would. The report gives, at the review (0.35) and high
+   (0.65) bands: the share of the class shown, copies caught, and clean pairs
+   flagged, plus each labelled pair's score and the engines behind it. None of
+   this data is in the model's training set, so it is a true holdout.
+3. Decision gate: if copies are caught and clean pairs stay out of the high band,
+   the bands stay as they are; if not, they are reviewed on _data_, not
+   guesswork — per `CURRENT_FOCUS.md`.
 4. The dataset stays on the institution's machine; nothing is re-shared.
 
 ### Why this matters now
 
-The FP baseline proved false-accusation risk is controlled. But the 0.95
-threshold is highly conservative — 97.5% of clean pairs score below 0.50. We do
-not yet know how many **real plagiarism cases** score below 0.95 and are
-therefore missed. That is the recall ceiling — and it is the single biggest
-unmeasured accuracy risk in the plagiarism checker.
+On contest data, false-accusation risk is low, but about a third of confirmed
+copies never reach the review band. We do not yet know how many **real
+coursework copies** are missed the same way, especially disguised ones. That is
+the single biggest unmeasured accuracy risk in the plagiarism checker.
