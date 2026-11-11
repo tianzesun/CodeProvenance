@@ -1,4 +1,4 @@
-# Current Focus (updated 26 October 2026)
+# Current Focus (updated 11 November 2026)
 
 **CURRENT MODE: Detection Honesty & Product Hardening** (post-case-loop phase)
 
@@ -55,6 +55,19 @@ as its UI.
   the heuristic does not (0.458). Offline fusion sweeps gain ≤0.03 within the
   student-FP contract, so the blend was left unchanged. Details in
   `docs/AI_DETECTOR_VS_TURNITIN.md` § External holdout.
+- **Similarity explanations are the score's own terms** (PR #25, 2026-11-10):
+  each pair's `contributions` are the learned model's coefficient × feature, so
+  the results page leads with the engines that raised the score (mostly
+  winnowing), not embedding, which the model barely weights. Chunked pairs use
+  the strongest chunk's terms.
+- **Similarity accuracy measured on trusted labels** (2026-11-11, ConPlag class
+  evaluation; `docs/BENCHMARK_WORK.md` § ConPlag): on par with JPlag/Dolos
+  (AUC 0.813 vs 0.821/0.838); 2.3% of innocent pairs reach the high band and
+  64% of copies reach the review band. Misses are copies rewritten inside a
+  personal template, which no engine (or tool) separates from innocent work;
+  containment scoring was tried and rejected. **Do not chase false flags from
+  the Kaggle labels**: some of its "innocent" pairs are copies (§ Class-level
+  evaluation).
 
 ## Current Active Areas
 
@@ -64,7 +77,12 @@ as its UI.
    (pilot scope: 60–100 ground-truth samples). **This is a user-side data
    acquisition task, not a coding task.**
 2. **Threshold/banding review** — deliberately GATED on the real holdout; do not
-   move bands on the unlabelled corpus alone.
+   move bands on the unlabelled corpus alone. ConPlag shows lowering bands is not
+   a cheap recall win (76 of 251 copies score under 0.3).
+3. **Disguised similarity copies (optional research)** — catching copies rewritten
+   inside a template would need per-function or template-stripped comparison.
+   Multi-day, uncertain payoff, since JPlag and Dolos stop at the same place; only
+   start it on request.
 
 ## Must-Read Files
 

@@ -54,9 +54,11 @@ Update this file as the benchmark focus evolves.
 
 ## Class-level evaluation (October 2026)
 
-`python -m src.backend.benchmark.runners.class_evaluation_runner` scores **every pair in each
-class** through the production path (class-shared code removed, small files held at review) and
-writes `reports/class_evaluation/`. Use it, not the pair-by-pair engine evaluation, for "how much
+`python -m src.backend.benchmark.runners.class_evaluation_runner [--datasets ...]` scores
+**every pair in each class** through the production path (class-shared code removed, small files
+held at review) and writes `reports/class_evaluation/`: a Markdown table at the default review
+policy's bands (review ≥0.35, high ≥0.65), a JSON report that also keeps 0.75/0.95, and every
+labelled pair with its engine features and score contributions (`*_labelled_pairs.jsonl`). Use it, not the pair-by-pair engine evaluation, for "how much
 of a class does a professor see flagged". The engine evaluation's negatives are often hand-picked
 look-alikes, so its false-positive rate is not a class flag rate.
 
@@ -82,3 +84,35 @@ Findings:
   training, but tuning on these labels would teach the product to pass renamed copies. Measure
   false flags on ConPlag (`--datasets conplag`, annotated verdicts) instead. Both corpora are in
   the learned-fusion training set, so their labelled-pair metrics are in-sample.
+
+## ConPlag class evaluation (November 2026)
+
+Run `CLASS_EVAL_20261111_103016` on the GPU host: 21 contest problems as classes, 911
+human-annotated pairs (251 copies, 660 innocent same-problem pairs). Unlike Kaggle, these labels
+can be trusted, so this is the false-flag and recall measurement to use.
+
+| Cut-off | Copies caught | Innocent pairs flagged |
+| --- | ---: | ---: |
+| 0.35 (default review band) | 64.1% | 17.3% |
+| 0.45 (introductory review band) | 57.8% | 8.5% |
+| 0.65 (default high band) | 44.6% | 2.3% |
+| 0.75 (earlier class-eval cut-off) | 40.6% | 0.8% |
+
+Findings:
+- **False flags are low; missed copies are the limit.** At the high band 2.3% of innocent pairs
+  are flagged, and 0.1–4.8% of each class's pairs reach 0.75, under 2% in 17 of 21 problems
+  (problem 14 is the outlier, 13.3%, with a 23-line shared template). The innocent pairs are hand-picked same-problem solutions, so
+  17% at the review band overstates what a real class would see there.
+- **Parity with established tools.** On the same 911 pairs (`reports/engine_evaluation/
+  ENGINE_EVAL_conplag_20261022_130311.md`): Dolos AUC 0.838, JPlag 0.821, IntegrityDesk 0.813.
+- **Caught copies are near-verbatim; missed ones look innocent to every engine.** Copies scoring
+  ≥0.75 have every lexical engine at 1.0. For copies under 0.4, no engine separates them from
+  innocent pairs (AUC 0.36–0.60). Sampled misses rewrite the copied algorithm inside each
+  author's own contest template (one pair: 259 vs 39 lines).
+- **Rejected: containment** (share of the smaller file found in the larger, identifier-normalised
+  8-gram tokens). AUC missed-vs-innocent 0.557 vs 0.568 for plain overlap: innocent pairs share
+  templates too, and the copied cores are rewritten at token level.
+- **Lowering the threshold is not a fix**: 76 of 251 copies score under 0.3. Band moves stay gated
+  on the student holdout.
+- ConPlag and Kaggle are both in the learned-fusion training set, so their labelled-pair metrics
+  are in-sample; the per-class share of pairs flagged is mostly over unlabelled pairs.

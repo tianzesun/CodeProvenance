@@ -68,6 +68,18 @@ def test_the_report_renders_a_row_per_class() -> None:
     )
 
     assert "| toy | 4 | 2 |" in text
+    assert f"Recall @{runner.REVIEW_MIN:.2f}" in text
+    assert f"Recall @{runner.HIGH_MIN:.2f}" in text
+
+
+def test_reports_at_the_review_policy_bands_and_earlier_cut_offs() -> None:
+    from src.backend.engines.scoring.review_policy import BAND_THRESHOLDS
+
+    default = BAND_THRESHOLDS["default"]
+    result = runner.evaluate_class(_class(), {("a.py", "b.py"): 0.9})
+
+    for cut_off in (default["review_min"], default["high_min"], 0.75, 0.95):
+        assert f"{cut_off:.2f}" in result.at_threshold
 
 
 def test_labelled_pair_rows_keep_the_engine_breakdown() -> None:
