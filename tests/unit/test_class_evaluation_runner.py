@@ -133,3 +133,25 @@ def test_conplag_groups_submissions_by_problem(tmp_path) -> None:
     assert p1.files["aaa.java"] == "class AAA {}\n"
     assert sorted(p2.files) == ["ddd.java", "eee.java"]
     assert p2.labels == {("ddd.java", "eee.java"): 0}
+
+
+def test_student_holdout_scores_each_assignment_as_a_class(tmp_path) -> None:
+    hw1 = tmp_path / "hw1"
+    (hw1 / "submissions").mkdir(parents=True)
+    for name in ("s1.py", "s2.py", "s3.py", "s4.py"):
+        (hw1 / "submissions" / name).write_text(f"# {name}\n")
+    (hw1 / "problem.txt").write_text("hw1-data-structures\n")
+    (hw1 / "pairs.csv").write_text(
+        "file_a,file_b,label,notes\n"
+        "s2.py,s1.py,1,viva-confirmed\n"
+        "s1.py,s3.py,0,independent\n"
+        "s1.py,missing.py,1,typo\n"
+        "s3.py,s4.py,maybe,borderline\n"
+    )
+    (tmp_path / "notes").mkdir()  # an assignment folder without the layout
+
+    (hw1_set,) = list(runner.load_student_holdout(tmp_path))
+
+    assert hw1_set.name == "student/hw1-data-structures"
+    assert sorted(hw1_set.files) == ["s1.py", "s2.py", "s3.py", "s4.py"]
+    assert hw1_set.labels == {("s1.py", "s2.py"): 1, ("s1.py", "s3.py"): 0}
