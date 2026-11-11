@@ -4731,7 +4731,12 @@ def _recover_job_from_report(
         .replace("IntegrityDesk Report -", "")
         .strip()
     )
-    assignment_name = title or f"Recovered Assignment {job_id}"
+    assignment_name = (
+        str(report_data.get("assignment_name") or "").strip()
+        or title
+        or f"Recovered Assignment {job_id}"
+    )
+    course_name = str(report_data.get("course_name") or "").strip() or assignment_name
     file_names = {
         name
         for result in results
@@ -4742,7 +4747,7 @@ def _recover_job_from_report(
     recovered_job = _normalize_job(
         {
             "id": job_id,
-            "course_name": assignment_name,
+            "course_name": course_name,
             "assignment_name": assignment_name,
             "threshold": threshold,
             "status": "completed",
@@ -9643,6 +9648,10 @@ async def _run_analysis_in_workspace(
         ]
         report_payload = {
             "report_id": job_id,
+            # Recovery names the job from these when only report.json survives
+            # (guest jobs, and any job the API reads back from the worker).
+            "course_name": course_name,
+            "assignment_name": assignment_name,
             "summary": report_summary,
             # The report is the artefact an integrity committee reads, so it
             # carries the same cohort context as the job payload: a similarity
