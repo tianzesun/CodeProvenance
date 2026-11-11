@@ -326,6 +326,8 @@ class ReportGenerator:
                 "version": "1.0",
                 "report_id": results.get("report_id", "N/A"),
             },
+            "course_name": results.get("course_name", ""),
+            "assignment_name": results.get("assignment_name", ""),
             "summary": results.get("summary", {}),
             "similarity_context": results.get("similarity_context", {}),
             "pairs": results.get("pairs", []),
