@@ -74,3 +74,11 @@ Findings:
   separates them, so IR-Plag should not drive threshold or calibration decisions.
 - Class-relative re-scoring (subtracting the class median) was considered and rejected: it does
   not help where look-alikes outscore copies, and Kaggle does not need it.
+- **The Kaggle "look-alikes flagged" column is not a false-flag rate** (audited 10 Nov 2026 from
+  the per-pair dump). Some innocent-labelled pairs are copies: `submission144`/`145` are
+  identical, `37`/`39` differ only in identifier names. Flagged look-alikes share more identical
+  lines than caught copies (median 44% vs 32%), and most are same-task variants no rule can call
+  either way. Only 3 of 193 negatives are objectively wrong, so relabelling would not change
+  training, but tuning on these labels would teach the product to pass renamed copies. Measure
+  false flags on ConPlag (`--datasets conplag`, annotated verdicts) instead. Both corpora are in
+  the learned-fusion training set, so their labelled-pair metrics are in-sample.
