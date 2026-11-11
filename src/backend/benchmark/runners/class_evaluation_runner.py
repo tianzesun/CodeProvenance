@@ -20,9 +20,10 @@ Every labelled pair is also written with its per-engine features, fusion
 contributions and review hold, so a false flag can be traced to the engines
 that produced it.
 
-Datasets: ``kaggle_student_code`` (one class, labelled pairs in a CSV) and
+Datasets: ``kaggle_student_code`` (one class, labelled pairs in a CSV),
 ``IR-Plag-Dataset`` (each case is a class; the original against each other
-file is labelled). Output goes to ``reports/class_evaluation/``.
+file is labelled) and ``conplag`` (each contest problem is a class; its
+annotated pairs are labelled). Output goes to ``reports/class_evaluation/``.
 """
 
 from __future__ import annotations
@@ -98,7 +99,40 @@ def load_irplag(root: Path = DATASET_ROOT) -> Iterator[ClassSet]:
         yield ClassSet(f"IR-Plag/{case.name}", files, labels)
 
 
-LOADERS = {"kaggle_student_code": load_kaggle, "IR-Plag-Dataset": load_irplag}
+def load_conplag(root: Path = DATASET_ROOT) -> Iterator[ClassSet]:
+    """Each contest problem is a class: every submission to it, paired.
+
+    Reads the layout the learned-fusion training uses: ``versions/labels.csv``
+    (``sub1,sub2,problem,verdict``) and ``versions/version_1/<sub1>_<sub2>/``
+    holding ``<sub>.java`` for both submissions.
+    """
+    versions = root / "conplag" / "versions"
+    files: dict[str, dict[str, str]] = {}
+    labels: dict[str, dict[tuple[str, str], int]] = {}
+    with open(versions / "labels.csv", newline="") as handle:
+        for row in csv.DictReader(handle):
+            sub1, sub2 = row["sub1"].strip(), row["sub2"].strip()
+            problem = row["problem"].strip()
+            pair_dir = versions / "version_1" / f"{sub1}_{sub2}"
+            paths = {sub: pair_dir / f"{sub}.java" for sub in (sub1, sub2)}
+            if not all(path.exists() for path in paths.values()):
+                logger.warning("Skipping ConPlag pair %s_%s: missing code", sub1, sub2)
+                continue
+            class_files = files.setdefault(problem, {})
+            for sub, path in paths.items():
+                class_files.setdefault(f"{sub}.java", path.read_text(errors="ignore"))
+            labels.setdefault(problem, {})[_pair(f"{sub1}.java", f"{sub2}.java")] = int(
+                row["verdict"]
+            )
+    for problem in sorted(files):
+        yield ClassSet(f"conplag/{problem}", files[problem], labels[problem])
+
+
+LOADERS = {
+    "kaggle_student_code": load_kaggle,
+    "IR-Plag-Dataset": load_irplag,
+    "conplag": load_conplag,
+}
 
 
 def _auc(labelled: list[tuple[int, float]]) -> float | None:
@@ -193,7 +227,7 @@ def score_class(
 
 
 def run_class_evaluation(
-    datasets: tuple[str, ...] = ("kaggle_student_code", "IR-Plag-Dataset"),
+    datasets: tuple[str, ...] = ("kaggle_student_code", "IR-Plag-Dataset", "conplag"),
     output_dir: Path = Path("reports/class_evaluation"),
     root: Path = DATASET_ROOT,
     max_workers: int | None = None,
@@ -250,5 +284,12 @@ def render_markdown(report: dict) -> str:
 
 
 if __name__ == "__main__":  # pragma: no cover - operator command
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--datasets", nargs="+", choices=sorted(LOADERS), default=sorted(LOADERS)
+    )
+    args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
-    print(render_markdown(run_class_evaluation()))
+    print(render_markdown(run_class_evaluation(tuple(args.datasets))))
