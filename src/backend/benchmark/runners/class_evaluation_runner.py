@@ -9,7 +9,9 @@ flagged.
 
 This runner scores *every* pair in each class through the production path
 (``BatchDetectionService.compare_all_pairs`` with class inference and the small
-file cap) and reports, per threshold:
+file cap) and reports, at the default review policy's review and high bands
+(what a professor sees) and at the fixed 0.75/0.95 cut-offs of earlier
+baselines:
 
 * ``flag_rate``: share of all pairs in the class that would be flagged,
 * ``recall``: labelled copies caught,
@@ -37,9 +39,15 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from src.backend.engines.scoring.review_policy import BAND_THRESHOLDS
+
 logger = logging.getLogger(__name__)
 
-THRESHOLDS = (0.5, 0.75, 0.85, 0.95)
+#: Where the default review policy puts a pair in front of a professor.
+REVIEW_MIN = BAND_THRESHOLDS["default"]["review_min"]
+HIGH_MIN = BAND_THRESHOLDS["default"]["high_min"]
+#: The bands, plus the fixed cut-offs earlier baselines were reported at.
+THRESHOLDS = tuple(sorted({REVIEW_MIN, HIGH_MIN, 0.5, 0.75, 0.85, 0.95}))
 DATASET_ROOT = Path(__file__).resolve().parents[4] / "data" / "datasets"
 
 
@@ -256,29 +264,38 @@ def run_class_evaluation(
 
 
 def render_markdown(report: dict) -> str:
+    """Render the per-class table at the default review and high bands."""
+    review, high = f"{REVIEW_MIN:.2f}", f"{HIGH_MIN:.2f}"
     lines = [
         "# Class-level evaluation",
         "",
         f"- Run: `{report['run_id']}` ({report['runtime_seconds']}s)",
         "- Every pair in each class scored through the production path.",
         (
-            "- Flag rate: share of all pairs flagged. Recall: labelled copies caught. "
-            "Hard negatives: labelled innocent pairs flagged (often hand-picked look-alikes)."
+            f"- Bands are the default review policy's: review from {review}, "
+            f"high from {high}. The JSON also has 0.75 and 0.95 for earlier baselines."
+        ),
+        (
+            "- Shown: share of all pairs in the band. Recall: labelled copies in the band. "
+            "Hard neg.: labelled innocent pairs in the band (often hand-picked look-alikes)."
         ),
         "",
         (
-            "| Class | Subs | Pairs | AUC | Flag rate @0.75 | Recall @0.75 | Hard neg. @0.75 "
-            "| Flag rate @0.95 | Recall @0.95 | Shared lines removed |"
+            f"| Class | Subs | Pairs | AUC | Shown @{review} | Recall @{review} "
+            f"| Hard neg. @{review} | Shown @{high} | Recall @{high} | Hard neg. @{high} "
+            "| Shared lines removed |"
         ),
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for c in report["classes"]:
-        mid, high = c["at_threshold"]["0.75"], c["at_threshold"]["0.95"]
+        low, top = c["at_threshold"][review], c["at_threshold"][high]
         auc = "n/a" if c["auc"] is None else f"{c['auc']:.4f}"
         lines.append(
             f"| {c['name']} | {c['submissions']} | {c['pairs']} | {auc} "
-            f"| {mid['flag_rate']:.1%} | {mid['recall']:.1%} | {mid['hard_negative_rate']:.1%} "
-            f"| {high['flag_rate']:.1%} | {high['recall']:.1%} | {c['common_code_lines']} |"
+            f"| {low['flag_rate']:.1%} | {low['recall']:.1%} "
+            f"| {low['hard_negative_rate']:.1%} "
+            f"| {top['flag_rate']:.1%} | {top['recall']:.1%} "
+            f"| {top['hard_negative_rate']:.1%} | {c['common_code_lines']} |"
         )
     return "\n".join(lines) + "\n"
 
