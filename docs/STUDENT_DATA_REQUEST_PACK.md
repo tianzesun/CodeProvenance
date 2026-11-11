@@ -22,10 +22,16 @@ pollute the one number we care about: the false-positive rate on real students.
 
 ## Why we need it
 
-The ML classifier scores AUC 0.66 on public benchmarks but was trained on
-competitive-programming-style code. Before it can be enabled by default we must
-measure — on real classroom code — how often it wrongly flags a human student.
-That FP rate is the product's trust number; we will not enable on assumption.
+The AI detector blends an ML classifier with explainable signals, capping the
+classifier's influence on short code. On its own the classifier flags about half
+of real novice students' code at the high band, so it only ships blended; the
+blend flags 2–3% (`docs/HUMAN_FP_BASELINE.md`). But every accuracy number so far
+comes from public or contest code, and on unseen public code the blend ranks
+close to chance (AUC 0.523, `docs/AI_DETECTOR_VS_TURNITIN.md` § External
+holdout). Only real classroom code with known authorship can tell us how often
+it wrongly flags a student, or whether the classifier can be trusted with more
+weight. That false-positive rate is the product's trust number; we will not
+change the detector on assumption.
 
 ## How to package it (folder layout — preferred)
 
@@ -59,9 +65,10 @@ labelled/
 1. Ingested locally with one command (no cloud upload):
    `python -m src.backend.engines.ai.build_student_dataset --input labelled/ --output data/datasets/student`
 2. The grouped-holdout benchmark runs and produces a report JSON.
-3. Decision gate: the ML classifier is enabled **only** if FP on the human class
-   is acceptable at a usable threshold; before/after numbers go on the accuracy
-   page (`/api/ai-detect/accuracy`) for anyone to inspect.
+3. Decision gate: the classifier's weight in the blend, and the bands, change
+   **only** if false positives on the human class stay acceptable at a usable
+   threshold; before/after numbers go on the accuracy page
+   (`/api/ai-detect/accuracy`) for anyone to inspect.
 4. The dataset stays on the institution's machine; nothing is re-shared.
 
 ## Baseline already measured (no new data needed)
