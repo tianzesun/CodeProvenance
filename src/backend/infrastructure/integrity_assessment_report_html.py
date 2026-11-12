@@ -174,7 +174,7 @@ tr:hover td{{background:#f8fafc}}
 
 
 def _build_confidential_banner() -> str:
-    return '<div class="conf-banner">Confidential — Academic Integrity Committee Only — FERPA Protected</div>'
+    return '<div class="conf-banner">Confidential — for the academic integrity process only</div>'
 
 
 def _build_cover_page(report: IntegrityAssessmentReport, risk: dict[str, Any]) -> str:
@@ -184,7 +184,7 @@ def _build_cover_page(report: IntegrityAssessmentReport, risk: dict[str, Any]) -
     <div>
       <div class="cover-brand">{escape(report.institution_name)}</div>
       <div class="cover-title">Integrity Assessment Report</div>
-      <div class="cover-subtitle">Multi-engine code forensics analysis with statistical confidence</div>
+      <div class="cover-subtitle">Similarity evidence for human review: a reason to look closely, not proof</div>
     </div>
     <div style="text-align:right">
       <div style="font-size:10px;opacity:.7">Report ID</div>
@@ -205,8 +205,8 @@ def _build_cover_page(report: IntegrityAssessmentReport, risk: dict[str, Any]) -
       <div class="cover-meta-value">{escape(report.course_name or 'N/A')}</div>
     </div>
     <div class="cover-meta-item">
-      <div class="cover-meta-label">Student</div>
-      <div class="cover-meta-value">{escape(report.student_display or 'Anonymous')}</div>
+      <div class="cover-meta-label">{'Student' if report.student_display else 'Scope'}</div>
+      <div class="cover-meta-value">{escape(report.student_display) if report.student_display else f'Whole class ({len(report.files)} submissions)'}</div>
     </div>
     <div class="cover-meta-item">
       <div class="cover-meta-label">Generated</div>
@@ -234,7 +234,7 @@ def _build_cover_page(report: IntegrityAssessmentReport, risk: dict[str, Any]) -
 
 
 def _build_executive_summary(report: IntegrityAssessmentReport, risk: dict[str, Any]) -> str:
-    ci = report.confidence_interval
+    cc = report.class_context
     return f"""
 <div class="section">
   <div class="section-num">Section 2</div>
@@ -247,9 +247,9 @@ def _build_executive_summary(report: IntegrityAssessmentReport, risk: dict[str, 
       <div class="card-sub">Highest pair score</div>
     </div>
     <div class="card">
-      <div class="card-label">Confidence Interval</div>
-      <div class="card-value">{ci.lower:.1%} – {ci.upper:.1%}</div>
-      <div class="card-sub">95% CI ({escape(ci.method)})</div>
+      <div class="card-label">Class Median</div>
+      <div class="card-value">{cc.median_similarity:.1%}</div>
+      <div class="card-sub">Typical pair score in this class</div>
     </div>
     <div class="card">
       <div class="card-label">Pairs Analyzed</div>
@@ -275,15 +275,11 @@ def _build_executive_summary(report: IntegrityAssessmentReport, risk: dict[str, 
 
 
 def _build_similarity_analysis(report: IntegrityAssessmentReport) -> str:
+    # ``score`` is each engine's share of what raised the top pair's score.
     engine_bars = ""
     for es in report.engine_scores:
         pct = es.score * 100
-        bar_color = (
-            "#dc2626" if es.score >= 0.7 else
-            "#ea580c" if es.score >= 0.5 else
-            "#d97706" if es.score >= 0.3 else
-            "#2563eb"
-        )
+        bar_color = "#2563eb"
         engine_bars += f"""
     <div class="engine-bar">
       <div class="engine-bar-header">
@@ -310,7 +306,6 @@ def _build_similarity_analysis(report: IntegrityAssessmentReport) -> str:
         <td style="font-weight:600">{escape(pr.file_a)}</td>
         <td style="font-weight:600">{escape(pr.file_b)}</td>
         <td style="color:{score_color};font-weight:700">{score_pct}</td>
-        <td>{pr.confidence:.1%}</td>
         <td>{len(pr.matched_blocks)}</td>
       </tr>"""
 
@@ -320,8 +315,9 @@ def _build_similarity_analysis(report: IntegrityAssessmentReport) -> str:
   <div class="section-title">Similarity Analysis</div>
 
   <div style="margin-bottom:16px">
-    <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:8px">Engine Score Breakdown</div>
-    {engine_bars if engine_bars else '<div style="color:#94a3b8;font-size:12px">No per-engine scores available</div>'}
+    <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:4px">What raised the highest pair's score</div>
+    <div style="font-size:11px;color:#64748b;margin-bottom:8px">Each engine's share of what raised {escape(report.pair_results[0].file_a + ' ↔ ' + report.pair_results[0].file_b) if report.pair_results else 'the score'}, from the scoring model.</div>
+    {engine_bars if engine_bars else '<div style="color:#94a3b8;font-size:12px">Not recorded for this check (run before score explanations were stored).</div>'}
   </div>
 
   <div style="font-size:12px;font-weight:700;color:#334155;margin:16px 0 8px">Pairwise Comparison Results</div>
@@ -331,12 +327,11 @@ def _build_similarity_analysis(report: IntegrityAssessmentReport) -> str:
         <th>File A</th>
         <th>File B</th>
         <th>Similarity</th>
-        <th>Confidence</th>
         <th>Matched Blocks</th>
       </tr>
     </thead>
     <tbody>
-      {pair_rows if pair_rows else '<tr><td colspan="5" style="color:#94a3b8;text-align:center;padding:20px">No pairwise results available</td></tr>'}
+      {pair_rows if pair_rows else '<tr><td colspan="4" style="color:#94a3b8;text-align:center;padding:20px">No pairwise results available</td></tr>'}
     </tbody>
   </table>
 </div>"""
@@ -361,24 +356,29 @@ def _build_plagiarism_classification(
     return f"""
 <div class="section">
   <div class="section-num">Section 4</div>
-  <div class="section-title">Plagiarism Type Classification</div>
+  <div class="section-title">Matched Code Types</div>
+
+  <div style="font-size:11px;color:#64748b;margin-bottom:10px">
+    Types come from the code matcher, block by block. They describe how matched code differs,
+    not whether anyone copied: independent solutions to the same task can also match.
+  </div>
 
   <div style="padding:14px 16px;background:#f8fafc;border-radius:8px;margin-bottom:14px">
-    <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:600;margin-bottom:4px">Primary Classification</div>
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:600;margin-bottom:4px">Highest-scoring pair</div>
     <div style="font-size:16px;font-weight:800;color:#0f172a">
-      {escape(report.primary_plagiarism_type)} — {escape(current_info.get('name', 'Unknown'))}
+      {escape(report.primary_plagiarism_type + ' — ' + current_info.get('name', '')) if report.primary_plagiarism_type else 'No typed matched blocks'}
     </div>
     <div style="font-size:12px;color:#64748b;margin-top:4px">
-      {escape(current_info.get('description', ''))}
+      {escape(current_info.get('description', '')) if report.primary_plagiarism_type else 'The code matcher found no typed blocks for this pair; read its score explanation and code.'}
     </div>
   </div>
 
   <table>
     <thead>
-      <tr><th>Type</th><th>Name</th><th>Description</th><th>Ratio</th></tr>
+      <tr><th>Type</th><th>Name</th><th>Description</th><th>Share of matched blocks</th></tr>
     </thead>
     <tbody>
-      {breakdown_rows if breakdown_rows else '<tr><td colspan="4" style="color:#94a3b8;text-align:center">No classification data</td></tr>'}
+      {breakdown_rows if breakdown_rows else '<tr><td colspan="4" style="color:#94a3b8;text-align:center">No typed matched blocks in this check</td></tr>'}
     </tbody>
   </table>
 </div>"""
@@ -531,7 +531,7 @@ def _build_source_provenance(report: IntegrityAssessmentReport) -> str:
 
 def _build_class_context(report: IntegrityAssessmentReport) -> str:
     cc = report.class_context
-    if cc.total_students == 0 and cc.total_pairs == 0:
+    if cc.total_pairs == 0:
         return ""
 
     return f"""
@@ -541,20 +541,21 @@ def _build_class_context(report: IntegrityAssessmentReport) -> str:
 
   <div class="card-grid card-grid-4">
     <div class="card">
-      <div class="card-label">Total Students</div>
-      <div class="card-value">{cc.total_students}</div>
+      <div class="card-label">Submissions</div>
+      <div class="card-value">{cc.total_submissions}</div>
     </div>
     <div class="card">
-      <div class="card-label">Average Similarity</div>
+      <div class="card-label">Median Pair Score</div>
+      <div class="card-value">{cc.median_similarity:.1%}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Average Pair Score</div>
       <div class="card-value">{cc.average_similarity:.1%}</div>
     </div>
     <div class="card">
-      <div class="card-label">Percentile Rank</div>
-      <div class="card-value">{cc.percentile_rank:.0f}th</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Flagged Ratio</div>
+      <div class="card-label">Pairs in High Band</div>
       <div class="card-value">{cc.flagged_ratio:.1%}</div>
+      <div class="card-sub">Score of 65% or more</div>
     </div>
   </div>
 </div>"""
@@ -572,10 +573,11 @@ def _build_evidence_chain(report: IntegrityAssessmentReport) -> str:
     return f"""
 <div class="section">
   <div class="section-num">Section 9</div>
-  <div class="section-title">Evidence Chain & Reproducibility</div>
+  <div class="section-title">Evidence Chain</div>
 
   <div style="margin-bottom:12px">
     <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:600;margin-bottom:4px">Report Integrity Hash (SHA-256)</div>
+    <div style="font-size:11px;color:#64748b;margin-bottom:4px">Of this report's results and generation time: it shows this copy was not altered, and changes if the report is generated again.</div>
     <div class="hash">{escape(report.evidence_chain_hash)}</div>
   </div>
 
@@ -635,16 +637,16 @@ def _build_policy_reference(report: IntegrityAssessmentReport) -> str:
     return f"""
 <div class="section">
   <div class="section-num">Section 11</div>
-  <div class="section-title">Policy Reference & Sanctions Matrix</div>
+  <div class="section-title">Policy Reference</div>
 
-  <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:6px">Applicable Policies</div>
   <ul style="padding-left:18px;margin-bottom:16px">{policy_items}</ul>
-
+  {f'''
   <div style="font-size:12px;font-weight:700;color:#334155;margin-bottom:6px">Sanctions Matrix</div>
   <table>
     <thead><tr><th>Offense</th><th>Potential Range</th><th>Notes</th></tr></thead>
     <tbody>{sanctions_rows}</tbody>
   </table>
+  ''' if sanctions_rows else ''}
 </div>"""
 
 

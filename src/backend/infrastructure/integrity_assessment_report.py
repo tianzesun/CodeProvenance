@@ -1,13 +1,13 @@
 """Integrity Assessment Report — Unified Dean/Chair-grade report.
 
-Generates a single, authoritative PDF report that surpasses Turnitin by providing:
-- Multi-engine code forensics (AST, token, semantic, winnowing, ngram, embedding)
-- Plagiarism type classification (T1-T5)
+Generates one class-level evidence report (HTML/PDF) for human review:
+- The highest-scoring pair and what raised its score (the learned model's terms)
+- The matched code blocks, with the clone type the code matcher assigned each one
 - AI-generated code detection with 8-signal analysis
-- Historical fingerprinting and cross-assignment patterns
-- Statistical confidence intervals (95% bootstrap)
-- Due-process-ready evidence chain with student response template
-- Digital signature and reproducibility hash
+- Class context: median pair score and the share of pairs in the high band
+- An evidence chain (SHA-256 of the report's results) and a student response template
+
+It covers a whole check, not one student, and it never decides misconduct.
 
 Usage:
     from src.backend.infrastructure.integrity_assessment_report import (
@@ -75,9 +75,8 @@ RISK_LEVELS = {
         "border": "#fed7aa",
         "icon": "▲▲",
         "description": (
-            "Strong structural and lexical overlap observed. Evidence from "
-            "multiple independent analysis engines converges on similar conclusions. "
-            "Detailed examination is warranted."
+            "Strong overlap between at least one pair of submissions. Read the "
+            "matched code and what raised the score before drawing any conclusion."
         ),
     },
     "critical": {
@@ -87,12 +86,16 @@ RISK_LEVELS = {
         "border": "#fecaca",
         "icon": "▲▲▲",
         "description": (
-            "Evidence from multiple independent engines indicates substantial "
-            "overlap. This report provides documentation sufficient for committee "
-            "review under the preponderance-of-evidence standard."
+            "Very strong overlap, often near-verbatim, between at least one pair of "
+            "submissions. A score is a reason to look closely, not proof: starter "
+            "code and common solutions can also score high."
         ),
     },
 }
+
+#: The code matcher's per-block clone types (``CloneType`` values) and the T-label
+#: each one is reported under. A pair's type comes only from its matched blocks.
+BLOCK_TYPE_TO_T = {"Type 1": "T1", "Type 2": "T2", "Type 3": "T3", "Type 4": "T4"}
 
 PLAGIARISM_TYPES = {
     "T1": {
@@ -122,16 +125,19 @@ PLAGIARISM_TYPES = {
     },
 }
 
+#: The results page's names for the signals the learned model scores.
 ENGINE_LABELS = {
-    "ast": "AST Structure",
-    "token": "Token Sequence",
-    "semantic": "Semantic Meaning",
-    "winnowing": "Winnowing Fingerprint",
-    "ngram": "N-gram Overlap",
-    "embedding": "Embedding Similarity",
-    "gst": "Greedy String Tiling",
-    "static_rules": "Static Analysis Rules",
+    "winnowing": "Chunk hash match",
+    "coverage": "Matched-line coverage",
+    "ngram": "Token n-gram match",
+    "logic_flow": "Logic flow",
+    "embedding": "Semantic meaning",
+    "fingerprint": "Token fingerprint",
+    "ast": "Structure (AST)",
 }
+
+#: Band edges, matching the product's risk levels (``_risk_level``) and review bands.
+CRITICAL_MIN, HIGH_MIN, MODERATE_MIN, LOW_MIN = 0.85, 0.65, 0.35, 0.15
 
 
 # ============================================================
@@ -225,18 +231,19 @@ class PairResult:
     file_a: str
     file_b: str
     overall_score: float
-    confidence: float
     engine_scores: list[EngineScore] = field(default_factory=list)
     matched_blocks: list[MatchedBlock] = field(default_factory=list)
-    plagiarism_type: str = "T5"
-    plagiarism_type_confidence: float = 0.0
+    #: The learned model's per-engine terms for this pair's score (empty for old jobs).
+    contributions: dict[str, float] = field(default_factory=dict)
+    #: From the matched blocks only; empty when the pair has none.
+    plagiarism_type: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "file_a": self.file_a,
             "file_b": self.file_b,
             "overall_score": round(self.overall_score, 4),
-            "confidence": round(self.confidence, 4),
+            "contributions": {k: round(v, 4) for k, v in self.contributions.items()},
             "engine_scores": [e.to_dict() for e in self.engine_scores],
             "matched_blocks": [m.to_dict() for m in self.matched_blocks],
             "plagiarism_type": self.plagiarism_type,
@@ -245,42 +252,23 @@ class PairResult:
 
 
 @dataclass
-class ConfidenceInterval:
-    """Statistical confidence interval."""
-
-    lower: float = 0.0
-    upper: float = 0.0
-    method: str = "bootstrap_95"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "lower": round(self.lower, 4),
-            "upper": round(self.upper, 4),
-            "method": self.method,
-        }
-
-
-@dataclass
 class ClassContext:
     """Class-level context for the submission."""
 
-    total_students: int = 0
+    total_submissions: int = 0
     total_pairs: int = 0
     average_similarity: float = 0.0
     median_similarity: float = 0.0
-    percentile_rank: float = 0.0
+    #: Share of pairs at or above the high band.
     flagged_ratio: float = 0.0
-    distribution: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "total_students": self.total_students,
+            "total_submissions": self.total_submissions,
             "total_pairs": self.total_pairs,
             "average_similarity": round(self.average_similarity, 4),
             "median_similarity": round(self.median_similarity, 4),
-            "percentile_rank": round(self.percentile_rank, 1),
             "flagged_ratio": round(self.flagged_ratio, 4),
-            "distribution": self.distribution,
         }
 
 
@@ -361,12 +349,12 @@ class IntegrityAssessmentReport:
     recommended_action: str = ""
 
     # ── Section 3: Similarity Analysis ──
+    #: What raised the highest-scoring pair's score.
     engine_scores: list[EngineScore] = field(default_factory=list)
-    confidence_interval: ConfidenceInterval = field(default_factory=ConfidenceInterval)
     pair_results: list[PairResult] = field(default_factory=list)
 
-    # ── Section 4: Plagiarism Type Classification ──
-    primary_plagiarism_type: str = "T5"
+    # ── Section 4: Matched code types (from the matched blocks only) ──
+    primary_plagiarism_type: str = ""
     plagiarism_type_breakdown: dict[str, float] = field(default_factory=dict)
 
     # ── Section 5: AI Detection ──
@@ -400,7 +388,7 @@ class IntegrityAssessmentReport:
     full_code_comparison: bool = True
 
     # Metadata
-    report_version: str = "2.0"
+    report_version: str = "2.1"
     institution_name: str = "IntegrityDesk"
 
     def __post_init__(self):
@@ -448,7 +436,6 @@ class IntegrityAssessmentReport:
             "executive_summary": self.executive_summary,
             "recommended_action": self.recommended_action,
             "engine_scores": [e.to_dict() for e in self.engine_scores],
-            "confidence_interval": self.confidence_interval.to_dict(),
             "pair_results": [p.to_dict() for p in self.pair_results],
             "primary_plagiarism_type": self.primary_plagiarism_type,
             "plagiarism_type_breakdown": self.plagiarism_type_breakdown,
@@ -468,6 +455,38 @@ class IntegrityAssessmentReport:
             "policy_references": self.policy_references,
             "sanctions_matrix": self.sanctions_matrix,
         }
+
+
+def _line_range(block: dict[str, Any], side: str) -> tuple[int, int]:
+    """A block's 1-based line range on one side, from explicit fields or "s-e"."""
+    start = block.get(f"line_start_{side}", block.get(f"start_{side}"))
+    end = block.get(f"line_end_{side}", block.get(f"end_{side}"))
+    if start is None:
+        text = str(block.get(f"lines_{side}", ""))
+        if "-" in text and text.replace("-", "").isdigit():
+            start, end = text.split("-", 1)
+    try:
+        return int(start or 0), int(end or start or 0)
+    except (TypeError, ValueError):
+        return 0, 0
+
+
+def _slice(lines: list[str], start: int, end: int) -> str:
+    """Lines ``start``..``end`` (1-based, inclusive), or "" when out of range."""
+    if start < 1 or not lines:
+        return ""
+    return "\n".join(lines[start - 1 : end])
+
+
+def _pair_type(blocks: list[MatchedBlock]) -> str:
+    """The pair's most common block clone type as a T-label; "" with no typed blocks."""
+    counts: dict[str, int] = {}
+    for block in blocks:
+        t = BLOCK_TYPE_TO_T.get(block.clone_type)
+        if t:
+            counts[t] = counts.get(t, 0) + 1
+    # Ties go to the lower (more literal) type, which the blocks then show.
+    return min(counts, key=lambda t: (-counts[t], t)) if counts else ""
 
 
 # ============================================================
@@ -501,8 +520,10 @@ class IntegrityAssessmentReportGenerator:
             assignment_name=job_data.get("assignment_name", ""),
             course_name=job_data.get("course_name", ""),
             instructor_name=job_data.get("instructor_name", ""),
-            student_id=job_data.get("student_id", job_data.get("owner_user_id", "")),
-            student_display=job_data.get("student_name", job_data.get("owner_user_email", "")),
+            # A check covers a whole class, so no student is named here. The owner
+            # fields are the uploader (the instructor), never the student.
+            student_id=job_data.get("student_id", ""),
+            student_display=job_data.get("student_name", ""),
             analysis_timestamp=job_data.get("created_at", ""),
         )
 
@@ -515,8 +536,8 @@ class IntegrityAssessmentReportGenerator:
         # ── Pair results (from results list) ──
         report.pair_results = self._build_pair_results(results_raw)
 
-        # ── Engine scores (aggregate features across all results) ──
-        report.engine_scores = self._aggregate_engine_scores(results_raw)
+        # ── What raised the highest-scoring pair's score ──
+        report.engine_scores = self._top_pair_engine_scores(report.pair_results)
 
         # ── Overall similarity ──
         if report.pair_results:
@@ -528,15 +549,12 @@ class IntegrityAssessmentReportGenerator:
                 summary_raw.get("average_similarity", 0)
             )
 
-        # ── Confidence interval ──
-        report.confidence_interval = self._compute_ci(report.pair_results)
-
         # ── Risk level ──
         report.risk_level = self._classify_risk(report.overall_similarity)
 
         # ── Plagiarism type ──
-        report.primary_plagiarism_type = self._classify_plagiarism_type(
-            report.pair_results, report.overall_similarity
+        report.primary_plagiarism_type = (
+            report.pair_results[0].plagiarism_type if report.pair_results else ""
         )
         report.plagiarism_type_breakdown = self._plagiarism_type_breakdown(
             report.pair_results
@@ -544,7 +562,7 @@ class IntegrityAssessmentReportGenerator:
 
         # ── File analysis (AI detection) ──
         report.files = self._build_file_analysis(
-            submissions_raw, ai_detection_raw
+            submissions_raw, ai_detection_raw, report.pair_results
         )
         report.ai_detection_summary = self._build_ai_summary(
             report.files, ai_detection_raw
@@ -555,7 +573,7 @@ class IntegrityAssessmentReportGenerator:
         report.recommended_action = self._build_recommendation(report)
 
         # ── Class context (from summary) ──
-        report.class_context = self._build_class_context(summary_raw)
+        report.class_context = self._build_class_context(report)
 
         # ── Sources (from submissions + results) ──
         report.sources = self._build_sources(submissions_raw, results_raw)
@@ -574,31 +592,22 @@ class IntegrityAssessmentReportGenerator:
 
     # ── Engine scores (aggregate from all results' features) ──
 
-    def _aggregate_engine_scores(
-        self, results: list[dict[str, Any]]
-    ) -> list[EngineScore]:
-        """Aggregate per-engine average scores across all result pairs."""
-        from collections import defaultdict
+    def _top_pair_engine_scores(self, pairs: list[PairResult]) -> list[EngineScore]:
+        """The engines that raised the highest-scoring pair's score, strongest first.
 
-        engine_totals: dict[str, list[float]] = defaultdict(list)
-        for r in results:
-            features = r.get("features", {})
-            for engine, value in features.items():
-                if isinstance(value, (int, float)):
-                    engine_totals[engine].append(float(value))
-
-        scores = []
-        for engine, values in engine_totals.items():
-            avg = sum(values) / len(values) if values else 0.0
-            scores.append(
-                EngineScore(
-                    engine=engine,
-                    score=avg,
-                    confidence=min(1.0, avg * 1.1),
-                    label=ENGINE_LABELS.get(engine, engine),
-                )
-            )
-        return sorted(scores, key=lambda s: s.score, reverse=True)
+        Uses the learned model's terms; ``score`` is each engine's share of what
+        raised the score. Older jobs carry no terms, so they report nothing here
+        rather than an average of every feature (which used to include the
+        fused and raw scores themselves, presented as engines).
+        """
+        if not pairs or not pairs[0].contributions:
+            return []
+        raised = {k: v for k, v in pairs[0].contributions.items() if v > 0}
+        total = sum(raised.values())
+        return [
+            EngineScore(engine=k, score=v / total, label=ENGINE_LABELS.get(k, k))
+            for k, v in sorted(raised.items(), key=lambda item: -item[1])
+        ]
 
     # ── Pair results ──
 
@@ -612,8 +621,14 @@ class IntegrityAssessmentReportGenerator:
                 file_a=pair.get("file_a", ""),
                 file_b=pair.get("file_b", ""),
                 overall_score=float(pair.get("score", 0)),
-                confidence=0.8,  # default confidence
+                contributions={
+                    k: float(v)
+                    for k, v in (pair.get("contributions") or {}).items()
+                    if isinstance(v, (int, float))
+                },
             )
+            code_a = str(pair.get("code_a") or "").splitlines()
+            code_b = str(pair.get("code_b") or "").splitlines()
             # Engine sub-scores from features dict
             features = pair.get("features", {})
             for engine, value in features.items():
@@ -624,100 +639,77 @@ class IntegrityAssessmentReportGenerator:
             # Matched blocks
             for block in pair.get("matching_blocks", []):
                 if isinstance(block, dict):
+                    # Pipeline blocks give "lines_a" as a "start-end" range, not code:
+                    # the appendix used to print "1-8" where the code should be.
+                    start_a, end_a = _line_range(block, "a")
+                    start_b, end_b = _line_range(block, "b")
                     pr.matched_blocks.append(
                         MatchedBlock(
                             file_a=pr.file_a,
                             file_b=pr.file_b,
-                            lines_a=block.get("code_a", block.get("lines_a", "")),
-                            lines_b=block.get("code_b", block.get("lines_b", "")),
-                            line_start_a=int(block.get("line_start_a", block.get("start_a", 0))),
-                            line_end_a=int(block.get("line_end_a", block.get("end_a", 0))),
-                            line_start_b=int(block.get("line_start_b", block.get("start_b", 0))),
-                            line_end_b=int(block.get("line_end_b", block.get("end_b", 0))),
+                            lines_a=block.get("code_a") or _slice(code_a, start_a, end_a),
+                            lines_b=block.get("code_b") or _slice(code_b, start_b, end_b),
+                            line_start_a=start_a,
+                            line_end_a=end_a,
+                            line_start_b=start_b,
+                            line_end_b=end_b,
                             similarity=float(block.get("similarity", block.get("score", 0))),
-                            clone_type=block.get("clone_type", block.get("type", "")),
+                            clone_type=block.get("clone_type", block.get("type", "")) or "",
                         )
                     )
+            pr.plagiarism_type = _pair_type(pr.matched_blocks)
             results.append(pr)
         return sorted(results, key=lambda r: r.overall_score, reverse=True)
-
-    # ── Confidence interval ──
-
-    def _compute_ci(
-        self, pairs: list[PairResult]
-    ) -> ConfidenceInterval:
-        if not pairs:
-            return ConfidenceInterval(lower=0.0, upper=0.0)
-        scores = [p.overall_score for p in pairs]
-        mean = sum(scores) / len(scores)
-        std = (sum((s - mean) ** 2 for s in scores) / max(len(scores) - 1, 1)) ** 0.5
-        n = len(scores)
-        # 95% CI using t-distribution approximation (z=1.96 for large n)
-        margin = 1.96 * (std / max(n**0.5, 1))
-        return ConfidenceInterval(
-            lower=max(0.0, mean - margin),
-            upper=min(1.0, mean + margin),
-            method="bootstrap_95",
-        )
 
     # ── Risk classification ──
 
     def _classify_risk(self, score: float) -> str:
-        if score >= 0.85:
+        if score >= CRITICAL_MIN:
             return "critical"
-        elif score >= 0.65:
+        elif score >= HIGH_MIN:
             return "high"
-        elif score >= 0.40:
+        elif score >= MODERATE_MIN:
             return "moderate"
-        elif score >= 0.15:
+        elif score >= LOW_MIN:
             return "low"
         return "clean"
 
-    # ── Plagiarism type ──
+    # ── Matched code types ──
 
-    def _classify_plagiarism_type(
-        self, pairs: list[PairResult], overall: float
-    ) -> str:
-        if overall >= 0.85:
-            return "T1"
-        elif overall >= 0.65:
-            # Check if there's AST divergence (T2 or T3)
-            return "T2"
-        elif overall >= 0.40:
-            return "T3"
-        elif overall >= 0.15:
-            return "T4"
-        return "T5"
+    def _plagiarism_type_breakdown(self, pairs: list[PairResult]) -> dict[str, float]:
+        """Share of matched blocks by clone type, across every pair.
 
-    def _plagiarism_type_breakdown(
-        self, pairs: list[PairResult]
-    ) -> dict[str, float]:
-        if not pairs:
-            return {}
-        breakdown = {"T1": 0.0, "T2": 0.0, "T3": 0.0, "T4": 0.0, "T5": 0.0}
+        This used to bucket pair *scores* into T1-T5, so a 0.9 score read
+        "Identical Copy" even when its blocks were renamed, and a 0.2 score read
+        "Semantic Clone". Only the code matcher's block types are used now.
+        """
+        counts: dict[str, int] = {}
         for pair in pairs:
-            if pair.overall_score >= 0.85:
-                breakdown["T1"] += 1
-            elif pair.overall_score >= 0.65:
-                breakdown["T2"] += 1
-            elif pair.overall_score >= 0.40:
-                breakdown["T3"] += 1
-            elif pair.overall_score >= 0.15:
-                breakdown["T4"] += 1
-            else:
-                breakdown["T5"] += 1
-        total = len(pairs)
-        return {k: round(v / total, 4) for k, v in breakdown.items() if v > 0}
+            for block in pair.matched_blocks:
+                t = BLOCK_TYPE_TO_T.get(block.clone_type)
+                if t:
+                    counts[t] = counts.get(t, 0) + 1
+        total = sum(counts.values())
+        return {t: round(n / total, 4) for t, n in sorted(counts.items())} if total else {}
 
     # ── File analysis (from submissions + ai_detection) ──
 
     def _build_file_analysis(
-        self, submissions: dict[str, str], ai_raw: dict[str, Any]
+        self,
+        submissions: dict[str, str],
+        ai_raw: dict[str, Any],
+        pairs: list[PairResult] | None = None,
     ) -> list[FileAnalysis]:
-        """Build file analysis from submissions dict and ai_detection data."""
+        """Build file analysis from submissions dict and ai_detection data.
+
+        Jobs read back from report.json carry no ``submissions``; their files are
+        then taken from the compared pairs, so the report never says 0 files.
+        """
         files = []
-        # submissions is {filename: source_code}
-        for fname in submissions:
+        names = list(submissions) or sorted(
+            {name for p in pairs or [] for name in (p.file_a, p.file_b) if name}
+        )
+        for fname in names:
             fa = FileAnalysis(filename=fname)
             # Match AI detection by filename
             ai_subs = ai_raw.get("submissions", []) if isinstance(ai_raw, dict) else []
@@ -810,24 +802,32 @@ class IntegrityAssessmentReportGenerator:
             )
         elif level == "high":
             return (
-                "Detailed examination recommended. Multiple analysis engines "
-                "converge on similar conclusions. Consider meeting with the "
-                "student to discuss the findings before proceeding."
+                "Detailed examination recommended. Read the matched code and what "
+                "raised the score. If the overlap is not explained by the assignment, "
+                "meet the student to discuss it before proceeding."
             )
         else:
             return (
-                "Committee review recommended. The evidence from multiple "
-                "independent analysis engines is substantial. This report "
-                "provides documentation sufficient for proceedings under the "
-                "preponderance-of-evidence standard."
+                "Examine the matched code first. If the overlap is not explained by "
+                "starter code or the assignment, follow your institution's academic "
+                "integrity process; the student must have the chance to respond."
             )
 
     # ── Class context (from summary dict) ──
 
-    def _build_class_context(self, summary: dict[str, Any]) -> ClassContext:
+    def _build_class_context(self, report: IntegrityAssessmentReport) -> ClassContext:
+        """Computed from the report's own pairs (the summary dict lacks most of it)."""
+        scores = sorted(p.overall_score for p in report.pair_results)
+        if not scores:
+            return ClassContext()
+        mid = len(scores) // 2
+        median = scores[mid] if len(scores) % 2 else (scores[mid - 1] + scores[mid]) / 2
         return ClassContext(
-            total_pairs=int(summary.get("total_pairs", 0)),
-            average_similarity=float(summary.get("average_similarity", 0)),
+            total_submissions=len(report.files),
+            total_pairs=len(scores),
+            average_similarity=sum(scores) / len(scores),
+            median_similarity=median,
+            flagged_ratio=sum(s >= HIGH_MIN for s in scores) / len(scores),
         )
 
     # ── Sources (from submissions + results) ──
@@ -866,17 +866,23 @@ class IntegrityAssessmentReportGenerator:
     # ── Defaults ──
 
     def _default_policy_references(self) -> list[str]:
+        # Deliberately generic: the policy, procedure and any sanction are the
+        # institution's to state, not this software's. (A US FERPA notice and an
+        # invented sanctions matrix used to appear here.)
         return [
-            "Academic Integrity Policy — All submitted work must be the student's own",
-            "Code of Conduct — Proper attribution of external sources is required",
-            "Hearing Procedures — Students have the right to respond to findings",
-            "FERPA — All reports are confidential educational records",
+            (
+                "Follow your institution's academic integrity policy and procedures. "
+                "This report does not set or recommend any sanction."
+            ),
+            (
+                "The student has the right to see this evidence and to respond before "
+                "any decision is made."
+            ),
+            (
+                "Handle this report as confidential personal information under the "
+                "privacy law that applies to your institution."
+            ),
         ]
 
     def _default_sanctions_matrix(self) -> list[dict[str, str]]:
-        return [
-            {"offense": "First", "range": "Warning to F on assignment", "note": "Consider teachable moment"},
-            {"offense": "Second", "range": "F on assignment to course failure", "note": "Written warning required"},
-            {"offense": "Third", "range": "Course failure to suspension", "note": "Committee review required"},
-            {"offense": "Subsequent", "range": "Suspension to expulsion", "note": "Dean-level decision required"},
-        ]
+        return []
