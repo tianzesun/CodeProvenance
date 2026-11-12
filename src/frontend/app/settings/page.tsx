@@ -350,7 +350,7 @@ const DEFAULT_PROFILE = {
   sensitivity: 'balanced',
   starter_code_handling: 'student_written_only',
   previous_term_matching: 'off',
-  ai_rewrite_detection: 'balanced',
+  ai_rewrite_detection: 'off',
   result_volume: 'top_25',
 };
 
@@ -412,21 +412,21 @@ const QUICK_SETUPS = [
     label: 'Intro course',
     hint: 'Lots of starter code, assignments reused each term',
     sensitivity: 'balanced',
-    profile: { starter_code_handling: 'student_written_only', previous_term_matching: 'same_course_only', ai_rewrite_detection: 'balanced', result_volume: 'top_25' },
+    profile: { starter_code_handling: 'student_written_only', previous_term_matching: 'same_course_only', ai_rewrite_detection: 'off', result_volume: 'top_25' },
   },
   {
     id: 'upper',
     label: 'Upper-year course',
     hint: 'Open-ended work, fewer but stronger flags',
     sensitivity: 'conservative',
-    profile: { starter_code_handling: 'ignore_starter_code', previous_term_matching: 'off', ai_rewrite_detection: 'balanced', result_volume: 'top_10' },
+    profile: { starter_code_handling: 'ignore_starter_code', previous_term_matching: 'off', ai_rewrite_detection: 'off', result_volume: 'top_10' },
   },
   {
     id: 'triage',
     label: 'Early triage',
     hint: 'Cast a wide net, then review',
     sensitivity: 'strict',
-    profile: { starter_code_handling: 'student_written_only', previous_term_matching: 'all_historical_courses', ai_rewrite_detection: 'balanced', result_volume: 'top_50' },
+    profile: { starter_code_handling: 'student_written_only', previous_term_matching: 'all_historical_courses', ai_rewrite_detection: 'off', result_volume: 'top_50' },
   },
   {
     id: 'similarity',

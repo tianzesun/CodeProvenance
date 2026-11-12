@@ -91,7 +91,9 @@ class ProfessorProfile:
     # Cross-term matching is not built yet, so it is off (it defaulted to
     # "same_course_only" and the settings page implied it ran).
     previous_term_matching: str = "off"
-    ai_rewrite_detection: str = "balanced"
+    # Off until it is validated on real student code: on unfamiliar code it ranks
+    # close to chance (docs/AI_DETECTOR_VS_TURNITIN.md § External holdout).
+    ai_rewrite_detection: str = "off"
     result_volume: str = "top_25"
 
 
@@ -232,13 +234,14 @@ def professor_profile_catalog() -> dict[str, Any]:
             {
                 "id": "off",
                 "label": "Off",
-                "description": "Similarity only; no AI-authorship scores.",
+                "description": "Similarity only; no AI-authorship scores. The default.",
             },
             {
                 "id": "balanced",
                 "label": "On",
                 "description": "Scores each submission for AI-authorship signals. "
-                "Recommended.",
+                "Experimental: on code unlike what it was trained on it ranks close "
+                "to chance, so never act on an AI score alone.",
             },
         ],
         "result_volume": [
@@ -286,7 +289,7 @@ def apply_professor_profile(raw: dict[str, Any] | None) -> AppliedProfessorProfi
             # "aggressive" behaved exactly like "balanced"; it is kept as an
             # accepted alias for saved profiles.
             {"off": 1, "balanced": 1, "aggressive": 1},
-            "balanced",
+            "off",
             notes,
             "ai_rewrite_detection",
         ),
@@ -311,8 +314,9 @@ def apply_professor_profile(raw: dict[str, Any] | None) -> AppliedProfessorProfi
         weights["cfg_dfg"] += 0.03
         weights["ast"] += 0.02
         weights["token"] = max(0.0, weights["token"] - 0.05)
-    elif profile.ai_rewrite_detection == "off":
-        threshold += 0.02
+    # Turning AI checks off used to add 0.02 here. Uploads never saw it (they use
+    # the workspace's default threshold, which the settings page sets from the
+    # sensitivity alone), so it only made this reported value disagree with it.
 
     weights = _normalize_weights(weights)
     result_limit = {"top_10": 10, "top_25": 25, "top_50": 50, "all": None}[
