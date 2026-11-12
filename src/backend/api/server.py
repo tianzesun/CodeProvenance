@@ -19071,15 +19071,12 @@ async def get_integrity_assessment_report(
     request: Request,
     format: str = Query("html", description="Output format: html, pdf, or json"),
 ):
-    """Generate a Dean/Chair-grade Integrity Assessment Report.
+    """Generate the class-level Integrity Assessment Report (HTML, PDF or JSON).
 
-    A 12-section report that surpasses Turnitin with:
-    - Multi-engine code forensics (AST, token, semantic, winnowing)
-    - Plagiarism type classification (T1-T5)
-    - AI-generated code detection with 8-signal analysis
-    - Statistical confidence intervals (95% bootstrap)
-    - Due-process-ready evidence chain with student response template
-    - Digital signature and reproducibility hash
+    It shows the highest-scoring pair and what raised its score, the matched
+    code with the code matcher's block types, AI detection, class context, an
+    evidence-chain hash and a student response template. It covers the whole
+    check, names no student, and never decides misconduct.
     """
     from src.backend.infrastructure.integrity_assessment_report import (
         IntegrityAssessmentReportGenerator,
