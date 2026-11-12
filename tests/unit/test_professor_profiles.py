@@ -147,3 +147,39 @@ def test_catalog_contains_all_simple_settings() -> None:
         item["id"] == "student_written_only"
         for item in catalog["starter_code_handling"]
     )
+
+
+def test_ai_authorship_checks_are_off_unless_turned_on() -> None:
+    """Off by default: the detector ranks near chance on unfamiliar code."""
+    from src.backend.api import server
+
+    assert apply_professor_profile({}).profile.ai_rewrite_detection == "off"
+    assert (
+        server.USER_EDITABLE_SETTINGS_DEFAULTS["professor_profile"][
+            "ai_rewrite_detection"
+        ]
+        == "off"
+    )
+    # Unknown values fall back to off, not on.
+    assert (
+        apply_professor_profile(
+            {"ai_rewrite_detection": "max"}
+        ).profile.ai_rewrite_detection
+        == "off"
+    )
+
+    assert server._ai_checks_enabled({}) is False  # saved before the setting existed
+    assert server._ai_checks_enabled({"ai_rewrite_detection": "off"}) is False
+    assert server._ai_checks_enabled({"ai_rewrite_detection": "balanced"}) is True
+    assert server._ai_checks_enabled({"ai_rewrite_detection": "aggressive"}) is True
+
+
+def test_turning_ai_checks_on_or_off_does_not_move_the_threshold() -> None:
+    for sensitivity in ("strict", "balanced", "conservative"):
+        on = apply_professor_profile(
+            {"sensitivity": sensitivity, "ai_rewrite_detection": "balanced"}
+        )
+        off = apply_professor_profile(
+            {"sensitivity": sensitivity, "ai_rewrite_detection": "off"}
+        )
+        assert on.threshold == off.threshold

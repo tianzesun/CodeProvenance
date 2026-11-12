@@ -8986,6 +8986,16 @@ def _run_analysis_engines(
     return results, report
 
 
+def _ai_checks_enabled(profile: dict[str, Any]) -> bool:
+    """Whether a check also scores AI authorship: only when the workspace turned it on.
+
+    Off by default until the detector is validated on real student code. A
+    profile saved before the setting existed, or with no value, gets the default
+    instead of running it.
+    """
+    return profile.get("ai_rewrite_detection") in ("balanced", "aggressive")
+
+
 async def _run_analysis(
     job_id,
     job_dir,
@@ -9547,9 +9557,8 @@ async def _run_analysis_in_workspace(
         _jobs[job_id]["external_tool_results"] = external_tool_results
         _persist_job(job_id)
         # AI detection is CPU-bound (and may load a local code LM); offload it
-        # like the engine work so the event loop stays responsive. The workspace
-        # can switch it off for similarity-only checks.
-        if profile.get("ai_rewrite_detection") == "off":
+        # like the engine work so the event loop stays responsive.
+        if not _ai_checks_enabled(profile):
             ai_detection = {}
         else:
             _set_job_progress(
@@ -14336,7 +14345,7 @@ USER_EDITABLE_SETTINGS_DEFAULTS: dict[str, Any] = {
         "sensitivity": "balanced",
         "starter_code_handling": "student_written_only",
         "previous_term_matching": "off",
-        "ai_rewrite_detection": "balanced",
+        "ai_rewrite_detection": "off",
         "result_volume": "top_25",
     },
 }
