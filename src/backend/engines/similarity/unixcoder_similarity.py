@@ -37,6 +37,29 @@ CACHE_DIR = Path("./.unixcoder_cache")
 
 _TOKEN_FALLBACK: Any = None
 _TOKEN_FALLBACK_LOCK = threading.Lock()
+#: Shared by every instance: the first ``from transformers import ...`` is not
+#: thread-safe, and the per-instance load lock did not stop two instances
+#: importing at once (3 of 8 threads got ImportError in a fresh process).
+_TRANSFORMERS_IMPORT_LOCK = threading.Lock()
+
+
+def _import_transformers() -> tuple[Any, Any]:
+    """Import ``AutoModel`` and ``AutoTokenizer``, one thread at a time.
+
+    Pairs are scored in parallel threads; when several loaded the model at
+    once, some imports failed, were reported as "not installed", and those
+    pairs silently fell back to token overlap, so the same upload could score
+    differently from run to run.
+
+    Returns:
+        ``(AutoModel, AutoTokenizer)``.
+
+    Raises:
+        ImportError: If transformers really is not installed.
+    """
+    with _TRANSFORMERS_IMPORT_LOCK:
+        from transformers import AutoModel, AutoTokenizer
+    return AutoModel, AutoTokenizer
 
 
 def _token_fallback_engine():
@@ -132,7 +155,7 @@ class UniXcoderSimilarity(BaseSimilarityAlgorithm):
 
     def _load_model_locked(self) -> None:
         try:
-            from transformers import AutoModel, AutoTokenizer
+            AutoModel, AutoTokenizer = _import_transformers()
         except ImportError as e:
             raise ImportError(
                 "transformers package not installed. "
