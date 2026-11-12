@@ -75,43 +75,43 @@ const ASSIGNMENT_TYPE_OPTIONS = [
     id: 'auto_detect',
     label: 'Auto Detect',
     eyebrow: 'Recommended',
-    description: 'AI automatically chooses the best detection strategy based on your files',
+    description: 'Picks the type from the course code when the check is linked to a course; otherwise uses the default.',
   },
   {
     id: 'foundations_code',
     label: 'Foundations Code (Intro CS)',
     eyebrow: 'CSCA08, CSCA48',
-    description: 'CS1/CS2 with high template overlap. Strong rename/copy detection, class baseline calibration.',
+    description: 'CS1/CS2 assignments, where many correct solutions naturally look alike.',
   },
   {
     id: 'algorithmic_code',
     label: 'Algorithmic Code (Data Structures/Algo)',
     eyebrow: 'CSCB63, CSCC73',
-    description: 'Logic similarity hidden behind different implementations. Deep semantic + execution analysis.',
+    description: 'Data structures and algorithms, where the logic can survive a rewrite of the syntax.',
   },
   {
     id: 'systems_projects',
     label: 'Systems & Projects',
     eyebrow: 'CSCB09, CSCD01, CSCD58',
-    description: 'Systems programming & large projects. Architecture-level similarity with CFG/execution focus.',
+    description: 'Systems programming and larger projects with shared headers and frameworks.',
   },
   {
     id: 'sql_data_logic',
     label: 'SQL & Data Logic',
     eyebrow: 'CSCC43, CSCD43',
-    description: 'Database/SQL assignments. Semantic equivalence over syntax. Query logic + embedding focus.',
+    description: 'SQL assignments, where the same query can be written many ways.',
   },
   {
     id: 'notebook_ai',
     label: 'Notebook & Applied AI',
     eyebrow: 'CSCC11, CSCD84',
-    description: 'Jupyter notebooks with code + narrative + AI risk. Separate code/markdown analysis.',
+    description: 'Notebook courses. Notebook files themselves cannot be uploaded yet: export the code to .py files.',
   },
   {
     id: 'reports_proofs',
     label: 'Reports & Proofs',
     eyebrow: 'CSCA67, CSCC63',
-    description: 'Text-based assignments. Source attribution, paraphrase detection, AI authorship analysis.',
+    description: 'Report and proof courses. Only code files can be uploaded, so written work is not checked yet.',
   },
 ];
 
@@ -1446,6 +1446,11 @@ export default function UploadPage() {
                   {selectedAssignmentMode?.context && (
                     <p className="mt-2.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{selectedAssignmentMode.context}</p>
                   )}
+                  <p className="mt-2.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                    {learnedSignals.length > 0
+                      ? 'The type labels this check in the committee report. Every type is currently checked the same way: the scoring model does not change with it.'
+                      : 'The type labels this check in the committee report and sets the starting engine weights.'}
+                  </p>
 
                   {selectedAssignmentMode?.warnings?.length ? (
                     <div className="mt-3 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/20 dark:bg-amber-500/10">

@@ -48,3 +48,33 @@ def test_error_report_hides_the_traceback(tmp_path, monkeypatch) -> None:
     assert "secret internal detail" not in html
     assert "Traceback" not in html
     assert "job-1" in html
+
+
+def test_report_describes_the_assignment_type_but_not_unrun_checks(tmp_path) -> None:
+    from src.backend.engines.scoring.assignment_modes import get_assignment_mode
+
+    mode = get_assignment_mode("foundations_code")
+    out = tmp_path / "committee_report.html"
+    # The same fields the upload path passes for the chosen assignment type.
+    server._generate_committee_report_inner(
+        "job-1",
+        "CSC108",
+        "A1",
+        0.5,
+        {"summary": {}},
+        [],
+        {},
+        out,
+        assignment_mode={
+            "id": mode.mode_id,
+            "name": mode.name,
+            "version": mode.version,
+            "context": mode.context,
+            "policy": {"evidence_surfaces": mode.evidence_surfaces},
+        },
+    )
+    html = out.read_text(encoding="utf-8")
+
+    assert mode.context in html
+    # The mode's preprocessing list describes steps no analysis performs yet.
+    assert "Preprocessing:" not in html
