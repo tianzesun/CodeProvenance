@@ -139,6 +139,87 @@ type AssignmentMode = {
   weights?: Record<string, number>;
 };
 
+type LearnedInfluence = { key: string; label: string; weight: number };
+
+/** Below this size (in log-odds) a model weight barely moves the score. */
+const LITTLE_EFFECT_WEIGHT = 0.5;
+
+/**
+ * Why the model gives a signal a negative weight, measured on the ConPlag and Kaggle
+ * class evaluations (docs/BENCHMARK_WORK.md), not assumed.
+ */
+const OFFSET_REASONS: Record<string, string> = {
+  fingerprint:
+    'it moves almost in lockstep with chunk hash match, so the model subtracts it rather than count the same overlap twice.',
+  ast: 'independent solutions to the same task share about as much structure as copies do, so it is discounted.',
+};
+
+/**
+ * What the learned model weighs, in place of weight sliders it ignores. Same
+ * signal names as the results page's Evidence Signals tab, which shows how
+ * much each one raised a particular pair's score.
+ */
+function LearnedInfluencePanel({ signals, influence }: { signals: string[]; influence: LearnedInfluence[] }) {
+  const raise = influence.filter((item) => item.weight >= LITTLE_EFFECT_WEIGHT);
+  const little = influence.filter((item) => Math.abs(item.weight) < LITTLE_EFFECT_WEIGHT);
+  const offset = influence.filter((item) => item.weight <= -LITTLE_EFFECT_WEIGHT);
+  const strongest = Math.max(...raise.map((item) => item.weight), 0);
+  return (
+    <div className="space-y-3 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
+      <p>
+        Scores come from a model trained on labelled plagiarism benchmarks. It combines the same signals with fixed
+        weights on every check, so there is nothing to tune here.
+      </p>
+      {influence.length === 0 ? (
+        <p>Signals combined: {signals.join(', ')}.</p>
+      ) : (
+        <>
+          {raise.length > 0 && (
+            <div>
+              <p className="mb-1.5 font-semibold text-slate-800 dark:text-slate-200">Raise the score</p>
+              <ul className="space-y-1.5">
+                {raise.map((item) => (
+                  <li key={item.key} className="flex items-center gap-3">
+                    <span className="w-44 shrink-0 text-slate-700 dark:text-slate-300">{item.label}</span>
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800" aria-hidden="true">
+                      <span
+                        className="block h-full rounded-full bg-blue-600 dark:bg-blue-500"
+                        style={{ width: `${Math.round((item.weight / strongest) * 100)}%` }}
+                      />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {little.length > 0 && (
+            <p>
+              <span className="font-semibold text-slate-800 dark:text-slate-200">Little effect: </span>
+              {little.map((item) => item.label).join(', ')}.
+            </p>
+          )}
+          {offset.length > 0 && (
+            <div>
+              <p className="mb-1 font-semibold text-slate-800 dark:text-slate-200">Offset by the model</p>
+              <ul className="list-disc space-y-1 pl-4">
+                {offset.map((item) => (
+                  <li key={item.key}>
+                    <span className="text-slate-700 dark:text-slate-300">{item.label}</span>
+                    {': '}
+                    {OFFSET_REASONS[item.key] ?? 'given a negative weight by the model.'}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1">A high value on these does not make a pair look innocent.</p>
+            </div>
+          )}
+        </>
+      )}
+      <p>Each result&apos;s Evidence Signals tab shows which of these raised that pair&apos;s score.</p>
+    </div>
+  );
+}
+
 const REFERENCE_HEADERS = ['x-correlation-id', 'x-request-id'];
 
 function getErrorInfo(error: unknown): { status?: number; reference?: string } {
@@ -312,6 +393,8 @@ export default function UploadPage() {
   // Signals the learned similarity model combines. While it scores the pairs the
   // engine weights below are not used, so the sliders are shown as inactive.
   const [learnedSignals, setLearnedSignals] = useState<string[]>([]);
+  // What the learned model weighs, strongest first (its log-odds weights).
+  const [learnedInfluence, setLearnedInfluence] = useState<LearnedInfluence[]>([]);
   const [threshold, setThreshold] = useState(0.5);
   const [assignmentModes, setAssignmentModes] = useState<AssignmentMode[]>([]);
   const [selectedAssignmentModeId, setSelectedAssignmentModeId] = useState('auto_detect');
@@ -561,6 +644,13 @@ export default function UploadPage() {
       setAssignmentModes(Array.isArray(mp?.modes) ? mp.modes : []);
       const learned = res.data?.learned_scoring;
       setLearnedSignals(learned?.active && Array.isArray(learned.signals) ? learned.signals.map(String) : []);
+      setLearnedInfluence(
+        learned?.active && Array.isArray(learned.influence)
+          ? (learned.influence as Partial<LearnedInfluence>[])
+            .filter((item) => item && typeof item.key === 'string' && Number.isFinite(Number(item.weight)))
+            .map((item) => ({ key: String(item.key), label: String(item.label || item.key), weight: Number(item.weight) }))
+          : [],
+      );
       if (typeof mp?.default_mode_id === 'string') setSelectedAssignmentModeId((c) => c || mp.default_mode_id);
     }).catch(() => {
       if (active) { setThreshold(0.5); setActiveEngines(UPLOAD_ENGINE_OPTIONS.map((e) => e.key)); setAssignmentModes([]); }
@@ -1354,7 +1444,9 @@ export default function UploadPage() {
               Advanced detection settings
             </summary>
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Defaults are recommended for professors. Adjust engine weights for your specific assignment type.
+              {learnedSignals.length > 0
+                ? 'Defaults are recommended for professors.'
+                : 'Defaults are recommended for professors. Adjust engine weights for your specific assignment type.'}
             </p>
 
             {/* External Source Scan moved out of the main flow into advanced
@@ -1465,8 +1557,11 @@ export default function UploadPage() {
                       <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
                         <SearchCheck size={13} className="text-slate-500" aria-hidden="true" />
                       </div>
-                      <span className="text-sm font-semibold text-slate-900 dark:text-white">Similarity Engine Weights</span>
+                      <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                        {learnedSignals.length > 0 ? 'How the similarity score is built' : 'Similarity Engine Weights'}
+                      </span>
                     </div>
+                    {learnedSignals.length === 0 && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1476,19 +1571,19 @@ export default function UploadPage() {
                           setWeightsTouched(false);
                         }
                       }}
-                      disabled={!selectedAssignmentMode?.weights || learnedSignals.length > 0}
+                      disabled={!selectedAssignmentMode?.weights}
                       className="text-xs font-medium text-slate-400 hover:text-blue-600 transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-slate-400"
                     >
                       Reset to preset
                     </button>
+                    )}
                   </div>
 
-                  {learnedSignals.length > 0 && (
-                    <p className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs leading-relaxed text-slate-600 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-400">
-                      Scores come from a model trained on labelled plagiarism benchmarks, which always combines the same signals: {learnedSignals.join(', ')}. These weights only apply if that model is unavailable.
-                    </p>
-                  )}
-                  <div className={`space-y-1.5 ${learnedSignals.length > 0 ? 'opacity-50' : ''}`}>
+                  {learnedSignals.length > 0 ? (
+                    <LearnedInfluencePanel signals={learnedSignals} influence={learnedInfluence} />
+                  ) : (
+                  <>
+                  <div className="space-y-1.5">
                     {/* Only engines the workspace has active are listed (every engine used to show). */}
                     {UPLOAD_ENGINE_OPTIONS.filter((engine) => activeEngines.includes(engine.key)).map((engine) => {
                       const weight = engineWeights[engine.key] ?? 0;
@@ -1517,7 +1612,6 @@ export default function UploadPage() {
                               step="1"
                               value={sliderValue}
                               onChange={(e) => updateEngineWeight(engine.key, Number(e.target.value) / 100)}
-                              disabled={learnedSignals.length > 0}
                               aria-label={`${engine.label} weight`}
                               aria-valuetext={`${share}% of the total`}
                               className="h-2 flex-1 cursor-pointer appearance-none rounded-lg bg-slate-200 accent-blue-600 disabled:cursor-not-allowed dark:bg-slate-700"
@@ -1541,6 +1635,8 @@ export default function UploadPage() {
                       ? 'Auto Detect chooses engine weights for each submission. Moving a slider overrides that.'
                       : 'The percentage beside each slider is that engine’s share of the total weight; shares always add up to 100%.'}
                   </div>
+                  </>
+                  )}
                 </div>
               </div>
             </div>

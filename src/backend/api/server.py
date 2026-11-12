@@ -14399,14 +14399,15 @@ ENGINE_DISPLAY_LABELS = {
     "ai_detection": "AI Detection",
 }
 #: Display names for the signals the learned similarity model combines.
+#: The names the results page uses for the same signals.
 LEARNED_SIGNAL_LABELS = {
-    "ast": "AST",
+    "ast": "Structure (AST)",
     "fingerprint": "Token fingerprint",
-    "embedding": "Embedding",
-    "ngram": "N-gram",
-    "winnowing": "Winnowing",
+    "embedding": "Semantic meaning",
+    "ngram": "Token n-gram match",
+    "winnowing": "Chunk hash match",
     "logic_flow": "Logic flow",
-    "coverage": "Coverage",
+    "coverage": "Matched-line coverage",
 }
 
 
@@ -14423,12 +14424,21 @@ def _learned_scoring_status() -> dict[str, Any]:
 
     scorer = LearnedFusionScorer()
     if not scorer.available:
-        return {"active": False, "signals": []}
+        return {"active": False, "signals": [], "influence": []}
+
+    def label(name: str) -> str:
+        return LEARNED_SIGNAL_LABELS.get(name, name.replace("_", " ").title())
+
     return {
         "active": True,
-        "signals": [
-            LEARNED_SIGNAL_LABELS.get(name, name.replace("_", " ").title())
-            for name in scorer.feature_names
+        "signals": [label(name) for name in scorer.feature_names],
+        # What the model actually weighs, strongest first, so the upload page
+        # can show it in place of weight sliders the model ignores.
+        "influence": [
+            {"key": name, "label": label(name), "weight": round(weight, 2)}
+            for name, weight in sorted(
+                scorer.coefficients.items(), key=lambda item: -item[1]
+            )
         ],
     }
 

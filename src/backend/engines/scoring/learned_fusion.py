@@ -69,6 +69,11 @@ class LearnedFusionScorer:
         """Order of coefficients used by the loaded model."""
         return list(self._feature_names)
 
+    @property
+    def coefficients(self) -> dict[str, float]:
+        """Each feature's weight in the model's log-odds; empty when not loaded."""
+        return dict(zip(self._feature_names, self._coefficients))
+
     # The trainer has stored its headline AUC under different keys as it
     # evolved (the shipped artifact says ``logo_auc_roc``, newer runs say
     # ``cv_auc_roc``). Look for all of them so the load log never reports a
