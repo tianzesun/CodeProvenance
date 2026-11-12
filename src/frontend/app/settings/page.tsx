@@ -2353,6 +2353,10 @@ export default function SettingsPage() {
                       without naming their validation proof. Shipping default weights requires a validation run on the
                       validation split (the locked test set stays untouched). Fill in the three fields to clear these warnings.
                     </p>
+                    <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-300">
+                      These are the rule-based fallback weights. While the learned scoring model is loaded (the default),
+                      they do not change any score; they only apply if that model is unavailable.
+                    </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
