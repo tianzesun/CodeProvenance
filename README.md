@@ -17,16 +17,21 @@ deployment.
 ## 🎯 Why IntegrityDesk?
 
 Traditional tools such as MOSS and JPlag apply one algorithm and return one number.
-IntegrityDesk fuses **eight weighted similarity signals**, a **learned fusion model**,
-**course-aware weight profiles**, and an **8-signal AI detector**, then routes every
-flag through a band-based review policy with human dispositions.
+IntegrityDesk scores each pair with a **learned model over seven similarity signals**,
+shows which of them raised that pair's score, adds an **8-signal AI detector**, and turns
+flags into cases with a per-student evidence dossier and viva questions.
+
+On ConPlag (911 human-annotated contest pairs) it ranks pairs on par with JPlag and
+Dolos (AUC 0.813 vs 0.821 / 0.838), and 2.3% of innocent pairs reach its high band. Like
+those tools, it misses copies rewritten inside a student's own scaffolding. Measurements
+and caveats: `docs/BENCHMARK_WORK.md`.
 
 ### ✨ What was added recently
 
 | Area | Capability |
 |------|-----------|
-| **Academic hierarchy** | Organizations → courses → terms → assignments → students, with instructors, enrollments, assignment versions, and per-course engine weight profiles |
-| **Review workspace** | Band-based queue, allowed/blocked dispositions, AI-corroboration rule, workload card, pair navigation, verdicts and review notes |
+| **Academic hierarchy** | Organizations → courses → terms → assignments → students, with instructors, enrollments, assignment versions, and assignment types recorded on reports |
+| **Review workspace** | Risk-ordered pairs, per-pair score explanation, side-by-side code, review status, workload card and cases. Band-based dispositions and the AI-corroboration rule exist in the reviews API but not yet in the dashboard |
 | **Evidence dossier** | Per-student printable dossier, generated viva questions, and viva outcome tracking that closes the case loop |
 | **AI detection** | 8 independent signals, safe-blend ML classifier, Turnitin-style likelihood bands, background-job execution, and student-code false positives cut from 21.3% → 2.3% |
 | **Reporting** | Integrity Assessment Report (Dean/Chair-grade PDF), committee report, AI originality PDF, HTML/JSON/PDF/CSV exports with caching |
@@ -40,16 +45,16 @@ flag through a band-based review policy with human dispositions.
 
 | Feature | MOSS | JPlag | IntegrityDesk |
 |---------|------|-------|----------------|
-| Engines | 1 (Winnowing) | 1–3 | 8 weighted signals (AST, Graph, Winnowing, N-gram/GST, Token, Embedding, Execution, Static rules) |
-| Weight learning | Manual | Manual | Learned fusion model + Optuna tuning |
-| Threshold optimization | Fixed | Fixed | PR-curve / F1 optimization + calibration |
+| Engines | 1 (Winnowing) | 1–3 | 7 signals combined by a learned model (see below) |
+| Weight learning | Manual | Manual | Learned fusion model; Optuna tuner for benchmark runs |
+| Threshold optimization | Fixed | Fixed | PR-curve / F1 analysis in benchmarks; product bands fixed until a student holdout exists |
 | Risk levels | ❌ | ❌ | ✅ (CRITICAL / HIGH / MEDIUM / LOW) |
-| Teacher review UI | ❌ | ❌ | ✅ Built-in dashboard with dispositions |
-| Reports | ❌ | Basic | ✅ HTML, JSON, PDF, CSV |
-| Feature explanations | ❌ | ❌ | ✅ Per-engine contribution breakdown |
-| GPU acceleration | ❌ | ❌ | ✅ CodeBERT / UniXcoder on CUDA |
+| Teacher review UI | HTML result pages | Report viewer | ✅ Review workspace, cases, dossier and viva |
+| Reports | HTML result pages | Report viewer | ✅ HTML, JSON, PDF, CSV |
+| Feature explanations | ❌ | ❌ | ✅ Per-engine contribution to each pair's score |
+| GPU acceleration | ❌ | ❌ | ✅ UniXcoder embeddings on CUDA |
 | AI code detection | ❌ | ❌ | ✅ 8-signal ensemble with confidence bands |
-| Course-aware config | ❌ | ❌ | ✅ Profiles per course/assignment type |
+| Course-aware config | ❌ | ❌ | Partial: assignment types are recorded; their weight presets only reach the rule-based fallback |
 | Reproducible benchmarking | ❌ | Partial | ✅ EvalForge + certification statistics |
 
 ---
@@ -58,16 +63,24 @@ flag through a band-based review policy with human dispositions.
 
 ### 1. Multi-Engine Similarity Detection
 
-| Engine | Method | Detects |
-|--------|--------|---------|
-| **AST** | Tree paths, subtree hashes, tree edit distance | Structural plagiarism, reordered code |
-| **Graph** | CFG + DFG structural comparison | Semantic-preserving rewrites |
-| **Winnowing** | Adaptive k-gram fingerprinting | Copy-paste, text overlap |
-| **N-gram / GST** | Character/token sequences + greedy string tiling | Partial copying, sliding windows |
-| **Token** | Token frequency + TF-IDF | Token-level manipulation |
-| **Embedding** | UniXcoder / CodeBERT (GPU) with OpenAI fallback | Semantic similarity, obfuscated code |
-| **Execution** | Runtime output comparison | Type-4 clones (different syntax, same behavior) |
-| **Static rules** | File-type–aware heuristics | Boilerplate, framework idioms |
+The production score is a logistic model over seven signals
+(`src/backend/engines/similarity/models/learned_fusion_model.json`), listed by their weight:
+
+| Signal | Method | Role in the score |
+|--------|--------|-------------------|
+| **Chunk hash match** (winnowing) | Adaptive k-gram fingerprinting | Strongest: shared copied passages |
+| **Matched-line coverage** | Share of lines inside matched blocks | Raises the score |
+| **Token n-gram match** | Consecutive token runs | Raises the score |
+| **Logic flow** | Order and shape of control flow | Raises the score |
+| **Semantic meaning** (embedding) | UniXcoder, CPU or GPU | Little effect |
+| **Token fingerprint** | Token-sequence overlap | Offset: moves in lockstep with chunk hash match |
+| **Structure** (AST) | Tree paths, subtree hashes | Offset: about as high for independent solutions as for copies |
+
+A near-exact match from the rule-based fusion (which also uses graph, string tiling,
+TF-IDF and static-rule signals) sets the score to 1.0, and a structure-agreement floor
+keeps reordered copies from slipping. Otherwise those extra signals do not move the
+score. An execution engine (`src/backend/engines/execution/`) exists but is not run on
+uploads.
 
 Engines are registered through a plugin registry
 (`src/backend/engines/engine_registry.py`), and `src/backend/plugins/` ships additional
@@ -76,29 +89,34 @@ drop-in algorithms (Jaccard n-gram, LCS, Levenshtein).
 ### 2. Intelligent Fusion Scoring
 
 - **Learned fusion model** is the production primary score (retrained on 1,371 labeled pairs)
-- **Weight profiles**: `standard`, `conservative`, `rewrite-sensitive`, plus course profiles
-  in `src/backend/engines/course_profiles.yaml`
-- **Precision guards**: minimum concrete/lexical engine agreement and score floors before a
-  high score is trusted
-- **Optuna tuner** (`src/backend/engines/tuning/optuna_tuner.py`) for threshold/weight search
-- **Starter-code exclusion** so template code never inflates a pair score
+- **Review holds**: tiny files and pairs whose overlap is mostly starter or boilerplate code
+  are held at 0.5 with a stated reason
+- **Starter-code exclusion** so template code never inflates a pair score, and code most of
+  the class shares is left out (and professors are told)
+- **Weight profiles** (`standard`, `conservative`, `rewrite-sensitive`, course profiles in
+  `src/backend/engines/course_profiles.yaml`) apply only to the rule-based fallback used
+  when the learned model cannot load
+- **Optuna tuner** (`src/backend/engines/tuning/optuna_tuner.py`) for benchmark
+  threshold/weight search
 
 ### 3. Academic Hierarchy & Assignment Awareness
 
 - Organizations, courses, terms, assignments, versions, students and enrollments
-- Per-course engine weight mapping (e.g. UTSC/UofT course catalog seeding)
-- Assignment modes with an automatic "suggest mode" helper
+- Course codes map to assignment types (e.g. UTSC/UofT course catalog seeding); the type
+  is recorded on the committee report but does not change how a check is scored yet
+- Assignment modes with a "suggest mode" helper (`/api/assignment-modes/suggest`)
 - Seedable demo data for a fresh deployment
 
 ### 4. Professor Review Workspace
 
-- **Risk-ordered queue** with review bands: `low`, `review`, `high`
-- **Band-dependent dispositions** — `no_action`, `note_on_file`, `conversation`,
-  `step_up_verification`, `formal_escalation`; high-stakes options stay blocked until
-  corroborating evidence exists
-- **AI corroboration rule**: an AI flag is only escalated when structural similarity or a
-  web match supports it
-- Side-by-side code comparison, per-engine feature importance, and a workload card
+- **Risk-ordered pairs** with verdict labels, filters and per-pair review status
+- **Score explanation**: the engines that raised each pair's score, strongest first
+- Side-by-side code comparison with matched blocks, a workload card, and one-click cases
+- **In the reviews API, not yet in the dashboard**: band-dependent dispositions
+  (`no_action`, `note_on_file`, `conversation`, `step_up_verification`,
+  `formal_escalation`, high-stakes options blocked until corroborating evidence exists),
+  per-assignment-type review bands, and the AI corroboration rule (an AI flag is only
+  escalated when structural similarity or a web match supports it)
 
 ### 5. Evidence Dossier & Viva
 
@@ -113,6 +131,8 @@ structural entropy, vocabulary richness, and more — blended with a trained ML 
 
 - Turnitin-style likelihood bands in the report
 - Honest confidence and per-layer visibility
+- Measured accuracy is modest: AUC 0.591 in-domain (AIGCodeSet) and 0.523 on an external
+  holdout (CoDet-M4); see `docs/AI_DETECTOR_VS_TURNITIN.md` before relying on a score
 - Calibration and retraining endpoints (`/api/ai-detect/calibrate`, `/retrain`)
 - Measured human-code false-positive baseline surfaced in the product
 - Runs as a background job so large uploads do not time out
@@ -120,9 +140,9 @@ structural entropy, vocabulary richness, and more — blended with a trained ML 
 ### 7. Professional Reporting
 
 - **Integrity Assessment Report** — Dean/Chair-grade PDF with T1–T5 plagiarism
-  classification, 8-signal AI analysis, 95% bootstrap confidence intervals, a
-  due-process evidence chain, student response template, digital signature and a
-  reproducibility hash
+  classification, 8-signal AI analysis, a 95% interval on the class's mean pair score
+  (normal approximation), a due-process evidence chain, student response template,
+  signature lines and a reproducibility hash
 - Committee report, AI originality PDF, HTML/JSON downloads, CSV export
 - Per-pair feature breakdown and expandable code views
 - Institution/course branding
@@ -196,7 +216,7 @@ CodeProvenance/
 │   │   ├── ml/ + pipeline/        # Fusion model training, checkpoints, dataset builders
 │   │   ├── integrations/          # LLM provider catalog + request layer
 │   │   ├── infrastructure/        # DB, email, PDF/CSV report exporters, GPU service
-│   │   ├── models/                # SQLAlchemy models (31 Alembic migrations)
+│   │   ├── models/                # SQLAlchemy models (41 Alembic migrations)
 │   │   ├── plugins/               # Drop-in algorithms (Jaccard, LCS, Levenshtein)
 │   │   ├── workers/               # Celery analysis queue, webhook, batch and GPU workers
 │   │   ├── load_tests/            # Locust + k6 suites
@@ -367,7 +387,8 @@ pytest -o addopts="" tests/integration/
 cd src/frontend && npx tsc --noEmit && npm run build
 ```
 
-The suite is roughly 1,400 tests across ~90 modules, plus scoring and fixture suites.
+The unit suite is roughly 2,100 tests across ~140 modules, plus integration, scoring and
+fixture suites.
 
 CI also runs:
 
@@ -407,13 +428,17 @@ See `docs/LOAD_TESTING.md`.
 
 ### Clone Types Detected
 
-| Type | Description | Engines Used |
-|------|-------------|--------------|
-| **T1** Identical copy | Whitespace/comment changes | Winnowing, Token, GST |
-| **T2** Renamed | Identifier renaming | AST, N-gram |
-| **T3** Restructured | Added/removed/reordered statements | AST, Graph, N-gram |
-| **T4** Semantic clone | Different syntax, same behavior | Execution, Embedding |
-| **T5** Independent work | No evidence of copying | Baseline across all engines |
+| Type | Description | How well it is caught |
+|------|-------------|-----------------------|
+| **T1** Identical copy | Whitespace/comment changes | Reliably: 4 of 5 Kaggle pairs scored 1.0; the fifth, a very short file, was held at review (0.5) by design |
+| **T2** Renamed | Identifier renaming | Reliably: all 24 renamed Kaggle copies scored 1.0 (in-sample: Kaggle is in the training set) |
+| **T3** Restructured | Added/removed/reordered statements | Partly: logic flow and the structure floor help; heavy rewrites score low |
+| **T4** Semantic clone | Different syntax, same behavior | Rarely: embedding has little weight and execution is not run on uploads |
+| **T5** Independent work | No evidence of copying | Same-task solutions can still score high; read the evidence |
+
+On ConPlag, copies scoring at or above 0.75 were near-verbatim, while copies rewritten
+inside a student's own scaffolding looked like independent work to every signal (and to
+JPlag and Dolos). See `docs/BENCHMARK_WORK.md` § ConPlag.
 
 ### Risk Bands
 
@@ -424,25 +449,29 @@ See `docs/LOAD_TESTING.md`.
 | **MEDIUM** | ≥ 0.35 | Suspicious — manual check |
 | **LOW** | < 0.35 | No action needed |
 
-Review bands are course-aware and tunable per assignment type
-(`introductory`, `algorithms`, `projects`, `capstone`) in
-`src/backend/engines/scoring/review_policy.py`.
+These bands are the same for every assignment type. Per-type review bands
+(`introductory`, `algorithms`, `projects`, `capstone`) are defined in
+`src/backend/engines/scoring/review_policy.py` and used by the reviews API, but not by the
+dashboard; changing bands waits for a labelled student-code holdout
+(`docs/STUDENT_DATA_REQUEST_PACK.md`).
 
-### Detection Layers
+### Detection Layers (experimental)
 
-1. **Deterministic** — exact/normalized matches, static rules
-2. **Statistical** — fingerprints, n-grams, token distributions
-3. **Semantic** — AST/graph/embedding/execution agreement
-4. **Explainability** — per-engine contribution, evidence spans, reviewer-facing narrative
+A four-layer pipeline (deterministic → statistical → semantic → explainability) lives in
+`src/backend/engines/detection/`. It is not on the upload path: uploads are scored by the
+learned model described above.
 
 ---
 
 ## 🏛️ Designed for Universities
 
 - **Institutional reports** — branded, committee-ready PDF/HTML with evidence chains
-- **Course-level analysis** — separate weight profiles per course and language
-- **Submission history** — repeat patterns tracked across assignments
-- **Human-in-the-loop** — every disposition is stored and can retrain thresholds
+- **Class-level analysis** — code most of the class shares is left out, and the score is
+  shown against the class's own distribution
+- **Submission history** — optional matching against earlier offerings of a course, and
+  repeat-pattern analytics
+- **Human-in-the-loop** — review decisions are stored per pair; thresholds are changed only
+  from labelled data, never retrained automatically
 - **Multi-tenant** — row-level security with per-tenant API keys and usage metering
 - **Supported languages** — Python, Java, C, C++, JavaScript, TypeScript, Go and more,
   with language-specific parsers and AST generation
