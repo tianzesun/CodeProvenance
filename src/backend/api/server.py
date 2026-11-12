@@ -9693,6 +9693,10 @@ async def _run_analysis_in_workspace(
                 "id": _jobs[job_id].get("assignment_mode"),
                 "name": _jobs[job_id].get("assignment_mode_name"),
                 "version": _jobs[job_id].get("assignment_mode_version"),
+                # What kind of assignment this is. Its preprocessing and evidence
+                # lists stay out: no analysis step acts on them yet, so printing
+                # them would tell a committee about checks that never ran.
+                "context": mode.context,
                 "policy": _jobs[job_id].get("assignment_mode_policy", {}),
             },
             calibration_report,
