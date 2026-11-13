@@ -309,8 +309,13 @@ def get_current_user(request: Request = None) -> dict:
 
 
 def get_current_tenant(user: dict = Depends(get_current_user)) -> dict:
-    """Get current organization from the resolved authenticated user."""
-    org_id = user.get("organization_id") or user.get("tenant_id")
+    """The caller's organization: cases belong to one, so only members may use them.
+
+    This used to fall back to the caller's workspace id, but cases.organization_id
+    references organizations, so a non-member opening a case got a database
+    error (500) instead of an answer (docs/ORGANIZATION_MEMBERSHIP_DESIGN.md).
+    """
+    org_id = user.get("organization_id")
     if org_id:
         try:
             return {"id": uuid.UUID(str(org_id))}
@@ -318,7 +323,10 @@ def get_current_tenant(user: dict = Depends(get_current_user)) -> dict:
             logger.warning("Malformed organization id on authenticated user")
     raise HTTPException(
         status_code=403,
-        detail="User is not associated with an organization",
+        detail=(
+            "Cases are for members of your organization. "
+            "Ask an administrator to add you."
+        ),
     )
 
 
@@ -385,6 +393,15 @@ def _require_result_in_org(
     course = assignment.course if assignment is not None else None
     same_org = course is not None and str(course.organization_id) == str(tenant["id"])
     if not (same_tenant or same_org):
+        raise HTTPException(status_code=404, detail="Result not found")
+    # Analyses are private to their owner unless shared. The workspace and
+    # organization checks above let any member open a case on, or link, a pair
+    # of a colleague's private analysis (learning its name and whether it
+    # scored as HIGH). Same rule as the dashboard and /api/v1.
+    from src.backend.api import server  # lazy: server imports this router
+
+    job_view = server._get_job(str(job.id)) or {"id": str(job.id)}
+    if not server._job_is_accessible(job_view, user):
         raise HTTPException(status_code=404, detail="Result not found")
 
 

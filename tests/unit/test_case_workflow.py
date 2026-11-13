@@ -15,6 +15,7 @@ from src.backend.models.database import (
     Case,
     CaseResultLink,
     Course,
+    CourseInstructor,
     Job,
     Organization,
     SimilarityResult,
@@ -38,6 +39,7 @@ def _ids() -> dict[str, str]:
             "result_mine",
             "result_other",
             "user",
+            "colleague",
         )
     }
 
@@ -85,15 +87,25 @@ def seeded(job_tenant_id):
                     similarity_score=0.9,
                 )
             )
+        for who in ("user", "colleague"):
+            db.add(
+                User(
+                    id=ids[who],
+                    organization_id=ids["org_mine"],
+                    email=f"case-test-{ids[who]}@example.com",
+                    full_name=f"Case Test {who}",
+                    password_hash="x",
+                    role="professor",
+                    is_active=True,
+                )
+            )
+        db.flush()
+        # The professor teaches the course, which is what lets them reach its
+        # analyses (owners live in job.json, not in the jobs row). The colleague
+        # is in the same organization with no course role and nothing shared.
         db.add(
-            User(
-                id=ids["user"],
-                organization_id=ids["org_mine"],
-                email=f"case-test-{ids['user']}@example.com",
-                full_name="Case Test",
-                password_hash="x",
-                role="professor",
-                is_active=True,
+            CourseInstructor(
+                course_id=ids["course_mine"], user_id=ids["user"], role="instructor"
             )
         )
         db.commit()
@@ -115,6 +127,11 @@ def seeded(job_tenant_id):
                 db.query(Case).filter(Case.id.in_(case_ids)).delete(
                     synchronize_session=False
                 )
+            db.query(CourseInstructor).filter(
+                CourseInstructor.course_id.in_(
+                    [ids["course_mine"], ids["course_other"]]
+                )
+            ).delete(synchronize_session=False)
             for side in ("mine", "other"):
                 db.query(SimilarityResult).filter(
                     SimilarityResult.id == ids[f"result_{side}"]
@@ -124,16 +141,17 @@ def seeded(job_tenant_id):
                     Assignment.id == ids[f"assignment_{side}"]
                 ).delete()
                 db.query(Course).filter(Course.id == ids[f"course_{side}"]).delete()
-            db.query(User).filter(User.id == ids["user"]).delete()
+            db.query(User).filter(User.id.in_([ids["user"], ids["colleague"]])).delete(
+                synchronize_session=False
+            )
             for org in ("org_mine", "org_other"):
                 db.query(Organization).filter(Organization.id == ids[org]).delete()
             db.commit()
 
 
-@pytest.fixture
-def client(seeded, monkeypatch) -> TestClient:
+def _client_as(seeded, monkeypatch, who: str) -> TestClient:
     user = {
-        "id": seeded["user"],
+        "id": seeded[who],
         "role": "professor",
         "tenant_id": None,
         "organization_id": seeded["org_mine"],
@@ -148,6 +166,11 @@ def client(seeded, monkeypatch) -> TestClient:
     test_client = TestClient(server.app)
     test_client.cookies.set(server.AUTH_COOKIE_NAME, token)
     return test_client
+
+
+@pytest.fixture
+def client(seeded, monkeypatch) -> TestClient:
+    return _client_as(seeded, monkeypatch, "user")
 
 
 def _new_case(client: TestClient) -> str:
@@ -216,7 +239,9 @@ def test_a_case_opened_from_a_pair_is_linked_to_its_result(client, seeded) -> No
     assert detail["result_ids"] == [seeded["result_mine"]]
 
 
-def test_opening_a_case_on_the_same_pair_again_returns_the_first(client, seeded) -> None:
+def test_opening_a_case_on_the_same_pair_again_returns_the_first(
+    client, seeded
+) -> None:
     first = _open_pair(client, seeded["job_mine"]).json()["case"]["id"]
     again = _open_pair(client, seeded["job_mine"])
     assert again.status_code == 200
@@ -233,3 +258,51 @@ def test_a_case_cannot_be_opened_on_another_organizations_pair(client, seeded) -
     assert _open_pair(client, seeded["job_other"]).status_code == 404
     assert _open_pair(client, seeded["job_mine"], "a.py", "c.py").status_code == 404
     assert client.get(f"/api/cases/for-job/{seeded['job_other']}").status_code == 404
+
+
+def test_a_colleague_cannot_open_a_case_on_a_private_analysis(
+    seeded, monkeypatch
+) -> None:
+    """Same organization is not enough: analyses are private unless shared."""
+    colleague = _client_as(seeded, monkeypatch, "colleague")
+
+    assert _open_pair(colleague, seeded["job_mine"]).status_code == 404
+    case_id = colleague.post(
+        "/api/cases", json={"title": "Colleague's own case"}
+    ).json()["id"]
+    link = colleague.post(
+        f"/api/cases/{case_id}/link", json={"result_id": seeded["result_mine"]}
+    )
+    assert link.status_code == 404
+
+
+def test_cases_need_organization_membership() -> None:
+    """A non-member got a 500 from the organizations foreign key, now a clear 403."""
+    from fastapi import HTTPException
+
+    from src.backend.api.routes import cases
+
+    for user in ({"id": "u", "tenant_id": str(uuid.uuid4())}, {"id": "u"}):
+        with pytest.raises(HTTPException) as exc:
+            cases.get_current_tenant(user)
+        assert exc.value.status_code == 403
+        assert "Ask an administrator" in exc.value.detail
+    org = str(uuid.uuid4())
+    assert cases.get_current_tenant({"id": "u", "organization_id": org}) == {
+        "id": uuid.UUID(org)
+    }
+
+
+def test_the_timeline_names_the_assigned_reviewer(client, seeded) -> None:
+    """The timeline is part of the record a committee reads, so not a bare id."""
+    case_id = _new_case(client)
+
+    assigned = client.post(
+        f"/api/cases/{case_id}/assign", json={"reviewer_id": seeded["colleague"]}
+    )
+    assert assigned.status_code == 200, assigned.text
+
+    events = client.get(f"/api/cases/{case_id}/timeline").json()
+    descriptions = [e.get("description") or "" for e in events]
+    assert "Assigned to Case Test colleague" in descriptions
+    assert not any(seeded["colleague"] in d for d in descriptions)
