@@ -88,6 +88,9 @@ from src.backend.infrastructure.security import (
     validate_password_strength as _validate_password_strength,
 )
 from src.backend.infrastructure.security import (
+    verify_and_upgrade_password as _verify_and_upgrade_password,
+)
+from src.backend.infrastructure.security import (
     verify_password as _verify_password,
 )
 
@@ -6054,13 +6057,16 @@ def _login_sync(email, password):
             .first()
         )
 
+        upgraded_hash = None
         if user is None:
             # Spend the same hashing time as a real check so response time does not
             # reveal which email addresses have an account.
             _verify_password(password, _dummy_password_hash())
             password_ok = False
         else:
-            password_ok = _verify_password(password, user.password_hash)
+            password_ok, upgraded_hash = _verify_and_upgrade_password(
+                password, user.password_hash
+            )
         if not password_ok:
             _record_login_failure(email)
             raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -6085,6 +6091,11 @@ def _login_sync(email, password):
             raise HTTPException(status_code=403, detail="Your account is disabled")
 
         _clear_login_attempts(email)
+        if user is not None and upgraded_hash:
+            # A legacy PBKDF2 hash becomes Argon2id on the first good sign-in. The
+            # session cookie is built after this commit, so it fingerprints the
+            # new hash.
+            user.password_hash = upgraded_hash
         if user.verify_token is not None:
             # First successful sign-in consumes the verification token.
             user.verify_token = None
@@ -6376,11 +6387,25 @@ async def refresh_session(request: Request):
         response = JSONResponse(content={"user": user})
         _issue_guest_cookie(response, user["id"])
         return response
+    claims = _session_claims(request)
+    signed_in_at = claims.get("auth_time")
+    if not isinstance(signed_in_at, (int, float)) or claims.get("pwd") is None:
+        # Issued before sessions had a sign-in time and password fingerprint:
+        # refreshing it would make it unending, so sign in again once instead.
+        raise HTTPException(status_code=401, detail="Please sign in again.")
+    auth_time = datetime.fromtimestamp(signed_in_at, tz=timezone.utc)
+    if datetime.now(timezone.utc) - auth_time >= timedelta(
+        hours=settings.AUTH_SESSION_MAX_HOURS
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Your session has reached its maximum length. Sign in again.",
+        )
     user_obj = await run_in_threadpool(_get_user_by_id, user["id"])
     if not user_obj:
         raise HTTPException(status_code=401, detail="User not found")
     response = JSONResponse(content={"user": user})
-    _issue_auth_cookie(response, user_obj)
+    _issue_auth_cookie(response, user_obj, auth_time)
     return response
 
 
@@ -14305,17 +14330,57 @@ def _validate_password_input(password: str) -> None:
     _validate_password_strength(password)
 
 
-def _create_access_token(user: User) -> str:
+def _password_fingerprint(password_hash: str | None) -> str:
+    """Short digest of the stored hash: changing the password changes it.
+
+    Carried in each session token and checked on every request, so a password
+    reset ends every session issued before it. The hash itself never leaves the
+    database; a 64-bit SHA-256 prefix only has to tell two hashes apart.
+    """
+    return hashlib.sha256((password_hash or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _create_access_token(user: User, auth_time: datetime | None = None) -> str:
+    """A session token; ``auth_time`` is when the user signed in (kept on refresh)."""
     secret = _ensure_auth_secret()
     now = datetime.now(timezone.utc)
+    signed_in = auth_time or now
+    # Refreshing renews the token, but never past the maximum session length.
+    expires = min(
+        now + timedelta(minutes=settings.AUTH_TOKEN_EXPIRE_MINUTES),
+        signed_in + timedelta(hours=settings.AUTH_SESSION_MAX_HOURS),
+    )
     payload = {
         "sub": str(user.id),
         "role": user.role,
         "tenant_id": str(user.tenant_id) if user.tenant_id is not None else None,
-        "exp": now + timedelta(minutes=settings.AUTH_TOKEN_EXPIRE_MINUTES),
+        "exp": expires,
         "iat": now,
+        "auth_time": int(signed_in.timestamp()),
+        "pwd": _password_fingerprint(user.password_hash),
     }
     return jwt.encode(payload, secret, algorithm="HS256")
+
+
+def _session_claims(request: Request) -> dict[str, Any]:
+    """The verified claims of the request's session token (cookie or bearer)."""
+    token = request.cookies.get(AUTH_COOKIE_NAME)
+    auth_header = request.headers.get("Authorization", "")
+    if not token and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    try:
+        return jwt.decode(
+            token,
+            _ensure_auth_secret(),
+            algorithms=["HS256"],
+            options={"require_exp": True},
+        )
+    except JWTError as exc:
+        raise HTTPException(
+            status_code=401, detail="Invalid or expired session"
+        ) from exc
 
 
 def _serialize_user(user: User) -> dict[str, Any]:
@@ -14757,8 +14822,10 @@ def _build_fusion_weights(engine_weights: dict[str, float]) -> dict[str, float]:
     return fusion_weights
 
 
-def _issue_auth_cookie(response: Response, user: User) -> None:
-    token = _create_access_token(user)
+def _issue_auth_cookie(
+    response: Response, user: User, auth_time: datetime | None = None
+) -> None:
+    token = _create_access_token(user, auth_time)
     response.set_cookie(
         key=AUTH_COOKIE_NAME,
         value=token,
@@ -15066,6 +15133,18 @@ def _authenticate_request(request: Request) -> dict[str, Any]:
         )
         if not user or not user.is_active:
             raise HTTPException(status_code=401, detail="User account is unavailable")
+        # A token carrying an older password's fingerprint belongs to a session
+        # from before a password change (or reset): it ends here. Tokens issued
+        # before fingerprints existed carry none and run out within the token
+        # lifetime, since refresh no longer renews them.
+        fingerprint = payload.get("pwd")
+        if fingerprint is not None and fingerprint != _password_fingerprint(
+            user.password_hash
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Your password was changed. Sign in again.",
+            )
         serialized = _serialize_user(user)
 
     return serialized
