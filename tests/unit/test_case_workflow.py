@@ -291,3 +291,18 @@ def test_cases_need_organization_membership() -> None:
     assert cases.get_current_tenant({"id": "u", "organization_id": org}) == {
         "id": uuid.UUID(org)
     }
+
+
+def test_the_timeline_names_the_assigned_reviewer(client, seeded) -> None:
+    """The timeline is part of the record a committee reads, so not a bare id."""
+    case_id = _new_case(client)
+
+    assigned = client.post(
+        f"/api/cases/{case_id}/assign", json={"reviewer_id": seeded["colleague"]}
+    )
+    assert assigned.status_code == 200, assigned.text
+
+    events = client.get(f"/api/cases/{case_id}/timeline").json()
+    descriptions = [e.get("description") or "" for e in events]
+    assert "Assigned to Case Test colleague" in descriptions
+    assert not any(seeded["colleague"] in d for d in descriptions)

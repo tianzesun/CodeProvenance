@@ -13,7 +13,7 @@ from src.backend.application.services.timeline_service import (
     TimelineEventType,
     TimelineService,
 )
-from src.backend.models.database import Case, CaseComment, CaseResultLink
+from src.backend.models.database import Case, CaseComment, CaseResultLink, User
 
 
 class CaseStatus(str):
@@ -116,13 +116,19 @@ class CaseService:
             self.db.commit()
             self.db.refresh(case)
 
+            # The timeline is part of the record a committee reads: name the
+            # reviewer instead of printing their id.
+            reviewer = self.db.get(User, reviewer_id)
+            reviewer_name = (
+                (reviewer.full_name or reviewer.email) if reviewer else str(reviewer_id)
+            )
             self.timeline.create_event(
                 case_id=case_id,
                 # The actor is whoever assigned, not the reviewer assigned.
                 user_id=assigned_by or reviewer_id,
                 event_type="reviewer_assigned",
                 title="Reviewer Assigned",
-                description=f"Assigned to {reviewer_id}",
+                description=f"Assigned to {reviewer_name}",
             )
         return case
 
