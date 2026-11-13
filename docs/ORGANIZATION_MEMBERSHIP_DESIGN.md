@@ -1,6 +1,6 @@
 # Design: organization membership (draft for review)
 
-**Status:** proposal, not implemented. **Risk:** high: it changes existing users' data and what
+**Status:** decisions made (§ 8); step 1, the migration and dry run, is implemented. **Risk:** high: it changes existing users' data and what
 each person can see. Nothing here should be built before the decisions in § 8 are made.
 
 ## 1. Problem
@@ -85,9 +85,10 @@ organization".
 `add_institution_membership`, data-only (no schema change beyond a bookkeeping table):
 
 1. **Pick the organization.** None exists: create one named `INSTITUTION_NAME` (default
-   "Institution"). Exactly one exists (e.g. the seeded "Demo University"): use it, and print a
-   reminder to rename it. More than one: **stop** with a message; mapping users to several
-   organizations needs a human (multi-institution is a non-goal).
+   "Institution"). Exactly one exists (e.g. the seeded "Demo University"): use it, renamed to
+   `INSTITUTION_NAME` when that is set. More than one: **change nothing** and log why; mapping
+   users to several organizations needs a human (multi-institution is a non-goal). It skips
+   rather than fails, because a failing migration would block every deploy.
 2. **Backfill members.** Set `organization_id` for active users with none, using the rule from
    **Decision 3**. Users who already have an organization are left alone.
 3. **Record what changed** in `org_membership_backfill (user_id, created_org_id)`, one row per
@@ -123,14 +124,16 @@ who would join; apply on staging and repeat the staging check in
 - Migration: upgrade on a database with none, one and two organizations (the last must stop);
   downgrade restores exactly the previous `organization_id` values.
 
-## 8. Decisions needed
+## 8. Decisions (made 13 Nov 2026)
 
-1. **Self-registration:** off entirely, admin approval, or auto-join for listed email domains?
-2. **Institution name**, and whether the seeded "Demo University" should be renamed or replaced.
-3. **Backfill rule for existing users:** all active users; only those whose email domain is
-   listed; or none (admins add people after the upgrade)?
-4. **Removal policy:** when someone leaves the organization, should items they shared stay
-   shared?
+1. **Self-registration:** stays open; verified addresses on `INSTITUTION_EMAIL_DOMAINS` join
+   automatically, anyone else is a non-member until an admin adds them.
+2. **Institution:** rename the existing organization (e.g. the seeded "Demo University") to
+   `INSTITUTION_NAME`; create one only when none exists.
+3. **Existing users:** only active users on `INSTITUTION_EMAIL_DOMAINS` join; with no domains
+   set, nobody does.
+4. **Removal:** what a removed member shared stays shared; they stop seeing organization-wide
+   shares.
 
 ## 9. Risks
 
@@ -140,3 +143,18 @@ who would join; apply on staging and repeat the staging check in
   all courses (`academic_access.can_read_course`). With one organization, the same set.
 - **Privacy review:** this changes who can see student work. It belongs in the Information Risk
   Assessment before the pilot.
+
+## 10. Rollout of step 1 (migration `u4v5w6x7y8z9`)
+
+1. Back up the database.
+2. Set, in the backend's environment (the same place as `DATABASE_URL`):
+   `INSTITUTION_NAME="University of Toronto"` and `INSTITUTION_EMAIL_DOMAINS=utoronto.ca`
+   (comma-separated for several; a subdomain such as `mail.utoronto.ca` must be listed itself).
+3. Dry run, and read the result before going on:
+   `python scripts/institution_membership_dry_run.py` (add `--list` to see who would join).
+4. `alembic upgrade head`, then repeat the dry run: it should report nobody left to join.
+5. Undo, if needed: `alembic downgrade t3u4v5w6x7y8` restores exactly the previous names and
+   memberships.
+
+Step 1 only sets memberships for existing accounts. New accounts join once step 2 (the
+creation paths) ships.
