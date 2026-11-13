@@ -313,6 +313,15 @@ class AppSettings(BaseSettings):
     #: Lifetime of a guest session and of the results it produced.
     GUEST_SESSION_MINUTES: int = Field(30, ge=1, le=240)
 
+    # Institution membership (docs/ORGANIZATION_MEMBERSHIP_DESIGN.md). Membership is
+    # what grants sharing, the colleague list and creating terms and courses.
+    #: Name of the deployment's one organization, created at bootstrap if none exists.
+    INSTITUTION_NAME: str = ""
+    #: Comma-separated email domains whose verified self-registrations join the
+    #: organization (e.g. "utoronto.ca"). Anyone else waits for an admin. Read the
+    #: same way by migration u4v5w6x7y8z9.
+    INSTITUTION_EMAIL_DOMAINS: str = ""
+
     # External plagiarism / AI-detection services. These send student work to a third party, so each one needs an
     # explicit *_ENABLED switch: a key sitting in the environment is not enough. Use the `*_active` properties.
     MOSS_ENABLED: bool = False
