@@ -22,6 +22,8 @@ export interface AuthUser {
   role: AuthRole;
   tenant_id: string | null;
   tenant_name: string | null;
+  /** Set for members of the institution's organization; membership grants sharing and courses. */
+  organization_id?: string | null;
   is_active: boolean;
   suspended: boolean;
   last_login_at: string | null;

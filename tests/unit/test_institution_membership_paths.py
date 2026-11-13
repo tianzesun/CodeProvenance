@@ -184,3 +184,125 @@ def test_an_admin_created_account_joins_the_admins_organization(
 
     assert response.status_code == 201, response.text
     assert _organization_of(email) == org_id
+
+
+# ── Admin page: add or remove a member (PATCH /api/admin/users/{id}) ──
+
+
+def _admin_client(monkeypatch, admin: dict) -> TestClient:
+    from jose import jwt as jose_jwt
+
+    monkeypatch.setattr(server, "_authenticate_request", lambda *a, **k: dict(admin))
+    now = datetime.now(timezone.utc)
+    token = jose_jwt.encode(
+        {"sub": admin["id"], "exp": now + timedelta(minutes=30), "iat": now},
+        settings.auth_jwt_secret or "unit-test-secret",
+        algorithm="HS256",
+    )
+    client = TestClient(server.app)
+    client.cookies.set(server.AUTH_COOKIE_NAME, token)
+    return client
+
+
+def test_membership_must_be_true_or_false(monkeypatch) -> None:
+    """Rejected before any lookup: the string "false" must not count as a value."""
+    admin = {
+        "id": str(uuid.uuid4()),
+        "email": "a@x.edu",
+        "role": "admin",
+        "tenant_id": None,
+    }
+    client = _admin_client(monkeypatch, admin)
+
+    response = client.patch(
+        f"/api/admin/users/{uuid.uuid4()}", json={"member": "false"}
+    )
+
+    assert response.status_code == 400
+    assert "member must be true or false" in response.text
+
+
+def _plain_user(email: str, organization_id=None) -> str:
+    with SessionLocal() as db:
+        user = User(
+            email=email,
+            full_name="Plain User",
+            password_hash="x",
+            role="professor",
+            is_active=True,
+            organization_id=organization_id,
+        )
+        db.add(user)
+        db.commit()
+        return str(user.id)
+
+
+def test_an_admin_adds_and_removes_a_member(institution, monkeypatch) -> None:
+    org_id, emails = institution
+    admin = {
+        "id": str(uuid.uuid4()),
+        "email": "admin@member.example.edu",
+        "role": "admin",
+        "tenant_id": None,
+        "organization_id": org_id,
+    }
+    client = _admin_client(monkeypatch, admin)
+    email = f"n-{uuid.uuid4().hex[:10]}@outside.example.com"
+    emails.append(email)
+    user_id = _plain_user(email)
+
+    assert (
+        client.patch(f"/api/admin/users/{user_id}", json={"member": True}).status_code
+        == 200
+    )
+    assert _organization_of(email) == org_id
+
+    assert (
+        client.patch(f"/api/admin/users/{user_id}", json={"member": False}).status_code
+        == 200
+    )
+    assert _organization_of(email) is None
+
+
+def test_an_admin_cannot_remove_their_own_membership(institution, monkeypatch) -> None:
+    org_id, emails = institution
+    email = f"self-{uuid.uuid4().hex[:10]}@member.example.edu"
+    emails.append(email)
+    admin_id = _plain_user(email, organization_id=org_id)
+    admin = {
+        "id": admin_id,
+        "email": email,
+        "role": "admin",
+        "tenant_id": None,
+        "organization_id": org_id,
+    }
+
+    response = _admin_client(monkeypatch, admin).patch(
+        f"/api/admin/users/{admin_id}", json={"member": False}
+    )
+
+    assert response.status_code == 400
+    assert _organization_of(email) == org_id
+
+
+def test_adding_with_no_organization_yet_is_refused(institution, monkeypatch) -> None:
+    _, emails = institution
+    monkeypatch.setattr(
+        server, "_institution_organization_id", lambda db, create=False: None
+    )
+    admin = {
+        "id": str(uuid.uuid4()),
+        "email": "a@x.edu",
+        "role": "admin",
+        "tenant_id": None,
+    }
+    email = f"none-{uuid.uuid4().hex[:10]}@outside.example.com"
+    emails.append(email)
+    user_id = _plain_user(email)
+
+    response = _admin_client(monkeypatch, admin).patch(
+        f"/api/admin/users/{user_id}", json={"member": True}
+    )
+
+    assert response.status_code == 409
+    assert _organization_of(email) is None
