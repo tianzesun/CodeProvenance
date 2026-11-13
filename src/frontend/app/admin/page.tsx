@@ -347,6 +347,46 @@ function StatusBadge({ suspended }: { suspended?: boolean }) {
   );
 }
 
+/**
+ * Organization membership: what lets someone share with colleagues and create terms and courses.
+ * Accounts outside the listed email domains start as non-members until an admin adds them.
+ */
+function MemberControl({
+  entry,
+  isSelf,
+  busy,
+  onToggle,
+}: {
+  entry: AuthUser;
+  isSelf: boolean;
+  busy: boolean;
+  onToggle: (entry: AuthUser) => void;
+}) {
+  const member = Boolean(entry.organization_id);
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span
+        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${member
+          ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+          : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+          }`}
+      >
+        {member ? 'Member' : 'Not a member'}
+      </span>
+      {!(member && isSelf) && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onToggle(entry)}
+          className="text-xs font-medium text-slate-500 underline-offset-2 hover:text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400"
+        >
+          {member ? 'Remove' : 'Add to organization'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function AddUserCard({
   onAdd,
   buttonRef,
@@ -956,6 +996,9 @@ function UserRowSkeleton() {
       </td>
       <td className="px-5 py-4">
         <div className="h-6 w-16 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
+      </td>
+      <td className="px-5 py-4">
+        <div className="h-6 w-20 animate-pulse rounded-full bg-slate-200 dark:bg-slate-800" />
       </td>
       <td className="px-5 py-4">
         <div className="h-4 w-28 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
@@ -1712,6 +1755,26 @@ export default function AdminPage() {
     }
   };
 
+  const handleToggleMembership = async (entry: AuthUser) => {
+    const joining = !entry.organization_id;
+    setTogglingId(entry.id);
+    setSuccessMessage('');
+    setPageError('');
+    try {
+      await apiClient.patch(`/api/admin/users/${entry.id}`, { member: joining });
+      await loadUsers(true);
+      setSuccessMessage(
+        joining
+          ? `${entry.full_name} is now a member of the organization.`
+          : `${entry.full_name} is no longer a member. Items they shared stay shared.`
+      );
+    } catch (error) {
+      setPageError(getErrorMessage(error, 'Couldn’t update membership. Please try again.'));
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
   const requestToggleSuspend = (entry: AuthUser) => {
     if (entry.suspended) {
       handleToggleSuspend(entry);
@@ -2106,6 +2169,7 @@ export default function AdminPage() {
                       <th scope="col" className="px-5 py-3">User</th>
                       <th scope="col" className="px-5 py-3">Role</th>
                       <th scope="col" className="px-5 py-3">Status</th>
+                      <th scope="col" className="px-5 py-3">Member</th>
                       <th scope="col" className="px-5 py-3">Last login</th>
                       <th scope="col" className="px-5 py-3">Workspace</th>
                       <th scope="col" className="px-5 py-3 text-right">Actions</th>
@@ -2138,6 +2202,7 @@ export default function AdminPage() {
                         <th scope="col" className="px-5 py-3">User</th>
                         <th scope="col" className="px-5 py-3">Role</th>
                         <th scope="col" className="px-5 py-3">Status</th>
+                        <th scope="col" className="px-5 py-3">Member</th>
                         <th scope="col" className="px-5 py-3">Last login</th>
                         <th scope="col" className="px-5 py-3">Workspace</th>
                         <th scope="col" className="px-5 py-3 text-right">Actions</th>
@@ -2171,6 +2236,9 @@ export default function AdminPage() {
                             </td>
                             <td className="px-5 py-4"><RoleBadge role={entry.role} /></td>
                             <td className="px-5 py-4"><StatusBadge suspended={entry.suspended} /></td>
+                            <td className="px-5 py-4">
+                              <MemberControl entry={entry} isSelf={isSelf} busy={isToggling} onToggle={handleToggleMembership} />
+                            </td>
                             <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-400">
                               {entry.last_login_at ? (
                                 <span title={`Last sign-in: ${formatDate(entry.last_login_at)}`}>
@@ -2260,6 +2328,12 @@ export default function AdminPage() {
                           <div>
                             <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Status</div>
                             <div className="mt-2"><StatusBadge suspended={entry.suspended} /></div>
+                          </div>
+                          <div className="col-span-2">
+                            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Member</div>
+                            <div className="mt-2">
+                              <MemberControl entry={entry} isSelf={isSelf} busy={isToggling} onToggle={handleToggleMembership} />
+                            </div>
                           </div>
                           <div>
                             <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Last login</div>

@@ -101,14 +101,14 @@ from src.backend.application.services.similarity_cohort import (
     annotate_results,
 )
 from src.backend.config.database import SessionLocal
-from src.backend.infrastructure.professional_report_generator import ReportGenerator
-from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
-    _minimal_pdf_bytes,
-)
 from src.backend.infrastructure.institution_membership import (
     DEFAULT_INSTITUTION_NAME,
     email_domain,
     parse_domains,
+)
+from src.backend.infrastructure.professional_report_generator import ReportGenerator
+from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
+    _minimal_pdf_bytes,
 )
 from src.backend.models.database import (
     AIDetectionResult,
@@ -117,10 +117,10 @@ from src.backend.models.database import (
     CourseInstructor,
     Enrollment,
     Job,
+    Organization,
     Report,
     SimilarityResult,
     Submission,
-    Organization,
     Tenant,
     User,
     VivaOutcome,
@@ -6459,6 +6459,9 @@ async def update_user(request: Request, user_id: str):
     # bool("false") is True, so a JSON string "false" used to SUSPEND the user.
     if suspension is not None and not isinstance(suspension, bool):
         raise HTTPException(status_code=400, detail="suspended must be true or false")
+    membership = payload.get("member")
+    if membership is not None and not isinstance(membership, bool):
+        raise HTTPException(status_code=400, detail="member must be true or false")
     is_active = (not suspension) if suspension is not None else None
 
     with SessionLocal() as db:
@@ -6490,6 +6493,24 @@ async def update_user(request: Request, user_id: str):
 
         if suspension is not None:
             user.is_active = is_active
+        # Membership grants sharing, the colleague list and creating terms and
+        # courses (docs/ORGANIZATION_MEMBERSHIP_DESIGN.md). Removing someone keeps
+        # what they shared shared; they only stop seeing organization-wide shares.
+        if membership is True and not user.organization_id:
+            organization_id = _member_organization_id(db, current_user)
+            if not organization_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="There is no organization to add them to yet",
+                )
+            user.organization_id = organization_id
+        elif membership is False and user.organization_id:
+            if str(user.id) == str(current_user.get("id")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="You cannot remove yourself from the organization",
+                )
+            user.organization_id = None
         db.add(user)
         db.commit()
         db.refresh(user)
