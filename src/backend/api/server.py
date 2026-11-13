@@ -105,6 +105,11 @@ from src.backend.infrastructure.professional_report_generator import ReportGener
 from src.backend.infrastructure.reporting.evidence_pdf_exporter import (
     _minimal_pdf_bytes,
 )
+from src.backend.infrastructure.institution_membership import (
+    DEFAULT_INSTITUTION_NAME,
+    email_domain,
+    parse_domains,
+)
 from src.backend.models.database import (
     AIDetectionResult,
     Assignment,
@@ -115,6 +120,7 @@ from src.backend.models.database import (
     Report,
     SimilarityResult,
     Submission,
+    Organization,
     Tenant,
     User,
     VivaOutcome,
@@ -6018,6 +6024,7 @@ def _bootstrap_admin_sync(email, full_name, password, tenant_name):
         )
         user = User(
             tenant_id=tenant.id,
+            organization_id=_institution_organization_id(db, create=True),
             email=email,
             full_name=full_name,
             password_hash=_hash_password(password),
@@ -6254,12 +6261,15 @@ async def register(request: Request):
             existing.password_hash = _hash_password(password)
             existing.verify_token = _hash_token(token)
             existing.verify_token_expires = expires_at
+            if not existing.organization_id:
+                existing.organization_id = _registration_organization_id(db, email)
             db.add(existing)
         else:
             tenant = _create_tenant(db, _generate_tenant_name(full_name, email))
             db.add(
                 User(
                     tenant_id=tenant.id,
+                    organization_id=_registration_organization_id(db, email),
                     email=email,
                     full_name=full_name,
                     password_hash=_hash_password(password),
@@ -6416,6 +6426,7 @@ async def create_user(request: Request):
         )
         user = User(
             tenant_id=tenant.id,
+            organization_id=_member_organization_id(db, current_user),
             email=email,
             full_name=full_name,
             password_hash=_hash_password(password),
@@ -6692,6 +6703,8 @@ async def import_users(request: Request) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
 
     with SessionLocal() as db:
+        # Every imported account joins the importing admin's organization.
+        member_organization_id = _member_organization_id(db, current_user)
         # A shared tenant is only materialised when the import actually writes.
         shared_tenant = None
         if default_tenant_name and not dry_run:
@@ -6783,6 +6796,7 @@ async def import_users(request: Request) -> dict[str, Any]:
                 db.add(
                     User(
                         tenant_id=tenant.id,
+                        organization_id=member_organization_id,
                         email=email,
                         full_name=full_name,
                         password_hash=_hash_password(password),
@@ -14925,6 +14939,43 @@ def _ensure_guest_sweeper() -> None:
 def _generate_tenant_name(full_name: str, email: str) -> str:
     base = full_name.strip() or email.split("@", 1)[0]
     return f"{base} Workspace"
+
+
+def _institution_organization_id(db, *, create: bool = False) -> str | None:
+    """The deployment's one organization (docs/ORGANIZATION_MEMBERSHIP_DESIGN.md).
+
+    ``create`` (bootstrap only) makes it, named ``INSTITUTION_NAME``, when none
+    exists. None when several exist: one per deployment is assumed, and nobody is
+    guessed into one of them.
+    """
+    ids = db.scalars(select(Organization.id).limit(2)).all()
+    if len(ids) == 1:
+        return str(ids[0])
+    if ids or not create:
+        return None
+    organization = Organization(
+        name=settings.INSTITUTION_NAME.strip() or DEFAULT_INSTITUTION_NAME
+    )
+    db.add(organization)
+    db.flush()
+    return str(organization.id)
+
+
+def _member_organization_id(db, creator: dict[str, Any] | None) -> str | None:
+    """Where an account an admin creates or imports belongs: the admin's organization."""
+    organization_id = (creator or {}).get("organization_id")
+    return str(organization_id) if organization_id else _institution_organization_id(db)
+
+
+def _registration_organization_id(db, email: str) -> str | None:
+    """A self-registration joins only from a listed domain; anyone else waits for an admin.
+
+    The account stays inactive until the emailed link proves the address, so the
+    domain is checked against an inbox the registrant controls.
+    """
+    if email_domain(email) in parse_domains(settings.INSTITUTION_EMAIL_DOMAINS):
+        return _institution_organization_id(db)
+    return None
 
 
 def _create_tenant(db, name: str) -> Tenant:
