@@ -286,6 +286,8 @@ class AppSettings(BaseSettings):
     #: Must be at least 32 random characters in production.
     AUTH_JWT_SECRET: SecretStr
     AUTH_TOKEN_EXPIRE_MINUTES: int = Field(480, ge=1, le=43200)
+    #: Longest a sign-in lasts: refresh renews the token, but never past this.
+    AUTH_SESSION_MAX_HOURS: int = Field(168, ge=1, le=8760)
     AUTH_COOKIE_SECURE: bool = False
     FRONTEND_URL: str = "http://localhost:3000"
 

@@ -11,7 +11,14 @@ from passlib.context import CryptContext
 
 logger = logging.getLogger(__name__)
 
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+#: Argon2id for every new hash (the U of T Secure Development Baseline's approved
+#: password algorithm). PBKDF2-SHA256 hashes stored before stay verifiable and are
+#: replaced on the user's next successful sign-in (``verify_and_update``).
+pwd_context = CryptContext(
+    schemes=["argon2", "pbkdf2_sha256"],
+    deprecated=["pbkdf2_sha256"],
+    argon2__type="ID",
+)
 
 WEAK_PASSWORDS: list[str] = [
     "password",
@@ -28,13 +35,25 @@ WEAK_PASSWORDS: list[str] = [
 
 
 def hash_password(password: str) -> str:
-    """Hash a password using PBKDF2-SHA256."""
+    """Hash a password with Argon2id."""
     return pwd_context.hash(password)
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """Verify a password against its hash."""
+    """Verify a password against its hash (Argon2id, or a legacy PBKDF2 hash)."""
     return pwd_context.verify(password, password_hash)
+
+
+def verify_and_upgrade_password(
+    password: str, password_hash: str
+) -> tuple[bool, str | None]:
+    """Verify, and return a replacement Argon2id hash when the stored one is legacy.
+
+    Returns:
+        ``(verified, new_hash)``; ``new_hash`` is None unless the password was
+        right and the stored hash should be replaced.
+    """
+    return pwd_context.verify_and_update(password, password_hash)
 
 
 def validate_password_strength(password: str) -> None:

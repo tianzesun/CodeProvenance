@@ -306,3 +306,72 @@ class TestResetPassword:
             assert strong.status_code == 200, strong.text
         finally:
             _cleanup(email)
+
+
+class TestSessionsAfterAPasswordChange:
+    """Sessions issued before a reset end; legacy hashes upgrade on sign-in."""
+
+    def test_a_reset_ends_sessions_started_before_it(self, monkeypatch) -> None:
+        sent: list[tuple[str, str]] = []
+
+        async def _capture(email: str, reset_url: str) -> bool:
+            sent.append((email, reset_url))
+            return True
+
+        monkeypatch.setattr(EmailService, "send_password_reset_email", _capture)
+        monkeypatch.setattr(auth_routes, "_forgot_password_rate_limit", {})
+        email = _unique_email()
+
+        try:
+            _create_active_user(email)
+            signed_in = TestClient(server.app)
+            assert (
+                signed_in.post(
+                    "/api/auth/login",
+                    json={"email": email, "password": ORIGINAL_PASSWORD},
+                ).status_code
+                == 200
+            )
+            assert signed_in.get("/api/auth/me").status_code == 200
+
+            other = TestClient(server.app)
+            other.post("/api/auth/forgot-password", json={"email": email})
+            reset = other.post(
+                "/api/auth/reset-password",
+                json={"token": _extract_token(sent), "new_password": NEW_PASSWORD},
+            )
+            assert reset.status_code == 200, reset.text
+
+            after = signed_in.get("/api/auth/me")
+            assert after.status_code == 401, "a session from before the reset must end"
+        finally:
+            _cleanup(email)
+
+    def test_a_legacy_hash_becomes_argon2id_on_sign_in(self) -> None:
+        from passlib.context import CryptContext
+
+        email = _unique_email()
+        try:
+            _create_active_user(email)
+            with SessionLocal() as db:
+                user = db.query(User).filter(User.email == email).first()
+                user.password_hash = CryptContext(schemes=["pbkdf2_sha256"]).hash(
+                    ORIGINAL_PASSWORD
+                )
+                db.commit()
+
+            client = TestClient(server.app)
+            response = client.post(
+                "/api/auth/login", json={"email": email, "password": ORIGINAL_PASSWORD}
+            )
+            assert response.status_code == 200, response.text
+            # The session issued with the upgrade still works: it fingerprints the new hash.
+            assert client.get("/api/auth/me").status_code == 200
+
+            with SessionLocal() as db:
+                stored = (
+                    db.query(User).filter(User.email == email).first().password_hash
+                )
+            assert stored.startswith("$argon2id$")
+        finally:
+            _cleanup(email)
