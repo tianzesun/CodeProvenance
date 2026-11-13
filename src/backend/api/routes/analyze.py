@@ -37,6 +37,28 @@ from src.backend.utils.database import (
 
 logger = logging.getLogger(__name__)
 
+def _require_session_job_access(request: Request, job_id: uuid.UUID) -> None:
+    """Apply the dashboard's per-person job rule to a dashboard session.
+
+    An API key is a workspace's machine identity, so it keeps workspace scope.
+    A signed-in person did not: these endpoints accepted the session cookie and
+    checked only the workspace, so a colleague could read a private analysis by
+    id. Same 404 as a missing job, so ids cannot be probed.
+    """
+    user = getattr(request.state, "user", None)
+    # API-key requests also carry a principal, with role "api" and no user id.
+    if user is None or user.get("role") == "api":
+        return
+    # Lazy: server imports this router, and owns the job store and the rule.
+    from src.backend.api import server
+
+    job = server._get_job(str(job_id)) or {"id": str(job_id)}
+    if not server._job_is_accessible(job, user):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} not found"
+        )
+
+
 router = APIRouter()
 
 # Initialize rate limiter
@@ -361,6 +383,7 @@ def get_job_status(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} not found"
         )
+    _require_session_job_access(request, job_id)
 
     results = []
     if include_results and job.status == "completed":
@@ -450,6 +473,7 @@ def get_job_results(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} not found"
         )
+    _require_session_job_access(request, job_id)
 
     if job.status != "completed":
         raise HTTPException(
@@ -518,6 +542,7 @@ def get_job_report(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Job {job_id} not found"
         )
+    _require_session_job_access(request, job_id)
 
     if job.status != "completed":
         raise HTTPException(
