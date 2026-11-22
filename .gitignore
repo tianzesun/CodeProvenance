@@ -174,3 +174,5 @@ sandbox/
 outputs/
 .hf-cache/
 .wheels/
+.env.production
+.env.*.bak
