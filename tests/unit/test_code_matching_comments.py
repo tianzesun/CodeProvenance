@@ -3,6 +3,7 @@
 from src.backend.engines.similarity.code_matching import (
     CodeHighlighter,
     strip_hash_comment,
+    uses_slash_comments,
 )
 
 SOURCE = """def mean(values):
@@ -75,3 +76,36 @@ def test_a_byte_order_mark_on_one_side_does_not_change_a_pair_score() -> None:
         "a.py": "x = 1\n",
         "b.py": "x = 1\n",
     }
+
+
+JAVA = """public class Main {
+    static int sum(int[] a) {
+        int s = 0;
+        for (int i = 0; i < a.length; i++) {
+            s += a[i];
+        }
+        return s;
+    }
+}
+"""
+
+
+def test_trailing_slash_comments_in_java_still_match() -> None:
+    """A Java copy with ``// comment`` on every line is still matched."""
+    commented = "\n".join(line + " // step" for line in JAVA.splitlines())
+    result = CodeHighlighter().find_matching_segments(
+        JAVA, commented, "Main.java", "Copy.java"
+    )
+    assert result.segments, "the commented Java copy must still show matching code"
+    assert result.total_matched_lines_a == 9
+
+
+def test_python_floor_division_is_never_cut() -> None:
+    """``//`` is an operator in Python, so it is only cut for C-family files."""
+    assert strip_hash_comment("half = n // 2") == "half = n // 2"
+    assert strip_hash_comment("int h = n; // half", slash_comments=True) == "int h = n;"
+    assert (
+        strip_hash_comment('String u = "http://x"; // c', slash_comments=True)
+        == 'String u = "http://x";'
+    )
+    assert uses_slash_comments("Main.JAVA") and not uses_slash_comments("main.py")

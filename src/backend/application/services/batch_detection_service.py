@@ -628,7 +628,7 @@ class BatchDetectionService:
         final_score, review_hold = self._scored(features, logic_flow, fused, ca, cb)
 
         # Compute matching blocks for highlighting
-        match_result = highlighter.find_matching_segments(ca, cb)
+        match_result = highlighter.find_matching_segments(ca, cb, fa, fb)
         matching_blocks = [
             {
                 "file_a": fa,
@@ -711,7 +711,7 @@ class BatchDetectionService:
             raw_score = self._primary_score(features, logic_flow, fused, ca, cb)
 
             # Compute matching blocks
-            match_result = highlighter.find_matching_segments(ca, cb)
+            match_result = highlighter.find_matching_segments(ca, cb, fa, fb)
             matching_blocks = [
                 {
                     "file_a": fa,
@@ -1015,7 +1015,9 @@ class BatchDetectionService:
         final_score = self._primary_score(features, logic_flow, fused, chunk_a, chunk_b)
 
         # Compute matching blocks
-        match_result = highlighter.find_matching_segments(chunk_a, chunk_b)
+        match_result = highlighter.find_matching_segments(
+            chunk_a, chunk_b, filename_a, filename_b
+        )
         matching_blocks = [
             {
                 "file_a": filename_a,

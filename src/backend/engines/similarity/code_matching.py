@@ -29,38 +29,69 @@ _HASH_CODE_LINE = re.compile(
 _BLOCK_COMMENT_PREFIXES = ("//", "/*", "*")
 
 
-def strip_hash_comment(line: str) -> str:
-    """Remove a ``#`` comment from a source line, leaving the code before it.
+#: Extensions whose line comments start with ``//``. Python is not one: there ``//``
+#: is floor division, so it is never cut from ``.py`` files.
+SLASH_COMMENT_SUFFIXES = (
+    ".java",
+    ".c",
+    ".h",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".hpp",
+    ".cs",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".go",
+    ".rs",
+    ".kt",
+    ".swift",
+    ".scala",
+    ".php",
+    ".dart",
+)
 
-    A whole-line comment becomes ``""``. A trailing comment is cut where a ``#``
-    outside a string literal follows whitespace, so ``print("#1")  # note`` keeps
-    its string and ``this.#field`` (JavaScript) is left alone. Preprocessor lines
-    such as ``#include`` are code and are returned unchanged.
+
+def uses_slash_comments(filename: str | None) -> bool:
+    """True when ``filename`` is a language whose line comments start with ``//``."""
+    return bool(filename) and str(filename).lower().endswith(SLASH_COMMENT_SUFFIXES)
+
+
+def strip_hash_comment(line: str, slash_comments: bool = False) -> str:
+    """Remove a trailing or whole-line comment from a source line, keeping the code.
+
+    A whole-line ``#`` comment becomes ``""``. A trailing ``#`` comment is cut where
+    a ``#`` outside a string literal follows whitespace, so ``print("#1")  # note``
+    keeps its string and ``this.#field`` (JavaScript) is left alone. Preprocessor
+    lines such as ``#include`` are code and are returned unchanged. With
+    ``slash_comments`` (C-family files, see ``uses_slash_comments``) a ``//``
+    outside a string literal also starts a comment.
 
     Without this, a copy with a comment added to each line shares no identical
-    lines with its source: the highlighter showed no matching code and line
-    coverage dropped to 0.0, which the fusion hard gate reads as "no evidence".
+    lines with its source, and the highlighter showed no matching code for it.
     """
     stripped = line.lstrip()
-    if not stripped.startswith("#"):
-        quote = ""
-        escaped = False
-        for index, char in enumerate(line):
-            if quote:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == quote:
-                    quote = ""
-            elif char in "\"'":
-                quote = char
-            elif char == "#" and index > 0 and line[index - 1] in " \t":
-                return line[:index].rstrip()
-        return line
-    if _HASH_CODE_LINE.match(stripped):
-        return line
-    return ""
+    if stripped.startswith("#"):
+        return line if _HASH_CODE_LINE.match(stripped) else ""
+    quote = ""
+    escaped = False
+    for index, char in enumerate(line):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif (char == "#" and index > 0 and line[index - 1] in " \t") or (
+            slash_comments and line.startswith("//", index)
+        ):
+            return line[:index].rstrip()
+    return line
 
 
 def is_comment_only(normalized_line: str) -> bool:
@@ -180,17 +211,20 @@ class CodeHighlighter:
         # Not considered a clone
         return None, similarity
 
-    def _code_lines(self, lines: list[str]) -> tuple[list[str], list[str], list[int]]:
+    def _code_lines(
+        self, lines: list[str], slash_comments: bool = False
+    ) -> tuple[list[str], list[str], list[int]]:
         """Return the code lines (comments cut), their normalized form, and their indices.
 
         Blank and comment-only lines are dropped; the indices map each kept line
-        back to its position in ``lines``.
+        back to its position in ``lines``. ``slash_comments`` also cuts trailing
+        ``//`` comments (C-family files only).
         """
         code: list[str] = []
         normalized: list[str] = []
         kept: list[int] = []
         for index, line in enumerate(lines):
-            without_comment = strip_hash_comment(line).rstrip()
+            without_comment = strip_hash_comment(line, slash_comments).rstrip()
             normalized_line = self._normalize_identifiers(without_comment)
             if is_comment_only(normalized_line):
                 continue
@@ -199,8 +233,18 @@ class CodeHighlighter:
             kept.append(index)
         return code, normalized, kept
 
-    def find_matching_segments(self, code_a: str, code_b: str) -> MatchResult:
-        """Find all matching code segments between two code files."""
+    def find_matching_segments(
+        self,
+        code_a: str,
+        code_b: str,
+        filename_a: str | None = None,
+        filename_b: str | None = None,
+    ) -> MatchResult:
+        """Find all matching code segments between two code files.
+
+        The file names, when given, decide whether trailing ``//`` comments are
+        cut (C-family files); ``#`` comments are always cut.
+        """
         lines_a = [line.rstrip() for line in code_a.splitlines()]
         lines_b = [line.rstrip() for line in code_b.splitlines()]
         truncated = len(lines_a) > MAX_MATCH_LINES or len(lines_b) > MAX_MATCH_LINES
@@ -214,8 +258,12 @@ class CodeHighlighter:
         # ``#`` comments cut), so added comments neither break a match into
         # pieces too short to show nor hide it; reported line numbers and text
         # are still the original file's.
-        code_a, normalized_a, kept_a = self._code_lines(lines_a)
-        code_b, normalized_b, kept_b = self._code_lines(lines_b)
+        code_a, normalized_a, kept_a = self._code_lines(
+            lines_a, uses_slash_comments(filename_a)
+        )
+        code_b, normalized_b, kept_b = self._code_lines(
+            lines_b, uses_slash_comments(filename_b)
+        )
 
         matcher = difflib.SequenceMatcher(
             None, normalized_a, normalized_b, autojunk=False
