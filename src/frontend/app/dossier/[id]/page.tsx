@@ -496,7 +496,7 @@ export default function EvidenceDossierPage() {
                 {refreshing ? 'Refreshing…' : 'Refresh'}
               </button>
               <a
-                href={`/report/${encodedJobId}/download-pdf`}
+                href={`/dossier/${encodedJobId}/download-pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
