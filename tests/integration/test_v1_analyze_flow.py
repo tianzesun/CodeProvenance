@@ -307,7 +307,9 @@ class TestV1AnalyzeFlow:
         data = response.json()
         job_id = data["job_id"]
         job_dir = stub_pipeline.get("job_dir")
-        submission_a, submission_b = data["submission_ids"][:2]
+        # Stored pairs are ordered (ck_no_duplicate_pairs: a < b), as the app writes them;
+        # the ids are random UUIDs, so inserting them in API order failed about half the time.
+        submission_a, submission_b = sorted(data["submission_ids"][:2])
 
         from datetime import datetime
 
