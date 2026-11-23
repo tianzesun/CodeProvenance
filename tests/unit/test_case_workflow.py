@@ -306,3 +306,46 @@ def test_the_timeline_names_the_assigned_reviewer(client, seeded) -> None:
     descriptions = [e.get("description") or "" for e in events]
     assert "Assigned to Case Test colleague" in descriptions
     assert not any(seeded["colleague"] in d for d in descriptions)
+
+
+def test_a_case_lists_its_linked_pairs_for_the_evidence_panel(client, seeded) -> None:
+    case_id = _open_pair(client, seeded["job_mine"]).json()["case"]["id"]
+
+    detail = client.get(f"/api/cases/{case_id}").json()
+    assert detail["results"] == [
+        {
+            "result_id": seeded["result_mine"],
+            "job_id": seeded["job_mine"],
+            "file_a": "a.py",
+            "file_b": "b.py",
+            "score": 0.9,
+        }
+    ]
+    assert detail["hidden_results"] == 0
+
+
+def test_a_shared_case_hides_pairs_from_an_analysis_the_viewer_cannot_open(
+    client, seeded, monkeypatch
+) -> None:
+    """Sharing a case is not sharing its analysis: no file names or scores leak."""
+    from src.backend.models.database import ResourceShare
+
+    case_id = _open_pair(client, seeded["job_mine"]).json()["case"]["id"]
+    shared = client.put(
+        f"/api/cases/{case_id}/sharing",
+        json={"workspace": False, "user_ids": [seeded["colleague"]]},
+    )
+    assert shared.status_code == 200, shared.text
+    try:
+        colleague = _client_as(seeded, monkeypatch, "colleague")
+        detail = colleague.get(f"/api/cases/{case_id}")
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["results"] == []
+        assert detail.json()["hidden_results"] == 1
+    finally:
+        with SessionLocal() as db:
+            db.query(ResourceShare).filter(
+                ResourceShare.resource_type == "case",
+                ResourceShare.resource_id == case_id,
+            ).delete(synchronize_session=False)
+            db.commit()
