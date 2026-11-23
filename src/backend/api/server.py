@@ -6411,6 +6411,13 @@ async def refresh_session(request: Request):
 
 @app.get("/api/admin/users")
 async def list_users(request: Request):
+    """List every user account in the deployment (admin only).
+
+    Deployment-wide on purpose, like export and update: a deployment serves one
+    institution, and admins must see non-members (``organization_id`` NULL) to add
+    them. Per-organization admins are a multi-institution non-goal; see
+    docs/ORGANIZATION_MEMBERSHIP_DESIGN.md § 3.
+    """
     _require_current_user(request, admin_only=True)
     with SessionLocal() as db:
         users = db.scalars(

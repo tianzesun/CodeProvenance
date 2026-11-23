@@ -199,11 +199,11 @@ false-positive-rate validation, history, login, reset password, verify email.
 - **Very large files (over 10,000 lines):** the chunked path pairs chunks by position. A copy
   with code inserted at the top could misalign and be missed. This was a deliberate
   performance trade-off; I didn't measure it.
-- **Possible cross-workspace listing:** `GET /api/admin/users` (`server.py:6412`) returns all
-  users with no tenant or organisation filter (confirmed in the code; not run). It is
-  admin-only, so this is fine if "admin" means platform operator. If workspace admins are meant
-  to see only their own workspace, it leaks the user list across workspaces. This is
-  auth-adjacent, so I didn't change it. Please decide and review.
+- **Cross-workspace listing (resolved, by design):** `GET /api/admin/users` returns all users
+  with no tenant or organisation filter. Reviewed on 23 November: this is the documented
+  design, not a leak. A deployment serves one institution, admins are deployment-wide for user
+  management, and they need to see non-members to add them
+  (`docs/ORGANIZATION_MEMBERSHIP_DESIGN.md` § 3). The route now says so in its docstring.
 - **Shared Redis:** the benchmark runs first wrote UniXcoder embedding cache entries to the
   local dev Redis (db 0, `integritydesk:unixcoder:*`, about 200 keys, keyed by file content).
   Those values are what the app would compute anyway. Later runs used db 15.
