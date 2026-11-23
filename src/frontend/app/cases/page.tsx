@@ -53,14 +53,21 @@ type RawCase = {
   investigator?: { name?: string };
 };
 
-// NOTE: this is a stand-in, not a measured score. The list endpoint doesn't
-// return a similarity/risk value, so "Risk" is derived from case priority.
+// Sort order for case priority, not a measured score: the list endpoint doesn't
+// return a similarity/risk value. It used to be shown as a "Risk" percentage
+// (HIGH = "92%"), which read like a detection score; the column now shows the priority.
 const PRIORITY_RISK: Record<string, number> = {
   URGENT: 97,
   HIGH: 92,
   MEDIUM: 72,
   LOW: 40,
 };
+
+/** "HIGH" -> "High" for the priority badge. */
+function formatPriority(priority: string): string {
+  const word = priority.toLowerCase();
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
 
 const STATUS_TABS: { key: CaseStatus | 'ALL'; label: string }[] = [
   { key: 'ALL', label: 'All' },
@@ -79,7 +86,7 @@ const STATUS_ORDER: Record<string, number> = {
 
 const SORT_KEYS: SortKey[] = ['risk', 'status', 'course', 'updated'];
 const SORT_LABELS: Record<SortKey, string> = {
-  risk: 'risk',
+  risk: 'priority',
   status: 'status',
   course: 'course',
   updated: 'last updated',
@@ -373,7 +380,7 @@ export default function CasesQueuePage() {
       }
       if (cmp !== 0) return cmp * dir;
 
-      // Risk and status have only a few distinct values; break ties newest-first
+      // Priority and status have only a few distinct values; break ties newest-first
       // (then by id) so the order is stable instead of whatever the API returned.
       const byUpdated = toTime(b.updatedAt) - toTime(a.updatedAt);
       return byUpdated !== 0 ? byUpdated : a.id.localeCompare(b.id);
@@ -454,7 +461,7 @@ export default function CasesQueuePage() {
         <th scope="col" className="px-5 py-3 text-left">
           Pair
         </th>
-        {renderSortableTh('risk', 'Risk')}
+        {renderSortableTh('risk', 'Priority')}
         <th scope="col" className="px-5 py-3 text-left">
           Assigned reviewer
         </th>
@@ -615,7 +622,7 @@ export default function CasesQueuePage() {
                         <div className="truncate font-medium text-slate-900 dark:text-white">{item.title}</div>
                       </td>
                       <td className="px-5 py-4">
-                        <RiskBadge value={item.risk || 50} />
+                        <RiskBadge value={item.risk || 50} label={formatPriority(item.priority)} />
                       </td>
                       <td className="px-5 py-4 text-sm text-slate-600 dark:text-slate-400">{item.reviewer}</td>
                       <td className="px-5 py-4 text-right text-xs text-slate-500 dark:text-slate-400">

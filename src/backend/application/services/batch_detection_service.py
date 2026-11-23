@@ -227,6 +227,21 @@ def _apply_structure_sensitivity_floor(
     return score
 
 
+def _bom_free(source: str) -> str:
+    """Drop a leading UTF-8 byte-order mark, an encoding artefact rather than code."""
+    return source.removeprefix("\ufeff")
+
+
+def _without_bom(submissions: dict[str, str]) -> dict[str, str]:
+    """Return ``submissions`` with any leading byte-order mark removed.
+
+    Uploads are decoded as plain "utf-8", so files saved by Windows editors keep
+    U+FEFF on their first line. A BOM on one side of a pair moved an innocent
+    pair's score by about 0.07; removing it shifts no line numbers.
+    """
+    return {name: _bom_free(source) for name, source in submissions.items()}
+
+
 class BatchDetectionService:
     """Process entire folders of student submissions."""
 
@@ -259,14 +274,16 @@ class BatchDetectionService:
         self.threshold = threshold
         self.weights = weights
         self.learned_scorer = LearnedFusionScorer()
-        self.starter_sources = list(starter_sources or [])
+        # BOM-free like the submissions, or a starter file saved with a BOM keeps
+        # its first line from being recognised in the students' copies.
+        self.starter_sources = [_bom_free(source) for source in starter_sources or []]
         self.infer_common_code = infer_common_code
         self.min_evidence_tokens = min_evidence_tokens
         self.starter_remover = None
-        if starter_sources:
+        if self.starter_sources:
             from src.backend.engines.mvp.starter_code import StarterCodeRemover
 
-            self.starter_remover = StarterCodeRemover(starter_sources)
+            self.starter_remover = StarterCodeRemover(self.starter_sources)
 
     def _learned_available(self) -> bool:
         """True when a trained learned-fusion artifact is loaded."""
@@ -426,6 +443,9 @@ class BatchDetectionService:
             - Parallel (8 workers): ~0.4-1s per pair (3-5x faster)
             - Recommended for >10 submissions (>45 pairs)
         """
+        submissions = _without_bom(submissions)
+        if cohort is not None:
+            cohort = [_bom_free(source) for source in cohort]
 
         if self.infer_common_code:
             from src.backend.engines.mvp.starter_code import StarterCodeRemover
@@ -610,7 +630,7 @@ class BatchDetectionService:
         final_score, review_hold = self._scored(features, logic_flow, fused, ca, cb)
 
         # Compute matching blocks for highlighting
-        match_result = highlighter.find_matching_segments(ca, cb)
+        match_result = highlighter.find_matching_segments(ca, cb, fa, fb)
         matching_blocks = [
             {
                 "file_a": fa,
@@ -669,6 +689,7 @@ class BatchDetectionService:
         from src.backend.engines.similarity.code_matching import CodeHighlighter
 
         highlighter = CodeHighlighter(min_match_length=4)
+        submissions = _without_bom(submissions)
         scored_pairs = []
         total_pairs = len(pairs)
         completed_pairs = 0
@@ -692,7 +713,7 @@ class BatchDetectionService:
             raw_score = self._primary_score(features, logic_flow, fused, ca, cb)
 
             # Compute matching blocks
-            match_result = highlighter.find_matching_segments(ca, cb)
+            match_result = highlighter.find_matching_segments(ca, cb, fa, fb)
             matching_blocks = [
                 {
                     "file_a": fa,
@@ -996,7 +1017,9 @@ class BatchDetectionService:
         final_score = self._primary_score(features, logic_flow, fused, chunk_a, chunk_b)
 
         # Compute matching blocks
-        match_result = highlighter.find_matching_segments(chunk_a, chunk_b)
+        match_result = highlighter.find_matching_segments(
+            chunk_a, chunk_b, filename_a, filename_b
+        )
         matching_blocks = [
             {
                 "file_a": filename_a,

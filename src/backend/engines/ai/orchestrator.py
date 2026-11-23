@@ -250,6 +250,11 @@ class AIDetectionOrchestrator:
         Returns the same shape as the legacy AIDetectionEngine.analyze()
         plus an extra "layers" key for debugging / UI.
         """
+        # A UTF-8 byte-order mark (Notepad and other Windows editors write one) is an
+        # encoding artefact, not code, but uploads are decoded as plain "utf-8", which
+        # keeps it. Left in, it moved scores on real student files by up to 0.16 and
+        # across a band. Removing it shifts no line numbers.
+        code = (code or "").removeprefix("﻿")
         if not code or len(code.strip()) < 20:
             return {
                 "ai_probability": 0.0,
