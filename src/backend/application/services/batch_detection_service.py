@@ -274,14 +274,16 @@ class BatchDetectionService:
         self.threshold = threshold
         self.weights = weights
         self.learned_scorer = LearnedFusionScorer()
-        self.starter_sources = list(starter_sources or [])
+        # BOM-free like the submissions, or a starter file saved with a BOM keeps
+        # its first line from being recognised in the students' copies.
+        self.starter_sources = [_bom_free(source) for source in starter_sources or []]
         self.infer_common_code = infer_common_code
         self.min_evidence_tokens = min_evidence_tokens
         self.starter_remover = None
-        if starter_sources:
+        if self.starter_sources:
             from src.backend.engines.mvp.starter_code import StarterCodeRemover
 
-            self.starter_remover = StarterCodeRemover(starter_sources)
+            self.starter_remover = StarterCodeRemover(self.starter_sources)
 
     def _learned_available(self) -> bool:
         """True when a trained learned-fusion artifact is loaded."""

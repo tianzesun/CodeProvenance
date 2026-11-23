@@ -109,3 +109,14 @@ def test_python_floor_division_is_never_cut() -> None:
         == 'String u = "http://x";'
     )
     assert uses_slash_comments("Main.JAVA") and not uses_slash_comments("main.py")
+
+
+def test_a_starter_file_saved_with_a_bom_is_still_removed() -> None:
+    """The first line of a BOM-prefixed starter file still matches the students' copy."""
+    from src.backend.application.services.batch_detection_service import (
+        BatchDetectionService,
+    )
+
+    starter = "import sys\n\ndef read_input():\n    return sys.stdin.read().split()\n"
+    service = BatchDetectionService(starter_sources=["﻿" + starter])
+    assert service.starter_sources == [starter]
