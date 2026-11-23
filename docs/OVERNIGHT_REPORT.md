@@ -109,7 +109,19 @@ scratch evaluation but **not into this branch**, because:
   **and** for innocent pairs (51 of 193, mean +0.026, up to +0.53 logits for one pair). ConPlag
   (Java/C++) is unchanged: 0 of 911 pairs change. That is effectively a band change, and band
   changes are gated on the student holdout.
-- Full-pipeline class evaluation on Kaggle, before and after: still running when this report was first committed. Results will be added below if they finish before 08:30.
+- Full-pipeline class evaluation on Kaggle, before and after (`class_evaluation_runner
+  --datasets kaggle_student_code`, all 15,051 pairs, base `bbeb12f6` vs base + patch, same
+  machine). **Without a retrain the patch makes things worse:**
+
+  | | AUC | Pairs shown ≥0.35 | Recall ≥0.35 / ≥0.65 | Labelled innocent ≥0.65 |
+  | --- | ---: | ---: | ---: | ---: |
+  | Before | 0.880 | 7.3% | 98.0% / 95.0% | 57.0% |
+  | After (patch, no retrain) | 0.867 | 8.6% | 98.0% / 95.0% | 57.5% |
+
+  Of the labelled pairs, 15 of 99 copies and 47 of 193 innocent pairs scored higher, and one
+  innocent pair crossed a band. Recall did not move. That confirms holding the patch back
+  until a retrain. (Kaggle labels are in-sample and partly wrong, see `docs/BENCHMARK_WORK.md`,
+  but the direction is clear.) The baseline AUC of 0.880 is close to the 25 Oct 0.874.
 
 **Recommendation:** apply the patch on the GPU host, retrain learned fusion
 (`docs/FUSION_TRAINING_WORKFLOW.md`), then rerun the ConPlag and Kaggle class evaluations
