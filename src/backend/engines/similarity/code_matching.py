@@ -20,6 +20,54 @@ from typing import NamedTuple
 MAX_MATCH_LINES = 5000
 _TOKEN_CACHE_SIZE = 256
 
+#: ``#`` lines that are code, not comments: C/C++/C# preprocessor directives and
+#: Rust attributes. Every other line starting with ``#`` is a comment.
+_HASH_CODE_LINE = re.compile(
+    r"#\s*(include|define|undef|if|ifdef|ifndef|elif|else|endif|pragma|error|warning|"
+    r"line|import|region|endregion)\b|#!?\[",
+)
+_BLOCK_COMMENT_PREFIXES = ("//", "/*", "*")
+
+
+def strip_hash_comment(line: str) -> str:
+    """Remove a ``#`` comment from a source line, leaving the code before it.
+
+    A whole-line comment becomes ``""``. A trailing comment is cut where a ``#``
+    outside a string literal follows whitespace, so ``print("#1")  # note`` keeps
+    its string and ``this.#field`` (JavaScript) is left alone. Preprocessor lines
+    such as ``#include`` are code and are returned unchanged.
+
+    Without this, a copy with a comment added to each line shares no identical
+    lines with its source: the highlighter showed no matching code and line
+    coverage dropped to 0.0, which the fusion hard gate reads as "no evidence".
+    """
+    stripped = line.lstrip()
+    if not stripped.startswith("#"):
+        quote = ""
+        escaped = False
+        for index, char in enumerate(line):
+            if quote:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    quote = ""
+            elif char in "\"'":
+                quote = char
+            elif char == "#" and index > 0 and line[index - 1] in " \t":
+                return line[:index].rstrip()
+        return line
+    if _HASH_CODE_LINE.match(stripped):
+        return line
+    return ""
+
+
+def is_comment_only(normalized_line: str) -> bool:
+    """True for a blank or ``//`` / ``/*`` / ``*`` comment line (after ``#`` stripping)."""
+    compact = normalized_line.replace(" ", "").replace("\t", "")
+    return not compact or compact.startswith(_BLOCK_COMMENT_PREFIXES)
+
 
 class CloneType(Enum):
     """Code clone types as per standard classification."""
@@ -132,6 +180,25 @@ class CodeHighlighter:
         # Not considered a clone
         return None, similarity
 
+    def _code_lines(self, lines: list[str]) -> tuple[list[str], list[str], list[int]]:
+        """Return the code lines (comments cut), their normalized form, and their indices.
+
+        Blank and comment-only lines are dropped; the indices map each kept line
+        back to its position in ``lines``.
+        """
+        code: list[str] = []
+        normalized: list[str] = []
+        kept: list[int] = []
+        for index, line in enumerate(lines):
+            without_comment = strip_hash_comment(line).rstrip()
+            normalized_line = self._normalize_identifiers(without_comment)
+            if is_comment_only(normalized_line):
+                continue
+            code.append(without_comment)
+            normalized.append(normalized_line)
+            kept.append(index)
+        return code, normalized, kept
+
     def find_matching_segments(self, code_a: str, code_b: str) -> MatchResult:
         """Find all matching code segments between two code files."""
         lines_a = [line.rstrip() for line in code_a.splitlines()]
@@ -143,8 +210,12 @@ class CodeHighlighter:
         # clones register as matching blocks. Without this, difflib finds no
         # blocks for renamed code and coverage collapses to 0.0, which the
         # fusion hard-gate interprets as "no structural evidence" and vetoes.
-        normalized_a = [self._normalize_identifiers(line) for line in lines_a]
-        normalized_b = [self._normalize_identifiers(line) for line in lines_b]
+        # Comments and blank lines are left out of the alignment (and trailing
+        # ``#`` comments cut), so added comments neither break a match into
+        # pieces too short to show nor hide it; reported line numbers and text
+        # are still the original file's.
+        code_a, normalized_a, kept_a = self._code_lines(lines_a)
+        code_b, normalized_b, kept_b = self._code_lines(lines_b)
 
         matcher = difflib.SequenceMatcher(
             None, normalized_a, normalized_b, autojunk=False
@@ -160,14 +231,15 @@ class CodeHighlighter:
             if block.size < self.min_match_length:
                 continue
 
-            start_a, start_b, length = block
-            end_a = start_a + length - 1
-            end_b = start_b + length - 1
+            first_a, first_b, length = block
+            start_a, end_a = kept_a[first_a], kept_a[first_a + length - 1]
+            start_b, end_b = kept_b[first_b], kept_b[first_b + length - 1]
 
+            clone_type, similarity = self._classify_clone_type(
+                code_a[first_a : first_a + length], code_b[first_b : first_b + length]
+            )
             segment_a = lines_a[start_a : end_a + 1]
             segment_b = lines_b[start_b : end_b + 1]
-
-            clone_type, similarity = self._classify_clone_type(segment_a, segment_b)
 
             if clone_type is not None:
                 segments.append(
