@@ -63,3 +63,15 @@ def test_strip_hash_comment_keeps_code_strings_and_directives() -> None:
     assert strip_hash_comment("#include <stdio.h>") == "#include <stdio.h>"
     assert strip_hash_comment("#[derive(Debug)]") == "#[derive(Debug)]"
     assert strip_hash_comment("this.#count += 1;") == "this.#count += 1;"
+
+
+def test_a_byte_order_mark_on_one_side_does_not_change_a_pair_score() -> None:
+    """Pair scores are computed on BOM-free text."""
+    from src.backend.application.services.batch_detection_service import (
+        _without_bom,
+    )
+
+    assert _without_bom({"a.py": "﻿x = 1\n", "b.py": "x = 1\n"}) == {
+        "a.py": "x = 1\n",
+        "b.py": "x = 1\n",
+    }

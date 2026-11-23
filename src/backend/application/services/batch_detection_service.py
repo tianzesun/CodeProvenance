@@ -227,6 +227,21 @@ def _apply_structure_sensitivity_floor(
     return score
 
 
+def _bom_free(source: str) -> str:
+    """Drop a leading UTF-8 byte-order mark, an encoding artefact rather than code."""
+    return source.removeprefix("\ufeff")
+
+
+def _without_bom(submissions: dict[str, str]) -> dict[str, str]:
+    """Return ``submissions`` with any leading byte-order mark removed.
+
+    Uploads are decoded as plain "utf-8", so files saved by Windows editors keep
+    U+FEFF on their first line. A BOM on one side of a pair moved an innocent
+    pair's score by about 0.07; removing it shifts no line numbers.
+    """
+    return {name: _bom_free(source) for name, source in submissions.items()}
+
+
 class BatchDetectionService:
     """Process entire folders of student submissions."""
 
@@ -426,6 +441,9 @@ class BatchDetectionService:
             - Parallel (8 workers): ~0.4-1s per pair (3-5x faster)
             - Recommended for >10 submissions (>45 pairs)
         """
+        submissions = _without_bom(submissions)
+        if cohort is not None:
+            cohort = [_bom_free(source) for source in cohort]
 
         if self.infer_common_code:
             from src.backend.engines.mvp.starter_code import StarterCodeRemover
@@ -669,6 +687,7 @@ class BatchDetectionService:
         from src.backend.engines.similarity.code_matching import CodeHighlighter
 
         highlighter = CodeHighlighter(min_match_length=4)
+        submissions = _without_bom(submissions)
         scored_pairs = []
         total_pairs = len(pairs)
         completed_pairs = 0
