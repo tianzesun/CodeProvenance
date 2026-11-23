@@ -34,6 +34,10 @@ import type { ComponentType, Ref } from 'react';
 
 type CaseComment = { id: string; user_id: string; body: string; created_at: string };
 
+// A linked pair the viewer may open; pairs behind analyses they can't open are
+// only counted (hidden_results), never described.
+type LinkedPair = { result_id: string; job_id: string; file_a: string; file_b: string; score: number };
+
 type CaseData = {
   id: string;
   title: string;
@@ -44,6 +48,8 @@ type CaseData = {
   investigator?: { id: string; name: string } | null;
   assignment?: { title: string; course_name: string };
   result_ids?: string[];
+  results?: LinkedPair[];
+  hidden_results?: number;
   comments?: CaseComment[];
 };
 
@@ -140,9 +146,16 @@ function parseCaseResponse(data: unknown): { caseData: CaseData; comments: CaseC
   // The API returns result_ids beside `case`, not inside it, so the page always
   // showed "Linked results: —". Deduplicate: older links could be stored twice.
   const resultIds = payload?.case ? payload.result_ids : found.result_ids;
-  const caseData = Array.isArray(resultIds)
+  const withIds = Array.isArray(resultIds)
     ? { ...found, result_ids: Array.from(new Set(resultIds.map(String))) }
     : found;
+  // results / hidden_results also sit beside `case`.
+  const source = payload?.case ? payload : found;
+  const caseData: CaseData = {
+    ...withIds,
+    results: Array.isArray(source?.results) ? source.results : undefined,
+    hidden_results: typeof source?.hidden_results === 'number' ? source.hidden_results : undefined,
+  };
 
   const comments = payload?.comments ?? found.comments ?? [];
   return { caseData, comments: Array.isArray(comments) ? comments : [] };
@@ -415,6 +428,8 @@ export default function CompareCasePage() {
   const riskPct = toPercent(caseData.risk_score);
   const confidencePct = toPercent(caseData.confidence);
   const linkedResults = Array.isArray(caseData.result_ids) ? caseData.result_ids.length : null;
+  const linkedPairs = caseData.results ?? [];
+  const hiddenResults = caseData.hidden_results ?? 0;
   const badgeValue = riskPct ?? PRIORITY_RISK[priority] ?? 72;
   const priorityTone: 'red' | 'blue' | 'slate' =
     priority === 'URGENT' || priority === 'HIGH' ? 'red' : priority === 'MEDIUM' ? 'blue' : 'slate';
@@ -648,13 +663,38 @@ export default function CompareCasePage() {
             <div className="flex flex-col gap-3">
               <CardHeader
                 title="Evidence"
-                description="Matched code, flagged reasons and history for this case."
+                description="The analysis pairs linked to this case."
               />
+              {linkedPairs.length > 0 && (
+                <ul className="flex flex-col divide-y divide-slate-200 dark:divide-slate-800">
+                  {linkedPairs.map((pair) => (
+                    <li key={pair.result_id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                          {pair.file_a} and {pair.file_b}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Similarity {Math.round(pair.score * 100)}%
+                        </p>
+                      </div>
+                      <Link
+                        href={`/results/${encodeURIComponent(pair.job_id)}`}
+                        className="theme-link inline-flex items-center gap-1 text-sm font-medium"
+                      >
+                        Open analysis
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <p className="text-sm leading-6 text-slate-600 dark:text-slate-400">
-                Detailed evidence isn’t shown on this page yet.{' '}
-                {linkedResults
-                  ? `This case links to ${linkedResults} analysis ${linkedResults === 1 ? 'result' : 'results'}; review the matches there before deciding.`
-                  : 'Review the original analysis results before deciding.'}
+                {linkedPairs.length > 0
+                  ? 'Review the matched code in each analysis before deciding.'
+                  : linkedResults
+                    ? `This case links to ${linkedResults} analysis ${linkedResults === 1 ? 'result' : 'results'}; review the matches there before deciding.`
+                    : 'Review the original analysis results before deciding.'}
+                {hiddenResults > 0 &&
+                  ` ${hiddenResults} linked ${hiddenResults === 1 ? 'pair is' : 'pairs are'} in an analysis you don’t have access to; ask its owner to share it.`}
               </p>
             </div>
           </Card>

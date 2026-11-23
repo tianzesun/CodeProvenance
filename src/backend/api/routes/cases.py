@@ -405,6 +405,46 @@ def _require_result_in_org(
         raise HTTPException(status_code=404, detail="Result not found")
 
 
+def _visible_linked_results(
+    db: Session, result_ids: list[Any], user: dict
+) -> tuple[list[dict], int]:
+    """Linked pairs the caller may open, highest score first, and how many were withheld.
+
+    A case can be shared with someone who cannot open the analysis behind it
+    (analyses are private unless shared). Those pairs are only counted, so the
+    case page never reveals another professor's file names or scores.
+    """
+    if not result_ids:
+        return [], 0
+    from src.backend.api import server  # lazy: server imports this router
+
+    rows = (
+        db.query(SimilarityResult)
+        .filter(SimilarityResult.id.in_([str(rid) for rid in result_ids]))
+        .all()
+    )
+    scope = sharing.access_scope(db, user)
+    job_access: dict[str, bool] = {}
+    visible: list[dict] = []
+    for row in rows:
+        job_id = str(row.job_id)
+        if job_id not in job_access:
+            job_view = server._get_job(job_id) or {"id": job_id}
+            job_access[job_id] = server._job_is_accessible(job_view, user, scope)
+        if job_access[job_id]:
+            visible.append(
+                {
+                    "result_id": str(row.id),
+                    "job_id": job_id,
+                    "file_a": row.submission_a_id,
+                    "file_b": row.submission_b_id,
+                    "score": float(row.similarity_score),
+                }
+            )
+    visible.sort(key=lambda item: item["score"], reverse=True)
+    return visible, len(result_ids) - len(visible)
+
+
 # A pair this similar opens as a HIGH priority case; below it, MEDIUM.
 HIGH_PRIORITY_SCORE = 0.9
 CASE_TITLE_MAX = 255
@@ -527,13 +567,21 @@ async def get_case(
     tenant=Depends(get_current_tenant),
     db: Session = Depends(get_db),
 ):
-    """Get a case with all linked results and comments."""
+    """Get a case with all linked results and comments.
+
+    ``results`` summarizes the linked pairs the caller may open;
+    ``hidden_results`` counts the ones behind analyses they cannot.
+    """
     service = CaseService(db)
     _load_case_for_tenant(service, case_id, tenant, user)
     case_data = service.get_case_with_results(case_id)
     if not case_data:
         raise HTTPException(status_code=404, detail="Case not found")
-    return _case_detail(case_data)
+    detail = _case_detail(case_data)
+    detail["results"], detail["hidden_results"] = _visible_linked_results(
+        db, case_data.get("result_ids", []), user
+    )
+    return detail
 
 
 @router.patch("/cases/{case_id}", response_model=dict)
