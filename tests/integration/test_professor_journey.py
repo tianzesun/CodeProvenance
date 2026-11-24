@@ -18,12 +18,9 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")
-def client() -> TestClient:
-    """Test client bound to the real API app."""
-    from src.backend.api import server
-
-    with TestClient(server.app) as test_client:
-        yield test_client
+def client(signed_in_client: TestClient) -> TestClient:
+    """Test client bound to the real API app, signed in as a professor."""
+    return signed_in_client
 
 
 HUMAN_A = """def fibonacci(n):

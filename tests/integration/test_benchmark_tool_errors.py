@@ -12,7 +12,9 @@ from fastapi.testclient import TestClient
 from src.backend.api import server
 
 
-def test_pan_benchmark_reports_tool_errors_with_ground_truth(tmp_path, monkeypatch):
+def test_pan_benchmark_reports_tool_errors_with_ground_truth(
+    tmp_path, monkeypatch, signed_in_client: TestClient
+):
     dataset_dir = tmp_path / "synthetic"
     dataset_dir.mkdir()
     (dataset_dir / "generated_pairs.jsonl").write_text(
@@ -40,8 +42,7 @@ def test_pan_benchmark_reports_tool_errors_with_ground_truth(tmp_path, monkeypat
     monkeypatch.setattr(server, "BENCHMARK_DATA_DIR", tmp_path)
     monkeypatch.setattr(ExternalToolRunner, "run_tool", failing_tool)
 
-    client = TestClient(server.app)
-    response = client.post(
+    response = signed_in_client.post(
         "/api/benchmark",
         data={
             "benchmark_type": "pan_optimization",
