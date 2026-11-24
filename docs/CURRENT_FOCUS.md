@@ -1,11 +1,11 @@
-# Current Focus (updated 11 November 2026)
+# Current Focus (updated 24 November 2026)
 
-**CURRENT MODE: Detection Honesty & Product Hardening** (post-case-loop phase)
+**CURRENT MODE: Detection Honesty & Pilot Readiness** (post-case-loop phase)
 
 > **Reminder:** Update this file when your main focus shifts. Codex relies on it being accurate.
 
 **Working Mode** (update this when switching):
-- **Current Mode**: Detection honesty + closing the professor case loop
+- **Current Mode**: Detection honesty + getting ready for the pilot (`docs/PILOT_RUNBOOK.md`)
 - Alternative modes: Benchmark Mode, Schema Work Mode (dormant — schema is stable)
 
 > **Session Start Ritual (Mandatory for Codex)**
@@ -36,7 +36,7 @@ as its UI.
   accuracy page, results banner, and dossier evidence details.
 - **E2E verified on a from-scratch stack** (fresh Postgres → full alembic chain →
   integration 30/30 → live upload/dossier/viva/PDF). Alembic runs clean from
-  zero (head `e2f4a6b8c0d1` at the time; now `t3u4v5w6x7y8`, and CI checks
+  zero (head `e2f4a6b8c0d1` at the time; now `u4v5w6x7y8z9`, and CI checks
   that migrations create every table and column the models use).
 - **FP deep-dive** (2026-08-22, `docs/HUMAN_FP_BASELINE.md` § Per-file deep-dive):
   style, not length, drives student flags, so a length-based "short submission"
@@ -68,6 +68,27 @@ as its UI.
   containment scoring was tried and rejected. **Do not chase false flags from
   the Kaggle labels**: some of its "innocent" pairs are copies (§ Class-level
   evaluation).
+- **Honest product copy** (PRs #36–#41, 2026-11-12): the README, upload panel,
+  assignment types, Integrity Assessment Report and settings say only what the
+  product does. **AI authorship checks are off by default** (#41), because the
+  detector ranks near chance out of domain.
+- **Organization membership** (PRs #43–#47, 2026-11-13;
+  `docs/ORGANIZATION_MEMBERSHIP_DESIGN.md`): existing users join the
+  institution's organization (migration `u4v5w6x7y8z9`, with a dry-run script),
+  new accounts join it, admins add and remove members, and cases require
+  membership plus access to the analysis. `/api/v1` applies per-person job
+  access (#42). Admin user listing is deployment-wide by design (#53).
+- **Auth hardening** (PR #48): Argon2id passwords, and sessions end on password
+  change (7-day cap). UTORid / Entra ID sign-in is planned for **after** the
+  pilot (`docs/SSO_PLAN.md`, not started).
+- **Pilot runbook** (PR #50): approvals, deploy freeze, configuration, backup,
+  deploy and rollback, smoke tests, go/no-go — `docs/PILOT_RUNBOOK.md`.
+- **Overnight fixes** (PR #52, 2026-11-23; `docs/OVERNIGHT_REPORT.md`): added
+  `#` / `//` comments no longer hide matched code; a UTF-8 BOM no longer
+  changes AI or similarity scores or blocks starter-code removal; the dossier
+  PDF is the dossier; the cases list shows priority, not an invented "Risk %".
+- **Case page lists its linked pairs** (PR #55), showing only analyses the
+  viewer can open; three orphaned dashboard pages were removed (PR #54).
 
 ## Current Active Areas
 
@@ -83,6 +104,17 @@ as its UI.
    inside a template would need per-function or template-stripped comparison.
    Multi-day, uncertain payoff, since JPlag and Dolos stop at the same place; only
    start it on request.
+4. **Pilot go/no-go** (`docs/PILOT_RUNBOOK.md` § 1 and § 7): Information Risk
+   Assessment and data-steward sign-off, load test at the largest pilot class,
+   restore test. Approvals are user-side.
+5. **Coverage feature fix + retrain** (`docs/OVERNIGHT_REPORT.md` § Held back):
+   `#` comments still zero the `coverage` feature. The patch is ready but makes
+   Kaggle AUC worse without a retrain (0.880 → 0.867), so it ships only together
+   with a learned-fusion retrain on the GPU host, followed by the ConPlag and
+   Kaggle class evaluations.
+6. **Two integration tests predate auth enforcement** (`test_professor_journey`,
+   `test_benchmark_tool_errors`): they get 401 and need a signed-in client
+   fixture. Not in CI.
 
 ## Must-Read Files
 
