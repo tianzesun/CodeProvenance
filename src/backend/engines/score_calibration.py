@@ -11,6 +11,8 @@ from typing import Any
 
 import numpy as np
 
+from src.backend.utils.safe_pickle import load_restricted_pickle
+
 try:
     from sklearn.isotonic import IsotonicRegression
 
@@ -111,11 +113,12 @@ class ScoreCalibrator:
 
     def load(self, path: str) -> None:
         """Load calibrator model from disk."""
-        with open(path, "rb") as f:
-            data = pickle.load(f)
-            self.calibrator = data["calibrator"]
-            self.is_fitted = data["is_fitted"]
-            self.sample_count = int(data.get("sample_count", 0))
+        data = load_restricted_pickle(path)
+        if not isinstance(data, dict):
+            raise TypeError("calibrator payload is not a dict")
+        self.calibrator = data["calibrator"]
+        self.is_fitted = data["is_fitted"]
+        self.sample_count = int(data.get("sample_count", 0))
 
 
 class CalibratedScoringPipeline:

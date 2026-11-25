@@ -8489,6 +8489,7 @@ _CALIBRATION_LOCK = threading.Lock()
 
 @app.post("/api/ai-detect/calibrate")
 async def calibrate_ai_detector(
+    request: Request,
     raw_score: float = Form(...),
     is_ai_generated: bool = Form(...),
     code_sample: str = Form(default=""),
@@ -8500,7 +8501,11 @@ async def calibrate_ai_detector(
     - raw_score: The original uncalibrated score (0.0-1.0)
     - is_ai_generated: True if the code was AI-generated, False if human-written
     - code_sample: Optional code snippet for context
+
+    Administrators only: the samples retrain a calibrator that adjusts every AI score in
+    the deployment, so any signed-in user could otherwise move everyone's scores.
     """
+    _require_current_user(request, admin_only=True)
     with _CALIBRATION_LOCK:
         _calibration_data.append(
             {
@@ -8521,12 +8526,14 @@ async def calibrate_ai_detector(
 
 
 @app.post("/api/ai-detect/retrain")
-async def retrain_ai_detector():
+async def retrain_ai_detector(request: Request):
     """
     Retrain the AI detection calibration model with collected feedback.
 
     This endpoint should be called periodically to improve detection reliability.
+    Administrators only (see ``calibrate_ai_detector``).
     """
+    _require_current_user(request, admin_only=True)
 
     if len(_calibration_data) < 10:
         return JSONResponse(

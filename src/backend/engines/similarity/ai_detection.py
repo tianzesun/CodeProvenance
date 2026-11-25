@@ -22,17 +22,15 @@ Usage:
 
 import ast
 import bisect
-import io
 import logging
 import math
-import pickle
 import re
-import stat
 from collections import Counter
 from pathlib import Path
 from typing import Any, ClassVar
 
 from src.backend.engines.features.code_stylometry import StylometryExtractor
+from src.backend.utils.safe_pickle import load_restricted_pickle
 
 logger = logging.getLogger(__name__)
 
@@ -108,40 +106,13 @@ _STRUCTURAL_LABELS: tuple[str, ...] = (
 )
 assert len(_STRUCTURAL_LABELS) == len(_LLM_STRUCTURAL_PATTERNS)
 
-_MAX_CALIBRATOR_BYTES = 50 * 1024 * 1024
-_SAFE_BUILTINS = frozenset(
-    {"dict", "list", "set", "frozenset", "tuple", "int", "float", "bool", "str", "bytes",
-     "complex", "slice", "range", "object", "bytearray"}  # fmt: skip
-)
-_SAFE_MODULE_PREFIXES = ("sklearn.", "numpy.", "scipy.", "collections", "joblib.numpy_pickle")
-
-
-class _RestrictedUnpickler(pickle.Unpickler):
-    """Unpickler that only builds scikit-learn / numpy objects and plain containers.
+def load_calibrator_file(path: str | Path) -> dict[str, Any]:
+    """Load a calibrator payload (``{"calibrator": ..., "sample_count": ...}``) defensively.
 
     ``.calibrator.pkl`` was loaded with a bare ``pickle.load``: anyone able to write that file
-    got code execution in the analysis worker. This refuses every global outside an allow-list
-    (so no ``os.system``, ``eval``, ``subprocess``, ``builtins.getattr`` ...).
+    got code execution in the analysis worker. See ``src/backend/utils/safe_pickle.py``.
     """
-
-    def find_class(self, module: str, name: str):
-        if module == "builtins" and name in _SAFE_BUILTINS:
-            return super().find_class(module, name)
-        if module.startswith(_SAFE_MODULE_PREFIXES) or module in ("sklearn", "numpy", "scipy"):
-            return super().find_class(module, name)
-        raise pickle.UnpicklingError(f"global {module}.{name} is not allowed in a calibrator file")
-
-
-def load_calibrator_file(path: str | Path) -> dict[str, Any]:
-    """Load a calibrator payload (``{"calibrator": ..., "sample_count": ...}``) defensively."""
-    path = Path(path)
-    info = path.stat()
-    if info.st_size > _MAX_CALIBRATOR_BYTES:
-        raise ValueError(f"calibrator file is too large ({info.st_size} bytes)")
-    if info.st_mode & stat.S_IWOTH:
-        raise PermissionError("calibrator file is world-writable; refusing to load it")
-    with open(path, "rb") as handle:
-        data = _RestrictedUnpickler(io.BytesIO(handle.read())).load()
+    data = load_restricted_pickle(path)
     if not isinstance(data, dict):
         raise ValueError("calibrator payload is not a dict")
     return data
