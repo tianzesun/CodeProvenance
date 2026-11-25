@@ -402,8 +402,9 @@ docker run --rm -d --name integritydesk-test -p 127.0.0.1:5432:5432 \
 DATABASE_URL=postgresql://postgres@localhost:5432/integritydesk_test python -m alembic upgrade head
 ```
 
-`TEST_DATABASE_URL` points tests at a different database; `ALLOW_REMOTE_TEST_DB=1`
-allows a remote one deliberately.
+`TEST_DATABASE_URL` points tests at a different database. `ALLOW_REMOTE_TEST_DB=1`, in
+the environment or `src/backend/.env.local`, allows a remote one deliberately (for example
+a throwaway dev database with nothing real in it).
 
 CI also runs:
 

@@ -30,13 +30,14 @@ sys.path.insert(0, str(backend_path))
 # Route, sharing and settings tests write real rows. Without this, a developer
 # whose src/backend/.env.local points at the shared remote (Neon) database ran
 # the suite against it. Tests now use a database on this machine unless
-# ALLOW_REMOTE_TEST_DB=1 says otherwise. TEST_DATABASE_URL picks the database.
+# ALLOW_REMOTE_TEST_DB=1 (environment or .env.local) says otherwise.
+# TEST_DATABASE_URL picks the database.
 LOCAL_TEST_DATABASE_URL = "postgresql://postgres@localhost:5432/integritydesk_test"
 _LOCAL_DB_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
-def _env_file_database_url() -> str:
-    """DATABASE_URL from the env file the backend would read (same rules as settings.py)."""
+def _env_file_value(name: str) -> str:
+    """``name`` from the env file the backend would read (same rules as settings.py)."""
     if os.environ.get("APP_ENV", "development").strip().lower() == "production":
         return ""
     override = os.environ.get("APP_ENV_FILE")
@@ -47,7 +48,7 @@ def _env_file_database_url() -> str:
         from dotenv import dotenv_values
     except ImportError:
         return ""
-    return (dotenv_values(path).get("DATABASE_URL") or "").strip()
+    return (dotenv_values(path).get(name) or "").strip()
 
 
 def _guard_test_database() -> str:
@@ -62,7 +63,10 @@ def _guard_test_database() -> str:
     test_url = os.environ.get("TEST_DATABASE_URL", "").strip()
     if test_url:
         os.environ["DATABASE_URL"] = test_url
-    configured = os.environ.get("DATABASE_URL", "").strip() or _env_file_database_url()
+    configured = os.environ.get("DATABASE_URL", "").strip() or _env_file_value("DATABASE_URL")
+    allow_remote = (
+        os.environ.get("ALLOW_REMOTE_TEST_DB") or _env_file_value("ALLOW_REMOTE_TEST_DB")
+    ).strip() == "1"
     try:
         url = make_url(configured) if configured else None
     except Exception:
@@ -70,7 +74,7 @@ def _guard_test_database() -> str:
     host = (url.host or "") if url is not None else ""
     remote = bool(host) and host not in _LOCAL_DB_HOSTS and not host.startswith("/")
 
-    if url is None or (remote and os.environ.get("ALLOW_REMOTE_TEST_DB") != "1"):
+    if url is None or (remote and not allow_remote):
         os.environ["DATABASE_URL"] = LOCAL_TEST_DATABASE_URL
         reason = f"remote host {host} refused" if url is not None else "no DATABASE_URL"
         return (
