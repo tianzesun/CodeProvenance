@@ -360,7 +360,7 @@ def calculate_file_checksum(file_path: str | Path, algorithm: str = "sha256") ->
 
     Args:
         file_path: Path to file
-        algorithm: Hash algorithm ("sha256", "md5", etc.)
+        algorithm: Hash algorithm ("sha256", "blake2b", etc.; never MD5 or SHA-1)
 
     Returns:
         Hex digest of file hash
@@ -382,7 +382,7 @@ def calculate_directory_checksum(
 
     Args:
         dir_path: Path to directory
-        algorithm: Hash algorithm ("sha256", "md5", etc.)
+        algorithm: Hash algorithm ("sha256", "blake2b", etc.; never MD5 or SHA-1)
 
     Returns:
         Hex digest of combined hash

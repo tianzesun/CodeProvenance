@@ -1066,7 +1066,7 @@ class LearnedFusionTrainingRunner:
         The code itself is hashed, so editing a corpus file invalidates its
         entry instead of silently training on stale features.
         """
-        digest = hashlib.sha1()
+        digest = hashlib.sha256()
         metadata = pair.metadata or {}
         for chunk in (
             str(FEATURE_CACHE_VERSION),
