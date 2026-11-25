@@ -377,11 +377,12 @@ runs as its own service (`src/backend/services/embedding_server.py`).
 CI gates on the real test suite (`.github/workflows/ci.yml`). Run locally:
 
 ```bash
-# Unit tests (fast, no database) — the CI merge gate
-pytest -o addopts="" tests/unit/
+# Unit tests — the CI merge gate. About 110 of them (routes, sharing, settings,
+# cases) write real rows, so they need a local Postgres (below); the rest don't.
+pytest tests/unit/
 
 # Integration tests (require a reachable database; skipped automatically if unavailable)
-pytest -o addopts="" tests/integration/
+pytest tests/integration/
 
 # Frontend type-check + production build (the other CI merge gate)
 cd src/frontend && npx tsc --noEmit && npm run build
@@ -389,6 +390,20 @@ cd src/frontend && npx tsc --noEmit && npm run build
 
 The unit suite is roughly 2,100 tests across ~140 modules, plus integration, scoring and
 fixture suites.
+
+**Tests never write to a remote database by default.** If `DATABASE_URL` (from the
+environment or `src/backend/.env.local`) is not on this machine, `tests/conftest.py`
+switches the run to `postgresql://postgres@localhost:5432/integritydesk_test`, and the
+pytest header says which database is in use. To set one up:
+
+```bash
+docker run --rm -d --name integritydesk-test -p 127.0.0.1:5432:5432 \
+  -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=integritydesk_test postgres:16
+DATABASE_URL=postgresql://postgres@localhost:5432/integritydesk_test python -m alembic upgrade head
+```
+
+`TEST_DATABASE_URL` points tests at a different database; `ALLOW_REMOTE_TEST_DB=1`
+allows a remote one deliberately.
 
 CI also runs:
 
