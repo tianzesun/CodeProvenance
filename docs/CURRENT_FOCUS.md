@@ -89,6 +89,17 @@ as its UI.
   PDF is the dossier; the cases list shows priority, not an invented "Risk %".
 - **Case page lists its linked pairs** (PR #55), showing only analyses the
   viewer can open; three orphaned dashboard pages were removed (PR #54).
+- **Integration tests sign in** (PR #57): `test_professor_journey` and
+  `test_benchmark_tool_errors` use a signed-in client fixture.
+- **Security review fixes** (PRs #58–#59, 2026-11-24): detector calibrate and
+  retrain are admin-only; every model file loads through the restricted
+  unpickler (`src/backend/utils/safe_pickle.py`); the stale
+  `engines/ai_detection/ai_detection.py` fork is gone; MD5/SHA-1 replaced by
+  SHA-256 (the learned-fusion feature cache rebuilds once on the next retrain).
+- **Tests stay off the shared database** (2026-11-24): `tests/conftest.py`
+  switches a remote `DATABASE_URL` to a local test database unless
+  `ALLOW_REMOTE_TEST_DB=1`; `pytest.ini` no longer stops at the first failure.
+  Setup in the README § Testing & CI.
 
 ## Current Active Areas
 
@@ -112,9 +123,10 @@ as its UI.
    Kaggle AUC worse without a retrain (0.880 → 0.867), so it ships only together
    with a learned-fusion retrain on the GPU host, followed by the ConPlag and
    Kaggle class evaluations.
-6. **Two integration tests predate auth enforcement** (`test_professor_journey`,
-   `test_benchmark_tool_errors`): they get 401 and need a signed-in client
-   fixture. Not in CI.
+6. **Production calibrator file** (follow-up to PR #58): if the pilot host has
+   `src/backend/.calibrator.pkl`, it was written before retraining became
+   admin-only, so any signed-in user could have made it. Delete it unless its
+   origin is known. This is an operations step, not a code change.
 
 ## Must-Read Files
 

@@ -26,6 +26,70 @@ backend_path = Path(__file__).parent.parent / "src" / "backend"
 sys.path.insert(0, str(backend_path))
 
 
+# ── Test database guard ──────────────────────────────────────────────────────
+# Route, sharing and settings tests write real rows. Without this, a developer
+# whose src/backend/.env.local points at the shared remote (Neon) database ran
+# the suite against it. Tests now use a database on this machine unless
+# ALLOW_REMOTE_TEST_DB=1 says otherwise. TEST_DATABASE_URL picks the database.
+LOCAL_TEST_DATABASE_URL = "postgresql://postgres@localhost:5432/integritydesk_test"
+_LOCAL_DB_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _env_file_database_url() -> str:
+    """DATABASE_URL from the env file the backend would read (same rules as settings.py)."""
+    if os.environ.get("APP_ENV", "development").strip().lower() == "production":
+        return ""
+    override = os.environ.get("APP_ENV_FILE")
+    path = Path(override) if override else backend_path / ".env.local"
+    if not path.is_file():
+        return ""
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        return ""
+    return (dotenv_values(path).get("DATABASE_URL") or "").strip()
+
+
+def _guard_test_database() -> str:
+    """Point DATABASE_URL at a local database unless remote use is allowed.
+
+    Returns:
+        A one-line description for the pytest header (host and database name,
+        never the password).
+    """
+    from sqlalchemy.engine import make_url
+
+    test_url = os.environ.get("TEST_DATABASE_URL", "").strip()
+    if test_url:
+        os.environ["DATABASE_URL"] = test_url
+    configured = os.environ.get("DATABASE_URL", "").strip() or _env_file_database_url()
+    try:
+        url = make_url(configured) if configured else None
+    except Exception:
+        url = None
+    host = (url.host or "") if url is not None else ""
+    remote = bool(host) and host not in _LOCAL_DB_HOSTS and not host.startswith("/")
+
+    if url is None or (remote and os.environ.get("ALLOW_REMOTE_TEST_DB") != "1"):
+        os.environ["DATABASE_URL"] = LOCAL_TEST_DATABASE_URL
+        reason = f"remote host {host} refused" if url is not None else "no DATABASE_URL"
+        return (
+            f"test database: localhost/integritydesk_test ({reason}; set TEST_DATABASE_URL, "
+            "or ALLOW_REMOTE_TEST_DB=1 to use a remote one)"
+        )
+    os.environ["DATABASE_URL"] = configured
+    where = "REMOTE, allowed by ALLOW_REMOTE_TEST_DB=1" if remote else "local"
+    return f"test database: {host or 'unix socket'}/{url.database} ({where})"
+
+
+_TEST_DATABASE_HEADER = _guard_test_database()
+
+
+def pytest_report_header(config: pytest.Config) -> str:
+    """Show which database the run writes to."""
+    return _TEST_DATABASE_HEADER
+
+
 @pytest.fixture(scope="session")
 def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     """Create an instance of the default event loop for the test session."""
