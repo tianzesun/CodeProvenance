@@ -12,6 +12,8 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from src.backend.utils.safe_pickle import load_restricted_pickle
+
 try:
     from sklearn.ensemble import GradientBoostingRegressor
 
@@ -139,10 +141,11 @@ class LearnedScoringModel:
 
     def load(self, path: str) -> None:
         """Load trained model from disk."""
-        with open(path, "rb") as f:
-            data = pickle.load(f)
-            self.model = data["model"]
-            self.is_trained = data["is_trained"]
+        data = load_restricted_pickle(path)
+        if not isinstance(data, dict):
+            raise TypeError("scoring model payload is not a dict")
+        self.model = data["model"]
+        self.is_trained = data["is_trained"]
 
 
 class GatedFusionModel:

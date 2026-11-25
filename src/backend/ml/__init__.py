@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Optional
 
+from src.backend.utils.safe_pickle import load_restricted_pickle
+
 
 class BaseModel(ABC):
     """Base class for all ML models."""
@@ -40,8 +42,7 @@ class BaseModel(ABC):
 
     def load(self, path: Path) -> None:
         """Load model from disk."""
-        with open(path, "rb") as f:
-            self.model = pickle.load(f)
+        self.model = load_restricted_pickle(path)
         self.is_trained = True
 
 
