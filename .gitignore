@@ -176,3 +176,6 @@ outputs/
 .wheels/
 .env.production
 .env.*.bak
+
+# AI-score calibrator written by /api/ai-detect/retrain
+.calibrator.pkl

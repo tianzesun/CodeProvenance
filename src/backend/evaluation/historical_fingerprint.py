@@ -51,7 +51,7 @@ class StyleFeatures:
             "function_count": self.function_count,
             "class_count": self.class_count,
         }
-        return hashlib.md5(str(sorted(data.items())).encode()).hexdigest()[:12]
+        return hashlib.sha256(str(sorted(data.items())).encode()).hexdigest()[:12]
 
 
 @dataclass

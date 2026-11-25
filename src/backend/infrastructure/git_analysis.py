@@ -187,7 +187,7 @@ class GitAnalyzer:
                 if current_entry:
                     current_entry.line_number = line_number
                     current_entry.content = content
-                    current_entry.line_hash = hashlib.md5(content.encode()).hexdigest()
+                    current_entry.line_hash = hashlib.sha256(content.encode()).hexdigest()
             elif line.startswith("author "):
                 if current_entry:
                     current_entry.author = line[7:]

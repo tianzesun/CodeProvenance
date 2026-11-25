@@ -39,7 +39,7 @@ class ASTNode:
                 for k, v in sorted(node.attributes.items()):
                     token += f"({k}:{v})"
             parts.append(token)
-        return hashlib.md5('|'.join(parts).encode()).hexdigest()
+        return hashlib.sha256('|'.join(parts).encode()).hexdigest()
 
     def walk(self) -> list['ASTNode']:
         """Walk all nodes in tree."""
